@@ -1,0 +1,17 @@
+squid is dual-licensed under either of
+
+  * the MIT license (see LICENSE-MIT)
+  * the Apache License, Version 2.0 (see LICENSE-APACHE)
+
+at your option.
+
+SPDX-License-Identifier: MIT OR Apache-2.0
+
+Note on third-party reference code
+----------------------------------
+
+A copy of the GPL-3.0-licensed project "Mole" may exist in this working tree
+for behavioural reference only (it is excluded from version control via
+.gitignore). squid is a clean-room implementation: it contains no code copied,
+translated, or derived from Mole, and it is not linked against GPL code. The
+GPL does not apply to the squid sources distributed under the terms above.

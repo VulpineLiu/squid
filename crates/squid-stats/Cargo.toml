@@ -1,0 +1,15 @@
+[package]
+name = "squid-stats"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Live system metrics for squid (iStat Menus style)"
+
+[dependencies]
+squid-core.workspace = true
+squid-platform.workspace = true
+serde.workspace = true
+sysinfo.workspace = true
+libc.workspace = true
+chrono.workspace = true

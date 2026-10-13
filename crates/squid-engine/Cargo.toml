@@ -1,0 +1,23 @@
+[package]
+name = "squid-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "squid engines: clean, uninstall, purge and disk analysis"
+
+[dependencies]
+squid-core.workspace = true
+squid-platform.workspace = true
+squid-rules.workspace = true
+squid-stats.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rayon.workspace = true
+walkdir.workspace = true
+globset.workspace = true
+crossbeam-channel.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+libc.workspace = true

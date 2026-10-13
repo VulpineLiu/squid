@@ -1,0 +1,22 @@
+[package]
+name = "squid-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "CleanMyMac-inspired terminal interface for squid"
+
+[dependencies]
+squid-core.workspace = true
+squid-engine.workspace = true
+squid-platform.workspace = true
+squid-rules.workspace = true
+squid-stats.workspace = true
+anyhow.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+unicode-width.workspace = true
+rayon.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+crossbeam-channel.workspace = true

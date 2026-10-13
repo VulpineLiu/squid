@@ -1,0 +1,475 @@
+# squid cleanup rules — macOS
+#
+# Every rule declares the anchor it owns (the longest literal prefix of each
+# pattern), so deletion is always validated against that anchor. Patterns use
+# `~` for the home directory; `*` never crosses a path separator.
+
+# ─────────────────────────────────────────────── system junk / temp files ──
+[[rule]]
+id = "user-cache"
+category = "app-caches"
+title = "User cache files"
+patterns = ["~/Library/Caches/*"]
+mode = "path"
+os = ["macos"]
+protect = ["com.apple.*", "*.lockfile", "Homebrew", "Homebrew/*", "CloudKit", "passd", "ss", "com.apple.containermanagerd.metadata.plist", "Fleet", "gnupd", "org.sparkle-project.Sparkle/*"]
+note = "Regenerable. Apps recreate what they need on next launch."
+
+[[rule]]
+id = "dot-cache"
+category = "app-caches"
+title = "~/.cache"
+patterns = ["~/.cache/*"]
+mode = "path"
+os = ["macos"]
+protect = ["mozilla/*/cache2", "gitkraken", "gitlens"]
+
+[[rule]]
+id = "system-cache"
+category = "system"
+title = "System caches"
+patterns = ["/Library/Caches/*"]
+mode = "path"
+os = ["macos"]
+needs_admin = true
+protect = ["com.apple.*", "Homebrew", "Homebrew/*"]
+
+[[rule]]
+id = "system-logs"
+category = "logs"
+title = "System logs"
+patterns = ["/Library/Logs/*"]
+mode = "path"
+os = ["macos"]
+needs_admin = true
+min_age_days = 7
+
+[[rule]]
+id = "private-var-log"
+category = "logs"
+title = "macOS log files"
+patterns = ["/private/var/log/*"]
+mode = "files"
+os = ["macos"]
+needs_admin = true
+min_age_days = 7
+
+[[rule]]
+id = "user-logs"
+category = "logs"
+title = "User logs"
+patterns = ["~/Library/Logs/*"]
+mode = "path"
+os = ["macos"]
+
+[[rule]]
+id = "crash-reports"
+category = "logs"
+title = "Diagnostic & crash reports"
+patterns = ["~/Library/Logs/DiagnosticReports/*", "/Library/Logs/DiagnosticReports/*", "~/Library/Application Support/CrashReporter/*"]
+mode = "files"
+os = ["macos"]
+min_age_days = 2
+
+[[rule]]
+id = "install-logs"
+category = "logs"
+title = "Installer logs"
+patterns = ["/private/var/log/install.log*", "/private/var/log/installassistant.log*"]
+mode = "files"
+os = ["macos"]
+needs_admin = true
+min_age_days = 14
+
+# ────────────────────────────────────────────────────────── browsers ────────
+[[rule]]
+id = "chrome-cache"
+category = "browsers"
+title = "Google Chrome cache"
+patterns = ["~/Library/Caches/Google/Chrome/Default/*/Cache/*", "~/Library/Caches/Google/Chrome/*/Cache/*"]
+mode = "path"
+os = ["macos"]
+skip_if_running = ["Google Chrome"]
+
+[[rule]]
+id = "chromium-cache"
+category = "browsers"
+title = "Chromium cache"
+patterns = ["~/Library/Caches/Chromium/Default/*/Cache/*"]
+mode = "path"
+os = ["macos"]
+skip_if_running = ["Chromium"]
+
+[[rule]]
+id = "safari-cache"
+category = "browsers"
+title = "Safari cache"
+patterns = ["~/Library/Caches/com.apple.Safari/*"]
+mode = "path"
+os = ["macos"]
+skip_if_running = ["Safari"]
+
+[[rule]]
+id = "firefox-cache"
+category = "browsers"
+title = "Firefox cache"
+patterns = ["~/Library/Caches/Firefox/Profiles/*/cache2"]
+mode = "path"
+os = ["macos"]
+skip_if_running = ["firefox"]
+
+[[rule]]
+id = "edge-cache"
+category = "browsers"
+title = "Microsoft Edge cache"
+patterns = ["~/Library/Caches/Microsoft Edge/*/Cache/*", "~/Library/Caches/Microsoft Edge/Default/*/Cache/*"]
+mode = "path"
+os = ["macos"]
+skip_if_running = ["Microsoft Edge"]
+
+[[rule]]
+id = "arc-cache"
+category = "browsers"
+title = "Arc cache"
+patterns = ["~/Library/Caches/company.thebrowser.Browser/*"]
+mode = "path"
+os = ["macos"]
+skip_if_running = ["Arc"]
+
+[[rule]]
+id = "brave-cache"
+category = "browsers"
+title = "Brave cache"
+patterns = ["~/Library/Caches/BraveSoftware/Brave-Browser/*/Cache/*"]
+mode = "path"
+os = ["macos"]
+skip_if_running = ["Brave Browser"]
+
+[[rule]]
+id = "service-workers"
+category = "browsers"
+title = "Offline web content"
+patterns = ["~/Library/WebKit/*/WebsiteData/ServiceWorkerData/*", "~/Library/Containers/com.apple.Safari/Data/Library/Caches/com.apple.Safari/WebKitReplay/*"]
+mode = "path"
+os = ["macos"]
+select_by_default = false
+note = "Web apps may need to re-register their background workers."
+
+# ───────────────────────────────────────────────────── chat & media apps ────
+[[rule]]
+id = "chat-caches"
+category = "app-caches"
+title = "Chat app caches"
+patterns = [
+  "~/Library/Application Support/Slack/Cache/*",
+  "~/Library/Application Support/Slack/Code Cache/*",
+  "~/Library/Application Support/discord/Cache/*",
+  "~/Library/Caches/us.zoom.xos/*",
+  "~/Library/Caches/com.tencent.xinWeChat/*",
+  "~/Library/Caches/com.tencent.WeWorkMac/*",
+  "~/Library/Caches/com.tencent.qq/*",
+  "~/Library/Caches/com.tencent.meeting/*",
+  "~/Library/Caches/ru.keepcoder.Telegram/*",
+  "~/Library/Caches/net.whatsapp.WhatsApp/*",
+  "~/Library/Caches/com.microsoft.teams2/*",
+  "~/Library/Caches/com.skype.skype/*",
+  "~/Library/Caches/dd.work.exclusive4aliding/*",
+  "~/Library/Caches/com.feishu.*/*",
+  "~/Library/Application Support/iDingTalk/log/*",
+]
+mode = "path"
+os = ["macos"]
+note = "Media history re-downloads when you scroll back."
+
+[[rule]]
+id = "creative-caches"
+category = "app-caches"
+title = "Creative suite caches"
+patterns = [
+  "~/Library/Caches/Adobe/*",
+  "~/Library/Caches/com.adobe.*/*",
+  "~/Library/Caches/com.figma.Desktop/*",
+  "~/Library/Application Support/Adobe/Common/Media Cache Files/*",
+  "~/Library/Caches/com.apple.finalcutpro/*",
+  "~/Library/Caches/com.blackmagic-design.DaVinciResolve/*",
+  "~/Library/Caches/com.adobe.PremierePro.*/*",
+  "~/Library/Caches/org.blenderfoundation.blender/*",
+  "~/Library/Caches/com.maxon.cinema4d/*",
+  "~/Library/Caches/com.bohemiancoding.sketch3/*",
+  "~/Library/Caches/com.sketch.app/*",
+  "~/Library/Caches/com.nwjs.*/*",
+]
+mode = "path"
+os = ["macos"]
+
+[[rule]]
+id = "ai-app-caches"
+category = "app-caches"
+title = "AI assistant caches"
+patterns = [
+  "~/Library/Caches/com.openai.chat/*",
+  "~/Library/Caches/com.anthropic.claudefordesktop/*",
+  "~/Library/Logs/Claude/*",
+  "~/Library/Caches/com.lmstudio.lmstudio/*",
+  "~/Library/Caches/com.ollama.ollama/*",
+]
+mode = "path"
+os = ["macos"]
+
+# ───────────────────────────────────────────────────────────── developer ────
+[[rule]]
+id = "xcode-derived-data"
+category = "developer"
+title = "Xcode DerivedData"
+patterns = ["~/Library/Developer/Xcode/DerivedData/*"]
+mode = "path"
+os = ["macos"]
+note = "Rebuilt automatically the next time you build each project."
+
+[[rule]]
+id = "xcode-caches"
+category = "developer"
+title = "Xcode caches & archives of build products"
+patterns = [
+  "~/Library/Caches/com.apple.dt.Xcode/*",
+  "~/Library/Developer/Xcode/Products/*",
+  "~/Library/Developer/Xcode/iOS Device Logs/*",
+  "~/Library/Developer/CoreSimulator/Caches/*",
+  "~/Library/Developer/Xcode/UserData/IB Support/Simulator Bundles/*",
+]
+mode = "path"
+os = ["macos"]
+
+[[rule]]
+id = "xcode-device-support"
+category = "developer"
+title = "Device support & watchOS runtimes"
+patterns = [
+  "~/Library/Developer/Xcode/iOS DeviceSupport/*",
+  "~/Library/Developer/Xcode/watchOS DeviceSupport/*",
+  "~/Library/Developer/Xcode/tvOS DeviceSupport/*",
+  "~/Library/Developer/Xcode/visionOS DeviceSupport/*",
+]
+mode = "path"
+os = ["macos"]
+select_by_default = false
+note = "Xcode re-downloads symbol files when you attach an old device again."
+
+[[rule]]
+id = "core-simulator"
+category = "developer"
+title = "Shutdown iOS Simulators"
+patterns = ["~/Library/Developer/CoreSimulator/Devices/*"]
+mode = "path"
+os = ["macos"]
+select_by_default = false
+needs_admin = false
+note = "Only safe for simulators you deleted from Xcode; squid skips booted ones."
+
+[[rule]]
+id = "simulator-runtime"
+category = "developer"
+title = "Simulator runtimes"
+patterns = ["~/Library/Developer/CoreSimulator/Volumes/*", "/Library/Developer/CoreSimulator/Volumes/*"]
+mode = "path"
+os = ["macos"]
+select_by_default = false
+needs_admin = true
+note = "Re-downloadable from Xcode → Settings → Platforms."
+
+[[rule]]
+id = "editors"
+category = "developer"
+title = "Editor caches & logs"
+patterns = [
+  "~/Library/Application Support/Code/Cache/*",
+  "~/Library/Application Support/Code/CachedData/*",
+  "~/Library/Application Support/Code/CachedExtensionVSIXs/*",
+  "~/Library/Application Support/Code/logs/*",
+  "~/Library/Application Support/Code/WebStorage/*/CacheStorage/*",
+  "~/Library/Application Support/Cursor/CachedExtensionVSIXs/*",
+  "~/Library/Application Support/Cursor/Cache/*",
+  "~/Library/Application Support/Cursor/logs/*",
+  "~/Library/Application Support/Zed/node/cache/*",
+  "~/Library/Application Support/Zed/Extensions/*",
+  "~/Library/Logs/Zed/*",
+  "~/Library/Caches/com.sublimetext.*/*",
+  "~/Library/Caches/Zed/*",
+  "~/Library/Caches/dev.zed.Zed/*",
+  "~/Library/Caches/com.todesktop.230313mzl4w4u92/*",
+  "~/Library/Caches/com.trae.app/*",
+  "~/Library/Caches/com.workbuddy/*",
+]
+mode = "path"
+os = ["macos"]
+
+[[rule]]
+id = "npm-cache"
+category = "developer"
+title = "npm / pnpm / yarn / bun caches"
+patterns = [
+  "~/.npm/_cacache/*",
+  "~/.npm/_npx/*",
+  "~/.npm/_prebuilds/*",
+  "~/Library/pnpm/store/*",
+  "~/Library/pnpm/store/v*/*",
+  "~/Library/Caches/Yarn/*",
+  "~/Library/Caches/bun/*",
+  "~/.bun/install/cache/*",
+]
+mode = "path"
+os = ["macos"]
+note = "`npm install` re-downloads packages on demand."
+
+[[rule]]
+id = "cargo-cache"
+category = "developer"
+title = "Cargo registry & build caches"
+patterns = ["~/.cargo/registry/cache/*", "~/.cargo/registry/index/*", "~/.cargo/registry/src/*", "~/.cargo/.package-cache"]
+mode = "path"
+os = ["macos"]
+note = "Cargo re-fetches crates when needed. Target dirs live in `squid purge`."
+
+[[rule]]
+id = "python-caches"
+category = "developer"
+title = "Python package caches"
+patterns = [
+  "~/Library/Caches/pip/*",
+  "~/.cache/pip/*",
+  "~/.cache/uv/*",
+  "~/Library/Caches/pypoetry/*",
+  "~/Library/Caches/poetry/*",
+  "~/Library/Caches/pdm/*",
+  "~/Library/Caches/conda/*",
+  "~/miniconda3/pkgs/cache/*",
+  "~/anaconda3/pkgs/cache/*",
+  "~/Library/Caches/pyinstaller/*",
+]
+mode = "path"
+os = ["macos"]
+
+[[rule]]
+id = "go-cache"
+category = "developer"
+title = "Go build & module caches"
+patterns = ["~/go/pkg/mod/cache/*", "~/Library/Caches/go-build/*", "~/Library/Caches/goimports/*"]
+mode = "path"
+os = ["macos"]
+
+[[rule]]
+id = "jvm-caches"
+category = "developer"
+title = "Gradle / Maven caches"
+patterns = ["~/.gradle/caches/*/generated-gradle-jars/*", "~/.gradle/wrapper/dists/*", "~/.gradle/caches/transforms-*", "~/.gradle/daemon/*", "~/Library/Caches/gradle/*"]
+mode = "path"
+os = ["macos"]
+select_by_default = false
+note = "Gradle re-downloads distributions; first build after cleaning is slower."
+
+[[rule]]
+id = "cocoapods-cache"
+category = "developer"
+title = "CocoaPods / SPM caches"
+patterns = ["~/Library/Caches/CocoaPods/*", "~/.cocoapods/repos/*", "~/Library/Caches/org.swift.swiftpm/*", "~/Library/org.swift.swiftpm/repositories/*"]
+mode = "path"
+os = ["macos"]
+
+[[rule]]
+id = "brew-cache"
+category = "developer"
+title = "Homebrew downloads & bottles"
+patterns = ["$(brew --prefix)/Library/Caches/Homebrew/*", "~/Library/Caches/Homebrew/*"]
+mode = "path"
+os = ["macos"]
+note = "`brew install` re-downloads bottles as needed."
+
+[[rule]]
+id = "ci-tool-caches"
+category = "developer"
+title = "CLI & CI tool caches"
+patterns = [
+  "~/Library/Caches/golangci-lint/*",
+  "~/Library/Caches/go-crunch-base/*",
+  "~/.cache/pre-commit/*",
+  "~/.cache/prettier/*",
+  "~/.cache/typescript/*",
+  "~/.cache/node-gyp/*",
+  "~/.npm/_quick/*",
+  "~/Library/Caches/Homebrew/api/*",
+  "~/.cache/chroma/*",
+  "~/.cache/visual-studio-code-browser-use/*",
+  "~/Library/Caches/ms-playwright/*",
+  "~/Library/Caches/cypress/*",
+  "~/Library/Caches/selenium/*",
+  "~/.cache/puppeteer/*",
+  "~/.cache/Cypress/*",
+]
+mode = "path"
+os = ["macos"]
+select_by_default = false
+note = "Test tooling re-downloads browsers and lint data on the next run."
+
+[[rule]]
+id = "container-images"
+category = "developer"
+title = "Docker / OrbStack disk usage"
+patterns = ["~/Library/Containers/com.docker.docker/Data/vms/*", "~/.orbstack/vm/Docker.raw"]
+mode = "path"
+os = ["macos"]
+select_by_default = false
+needs_admin = false
+risky = true
+skip_if_running = ["Docker Desktop", "com.docker.backend", "com.docker.build", "com.docker.virtualization", "OrbStack", "OrbStack Helper"]
+note = "This is the whole VM disk, not a cache: stop Docker/OrbStack and run `docker system prune -a` first."
+
+# ─────────────────────────────────────────────────────────── system junk ───
+[[rule]]
+id = "language-packs"
+category = "languages"
+title = "Speech & dictionary data"
+patterns = ["/System/Library/Speech/*", "/Library/Fonts/*"]
+mode = "path"
+os = ["macos"]
+select_by_default = false
+risky = true
+note = "Sealed on modern macOS: usually nothing to reclaim here."
+
+[[rule]]
+id = "installer-leftovers"
+category = "system"
+title = "Cached installers & updates"
+patterns = ["/Library/Updates/*", "~/Library/Caches/com.apple.appstore/*", "/private/var/folders/*/*/0/com.apple.installeraudit*/*"]
+mode = "path"
+os = ["macos"]
+needs_admin = true
+
+[[rule]]
+id = "disk-images"
+category = "system"
+title = "Mounted disk images"
+patterns = ["/Volumes/*/"]
+mode = "path"
+os = ["macos"]
+select_by_default = false
+risky = true
+note = "Eject instead of deleting; squid never removes a mounted volume."
+
+[[rule]]
+id = "old-downloads"
+category = "system"
+title = "Downloads older than 30 days"
+patterns = ["~/Downloads/*.dmg", "~/Downloads/*.pkg", "~/Downloads/*.zip"]
+mode = "files"
+os = ["macos"]
+min_age_days = 30
+select_by_default = false
+
+[[rule]]
+id = "user-trash"
+category = "trash"
+title = "Trash"
+patterns = ["~/.Trash/*"]
+mode = "path"
+os = ["macos"]
+note = "Everything you already deleted but that still occupies the volume."

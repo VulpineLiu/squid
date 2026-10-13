@@ -1,0 +1,28 @@
+[package]
+name = "squid-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "squid — clean, uninstall, purge and monitor your machine"
+default-run = "squid"
+
+[[bin]]
+name = "squid"
+path = "src/main.rs"
+
+[dependencies]
+squid-core.workspace = true
+squid-engine.workspace = true
+squid-platform.workspace = true
+squid-rules.workspace = true
+squid-stats.workspace = true
+squid-tui.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+crossterm.workspace = true
+unicode-width.workspace = true
+

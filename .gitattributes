@@ -1,0 +1,12 @@
+# 统一换行符:*install.sh / release.sh 只要带上 CRLF,在 macOS/Linux 上就是
+# 「/usr/bin/env bash\r: bad interpreter」。源码和文档一律以 LF 落盘,
+# 二进制产物按二进制处理(它们本来也被 .gitignore 挡在外面)。
+* text=auto eol=lf
+*.sh text eol=lf
+*.rb text eol=lf
+*.toml text eol=lf
+*.rs text eol=lf
+*.md text eol=lf
+*.tar.gz binary
+*.dmg binary
+*.zip binary

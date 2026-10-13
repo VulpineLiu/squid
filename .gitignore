@@ -1,0 +1,55 @@
+# squid 的 .gitignore
+#
+# 原则:仓库里只放源码、文档、脚本和配方。凡是构建出来的、机器本地产生的、
+# 或者只用来参考的东西,都不进版本历史——一旦提交进去,3.3 GB 的构建产物就
+# 永远赖在历史里了。
+
+# ── 构建产物 ─────────────────────────────────────────────────────────
+# cargo 的输出(debug / release / 各 target triple 都在它下面)。
+/target/
+# scripts/release.sh 的产物:通用二进制 + tar.gz + sha256。
+# 发布走 GitHub Release 附件和 Homebrew formula,不进仓库。
+/dist/
+*.tar.gz
+*.sha256
+*.dmg
+*.zip
+
+# ── 只读参考代码 ─────────────────────────────────────────────────────
+# Mole 是本地 clone 的参考项目(自带 .git,272 MB),只用来对照规则设计:
+# 不打包、不提交、不发版。
+/Mole/
+
+# ── Rust / 覆盖率 ────────────────────────────────────────────────────
+**/*.rs.bk
+*.profraw
+*.profdata
+/coverage/
+tarpaulin-report.html
+default.prof*
+
+# ── Python(测试脚手架 scripts/tui_smoke.py)─────────────────────────
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ── 编辑器 / IDE ─────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── macOS / 系统垃圾 ─────────────────────────────────────────────────
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# ── 本机专属配置 ─────────────────────────────────────────────────────
+# squid 的数据在 ~/Library/Application Support/squid,不落在这棵树里;
+# 下面这几条只是防止有人把本地实验配置或 .env 顺手 add 进来。
+.env
+.env.*
+!.env.example
+*.local

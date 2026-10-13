@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT OR Apache-2.0"
+authors = ["squid contributors"]
+repository = "https://github.com/nexdev/squid"
+description = "squid — one tool for cleaning, uninstalling, purging and monitoring your machine"
+
+[workspace.dependencies]
+squid-core = { path = "crates/squid-core" }
+squid-platform = { path = "crates/squid-platform" }
+squid-rules = { path = "crates/squid-rules" }
+squid-engine = { path = "crates/squid-engine" }
+squid-stats = { path = "crates/squid-stats" }
+squid-tui = { path = "crates/squid-tui" }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+crossbeam-channel = "0.5"
+rayon = "1.10"
+walkdir = "2.5"
+globset = "0.4"
+dirs = "6"
+libc = "0.2"
+plist = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+sysinfo = { version = "0.34", default-features = false, features = ["system", "network", "disk"] }
+crossterm = "0.28"
+ratatui = "0.29"
+unicode-width = "0.2"
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev]
+opt-level = 1
