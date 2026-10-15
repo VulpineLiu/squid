@@ -403,23 +403,45 @@ mod tests {
         // The bug: as a normal user the home-only rule refused every bundle,
         // so `squid uninstall` approved the app and then deleted only its
         // leftovers.
+        //
+        // The shared install folder is `/Applications` on Unix and the
+        // machine-wide program-data folders on Windows, so the fixture is read
+        // back from the policy instead of being hardcoded to one OS's spelling
+        // — a literal `/Applications` on Windows is not even an absolute path,
+        // and the test would have been asserting that Windows refuses an app
+        // folder it never actually looked at.
         let policy = SafetyPolicy::user_only();
-        let anchors = vec![PathBuf::from("/Applications")];
-        assert!(policy
-            .check(Path::new("/Applications/Demo.app"), &anchors)
-            .is_ok());
+        let shared = policy
+            .outside_home_ok
+            .first()
+            .cloned()
+            .expect("every platform names a shared install folder");
+        let app = if cfg!(windows) {
+            shared.join("Demo")
+        } else {
+            shared.join("Demo.app")
+        };
+        let anchors = vec![shared.clone()];
         assert!(
-            policy
-                .denies(Path::new("/Applications"), &anchors)
-                .is_some(),
+            policy.check(&app, &anchors).is_ok(),
+            "{app:?} has to be removable without elevation"
+        );
+        assert!(
+            policy.denies(&shared, &anchors).is_some(),
             "the folder itself stays untouchable"
         );
-        assert!(policy
-            .denies(Path::new("/Library/LaunchDaemons/x.plist"), &anchors)
-            .is_some());
-        assert!(policy
-            .denies(Path::new("/System/Applications/Notes.app"), &anchors)
-            .is_some());
+        assert!(policy.denies(Path::new(system_file()), &anchors).is_some());
+    }
+
+    /// A file no run of squid may ever delete, on any platform.
+    #[cfg(not(windows))]
+    fn system_file() -> &'static str {
+        "/System/Applications/Notes.app"
+    }
+
+    #[cfg(windows)]
+    fn system_file() -> &'static str {
+        r"C:\Windows\System32\drivers\ndis.sys"
     }
 
     #[test]

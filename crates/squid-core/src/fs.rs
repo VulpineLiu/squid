@@ -72,16 +72,93 @@ impl SizeInfo {
 
 pub use crate::bytes::format_thousands;
 
-fn allocated_bytes(meta: &Metadata) -> u64 {
+/// Bytes the volume really gave up for one file, or 0 when the platform
+/// cannot say.
+///
+/// Unix answers from `st_blocks`, which `stat` already handed us. Windows only
+/// answers through a handle, and opening one per file would dominate the walk,
+/// so we ask only for files large enough to distort a total and let the rest
+/// count as their length. The cutoff is not a precision trade-off so much as a
+/// correctness one: NTFS keeps small files inside the MFT record, where they
+/// report an allocation of 0, and summing that over a cache full of 2 KB
+/// entries would announce a cleanup that gave back nothing.
+fn allocated_bytes(path: &Path, meta: &Metadata) -> u64 {
     #[cfg(unix)]
     {
+        let _ = path;
         use std::os::unix::fs::MetadataExt;
         meta.blocks().saturating_mul(512)
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        let _ = meta;
+        windows_allocation(path, meta.len())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (path, meta);
         0
+    }
+}
+
+/// Anything below this cannot change a reported total by more than the odd
+/// cluster, and is far too common to be worth a syscall each.
+///
+/// Only Windows consults it — `stat` hands Unix the answer for free — but the
+/// size test uses it on every platform so the two stay tied together.
+#[cfg_attr(not(windows), allow(dead_code))]
+const ALLOCATION_PROBE_MIN: u64 = 8 << 20;
+
+/// `GetFileInformationByHandleEx(FileStandardInfo).AllocationSize`.
+///
+/// `FILE_READ_ATTRIBUTES` is the cheapest access right that still hands back a
+/// handle: it needs no read access to the contents, so it succeeds on files
+/// another process holds open for writing — exactly the cache files a scan
+/// walks past. `FILE_FLAG_BACKUP_SEMANTICS` keeps it working when the ACL only
+/// grants us permission to look at the entry.
+#[cfg(windows)]
+fn windows_allocation(path: &Path, len: u64) -> u64 {
+    if len < ALLOCATION_PROBE_MIN {
+        return len;
+    }
+    use std::ffi::c_void;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, FileStandardInfo, GetFileInformationByHandleEx, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_MODE, FILE_STANDARD_INFO, OPEN_EXISTING,
+    };
+
+    let wide: Vec<u16> = path
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    unsafe {
+        let Ok(handle) = CreateFileW(
+            PCWSTR(wide.as_ptr()),
+            FILE_READ_ATTRIBUTES.0,
+            FILE_SHARE_MODE(0),
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        ) else {
+            return len;
+        };
+        let mut info = FILE_STANDARD_INFO::default();
+        let read = GetFileInformationByHandleEx(
+            handle,
+            FileStandardInfo,
+            &mut info as *mut FILE_STANDARD_INFO as *mut c_void,
+            std::mem::size_of::<FILE_STANDARD_INFO>() as u32,
+        );
+        let _ = CloseHandle(handle);
+        match read {
+            // A deleted-but-still-open file reports 0; never let that shrink a
+            // total the user is about to act on.
+            Ok(()) if info.AllocationSize > 0 => info.AllocationSize as u64,
+            _ => len,
+        }
     }
 }
 
@@ -102,7 +179,7 @@ pub fn measure(path: &Path, kind: ItemKind) -> SizeInfo {
         ItemKind::File => {
             info.files += 1;
             info.logical += Bytes(meta.len());
-            info.allocated += Bytes(allocated_bytes(&meta));
+            info.allocated += Bytes(allocated_bytes(path, &meta));
             return info;
         }
         ItemKind::Path | ItemKind::Contents => {}
@@ -110,7 +187,7 @@ pub fn measure(path: &Path, kind: ItemKind) -> SizeInfo {
     if !meta.is_dir() {
         info.files += 1;
         info.logical += Bytes(meta.len());
-        info.allocated += Bytes(allocated_bytes(&meta));
+        info.allocated += Bytes(allocated_bytes(path, &meta));
         return info;
     }
 
@@ -139,7 +216,7 @@ pub fn measure(path: &Path, kind: ItemKind) -> SizeInfo {
                     Ok(meta) => {
                         info.files += 1;
                         info.logical += Bytes(meta.len());
-                        info.allocated += Bytes(allocated_bytes(&meta));
+                        info.allocated += Bytes(allocated_bytes(entry.path(), &meta));
                     }
                     Err(_) => info.unreadable += 1,
                 }
@@ -569,6 +646,7 @@ pub type SharedCancel = Arc<CancelToken>;
 mod tests {
     use super::*;
     use std::fs;
+    use std::io::Write as _;
 
     #[test]
     fn measures_contents_and_path() {
@@ -601,6 +679,16 @@ mod tests {
         let file = fs::File::create(&raw).unwrap();
         file.set_len(8 << 30).unwrap();
         drop(file);
+        if !mark_sparse(&raw) {
+            eprintln!("skipped: this volume refuses to make a file sparse");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        }
+        // One block of real data, so the file has both a hole and a tail the
+        // volume had to hand over — the shape of an actual thin disk image.
+        let mut hole = fs::OpenOptions::new().write(true).open(&raw).unwrap();
+        hole.write_all(&[3u8; 4096]).unwrap();
+        drop(hole);
 
         let info = measure(&root, ItemKind::Path);
         assert!(info.logical.as_u64() >= 8 << 30, "logical length is 8 GiB");
@@ -608,6 +696,55 @@ mod tests {
             info.on_disk().as_u64() * 100 < info.logical.as_u64(),
             "the walk reported {}/{}; a sparse file must count as the blocks              it wrote",
             info.on_disk(),
+            info.logical
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Ask the volume to make a file sparse.
+    ///
+    /// `fsutil` is the only way to do this without pulling a second set of
+    /// Windows bindings into a dev-dependency just for one `DeviceIoControl`.
+    /// It fails when the volume is not NTFS or we lack the right, and the
+    /// caller treats that as "this machine cannot demonstrate the property"
+    /// rather than as a failure.
+    #[cfg(windows)]
+    fn mark_sparse(path: &std::path::Path) -> bool {
+        std::process::Command::new("fsutil")
+            .args(["file", "setSparse", &path.to_string_lossy()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    /// POSIX holes a file by extending it, which is all `set_len` has to do.
+    #[cfg(not(windows))]
+    fn mark_sparse(_: &std::path::Path) -> bool {
+        true
+    }
+
+    /// The invariant both platforms must satisfy: a file that was really
+    /// written occupies at least what it logically holds. A port that forgets
+    /// to answer the allocation question returns 0 here, and every "freed"
+    /// number downstream quietly becomes the logical size.
+    #[test]
+    fn a_written_file_reports_what_the_volume_gave_it() {
+        let root = std::env::temp_dir().join(format!("squid-alloc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let mut file = fs::File::create(root.join("solid.bin")).unwrap();
+        file.set_len(ALLOCATION_PROBE_MIN).unwrap();
+        file.write_all(&[9u8; 4096]).unwrap();
+        drop(file);
+
+        let info = measure(&root, ItemKind::Path);
+        assert_eq!(info.logical, Bytes(ALLOCATION_PROBE_MIN));
+        assert!(
+            info.allocated >= info.logical,
+            "a freshly written file reported {} of {} allocated; clusters only round up",
+            info.allocated,
             info.logical
         );
         let _ = fs::remove_dir_all(&root);
