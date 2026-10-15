@@ -1504,12 +1504,25 @@ fn draw_stats(frame: &mut Frame, area: Rect, app: &App) {
         )),
         None => Line::from(Span::styled(" desktop · ac".to_string(), Palette::muted())),
     }];
+    // The platform already names the system in its own words: `os_version` is
+    // `Windows 10 Pro (build 18363)` there and `macOS 15.1 (24B83)` here, so
+    // naming it again here printed the word macOS on a Windows machine. When
+    // the row ran short of columns it was also the build number — the half that
+    // decides whether Windows Terminal exists — that fell off the end, so the
+    // machine model is the part asked to give room.
+    let room = plain_block().inner(middle[2]).width as usize;
+    let os = &snapshot.host.os_version;
+    let spare = room.saturating_sub(os.width() + 4);
+    let machine = truncate(&snapshot.host.hardware, spare, false);
+    let row = if machine.chars().count() >= 6 {
+        format!(" {machine} · {os}")
+    } else {
+        // No room for both, so the machine model leaves: `LENOVO 20SDA09HCD`
+        // never decides anything, the Windows build does.
+        format!(" {os}")
+    };
     power.push(Line::from(Span::styled(
-        format!(
-            " {} · macOS {}",
-            truncate(&snapshot.host.hardware, 16, false),
-            snapshot.host.os_version
-        ),
+        truncate(&row, room, false),
         Palette::muted(),
     )));
     stat_card(frame, middle[2], &battery_title, power);
@@ -2371,6 +2384,58 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_power_card_names_the_system_the_platform_reported() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        use squid_stats::{HostInfo, SystemSnapshot};
+
+        crate::theme::force_color_mode(ColorMode::TrueColor);
+        fn screen(app: &App, columns: u16) -> String {
+            let mut term = Terminal::new(TestBackend::new(columns, 34)).expect("terminal");
+            term.draw(|frame| draw(frame, app)).expect("draw");
+            term.backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect()
+        }
+        let windows = SystemSnapshot {
+            host: HostInfo {
+                os_name: "Windows".into(),
+                os_version: "Windows 10 Pro (build 18363)".into(),
+                hardware: "LENOVO 20SDA09HCD".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut app = App::new().expect("app");
+        app.panel = Panel::Stats;
+        app.stats.snapshot = Some(windows.clone());
+
+        let wide = screen(&app, 140);
+        assert!(
+            wide.contains("Windows 10 Pro (build 18363)"),
+            "the card says which Windows this is:\n{wide}"
+        );
+        assert!(
+            !wide.contains("macOS"),
+            "a Windows machine must not be called macOS:\n{wide}"
+        );
+
+        // Narrow enough that neither half fits in full. The system is still
+        // the half on screen, and the machine model is the half that left.
+        let narrow = screen(&app, 72);
+        assert!(
+            narrow.contains("Windows 10"),
+            "a squeezed Power card still says what this machine runs:\n{narrow}"
+        );
+        assert!(
+            !narrow.contains("LENOVO"),
+            "the machine model is what gives up its columns:\n{narrow}"
+        );
+    }
     /// A toast is four seconds of prose; a card's border is permanent. The chip
     /// used to be pinned to `height - 3` of the *frame*, and that row is the
     /// panel card's bottom border — so every toast cut a sentence into the
