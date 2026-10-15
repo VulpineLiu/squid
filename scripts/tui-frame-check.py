@@ -58,6 +58,21 @@ def column_of_right_border(line):
     return edge
 
 
+def border_columns(line):
+    """行里每一个边框字符落在第几列(从 0 数)。
+
+    只量"最右边那个边框字符"的列,会把并排的两个框读成一幅画:左栏在 31 列收口、
+    面板在 140 列收口,一行之上两个收口点都存在,量到的永远是右边那个。要知道这一行
+    到底属于哪个框,得把它全部的边框列都记下来。
+    """
+    col, out = 0, []
+    for ch in line:
+        if ch in BORDER and (not out or out[-1] != col):
+            out.append(col)
+        col += cells(ch)
+    return out
+
+
 def geometry(lines, cols):
     """量一帧,返回(问题列表, 给人看的说明, 这一帧值不值得判)。
 
@@ -118,17 +133,38 @@ def geometry(lines, cols):
         for n, stripped in ragged[:2]:
             notes.append(f"[frame ]   第 {n} 行右边界缺失: ...{stripped[-20:]!r}")
         problems.append(f"有 {len(ragged)} 行左边框在、右边框却被挤没了 —— 行写过了行尾")
-    if len(edges) > 1:
-        main = max(len(v) for v in edges.values())
-        problems.append(f"右边框出现在 {len(edges)} 个不同的列"
-                        f"(最多的那一列有 {main} 行)—— 花屏/叠帧")
-    elif edges:
-        column = next(iter(edges))
-        if column + 1 > cols:
-            problems.append(f"右边框在第 {column + 1} 列,超出 {cols} 列")
+    # 右边框不止一列,有两种解释,只有一种是病。
+    #
+    # 界面天生就是好几个框并排画的:左栏收在第 31 列,面板一直画到第 140 列。
+    # 于是"左栏比面板长"的那些行,行尾落在第 31 列 —— 这是合法布局里最常见的一种,
+    # 而按"所有右边框必须落在同一列"去判,它每一拍都是花屏。
+    # 合法的真正特征不是宽度相等,而是"截短":短行的每一个边框列,宽行上也都有。
+    # 左栏行 {0,30} 的两条边,面板行 {0,30,31,139} 里都找得到 —— 它看起来就是那幅
+    # 宽画被从右边切掉一截的样子,而切掉一截正是 ratatui 少画一个框时的行为。
+    # 真叠帧坏在另一件事上:窄框(70 列)接在宽框(100 列)下面时,它的右边框落在
+    # 第 69 列,而宽框那一行从来没有第 69 列。这一列是凭空冒出来的,只能来自另一幅画
+    # —— 尺寸变了却没重画,新旧两版叠在同一屏上,就是用户说的"重叠"。
+    widest = max(edges, default=-1)
+    frame = set()
+    for _, stripped in box_rows:
+        if column_of_right_border(stripped) == widest:
+            frame.update(border_columns(stripped))
+    strangers = [n for n, stripped in box_rows
+                 if any(c not in frame for c in border_columns(stripped))]
+    # edges 为空 = 没有任何一行画出了右边框,那正是 ragged 在管的事,
+    # 这里再插一句"叠帧"只是把同一个毛病换名再报一遍。
+    if edges and strangers:
+        for n in strangers[:2]:
+            line = dict(box_rows)[n]
+            extra = [c for c in border_columns(line) if c not in frame]
+            notes.append(f"[frame ]   第 {n} 行有宽框上不存在边框列 {extra}: {line[:26]!r}…")
+        problems.append(f"有 {len(strangers)} 行的边框列在最宽那一行上根本不存在"
+                        " —— 屏上有两幅不同尺寸的画叠着")
+    if edges:
+        if widest + 1 > cols:
+            problems.append(f"右边框在第 {widest + 1} 列,超出 {cols} 列")
         else:
-            notes.append(f"[frame ] 画面宽 {column + 1} 列(窗口 {cols} 列)· "
-                         f"触边 {len(next(iter(edges.values())))} 行")
+            notes.append(f"[frame ] 画面宽 {widest + 1} 列(窗口 {cols} 列)")
     return problems, notes, True
 
 
@@ -141,6 +177,11 @@ def analyze(raw, echo=True):
         cols, rows = 120, 30
         print("[size] !!! 流里没有 MARK_STARTED,退回 120x30 仿真(结论不可信)")
     print(f"[size] 控制台实际 {cols}x{rows}")
+    # 代码页要印出来:同一个二进制在 65001 和 936 下可以是两幅画 —— 代码页决定
+    # "没被问到"的字符按几格算,而用户那个窗口就站在 936 上。一帧是在哪个代码页上
+    # 抓的,结论就只对那个代码页成立,所以这件事必须写在报告的第一行。
+    codepage = re.search(r'MARK_CODEPAGE\s+(\d+)', raw)
+    print(f"[size] 代码页 {codepage.group(1) if codepage else '未知(旧版抓帧脚本)'}")
 
     def render(data):
         screen = pyte.Screen(cols, rows)
@@ -194,6 +235,14 @@ def analyze(raw, echo=True):
     print(f"[decode] CJK 字符 {len(cjk)} 个")
     if 'panicked' in raw.lower():
         problems.append("输出里有 panic 字样")
+    # 抓帧的壳子坏在程序之前。win-tui-run.ps1 一旦有语法错误,PowerShell 报完自己
+    # 的错就退出,屏上一个边框都不会有 —— 那会被下面读成"界面没跑起来",再往下就是
+    # 有人上真机去找一个根本不存在的排版 bug。这一条把案发现场直接摆出来:
+    # 换行符或 BOM 被谁改坏过一次,就够了两次这种空跑的调试轮。
+    parse = re.search(r'CategoryInfo\s*:\s*\(.*?\)[^\r\n]*', raw)
+    if parse:
+        problems.append("抓帧脚本自己没跑起来,远端 PowerShell 报的是它自己的错: "
+                        f"{parse.group(0).strip()!r} —— 界面根本没被启动")
     if 'MARK_QUIT' not in raw:
         problems.append("没有 MARK_QUIT —— 界面没退,或根本没跑起来")
 
@@ -232,9 +281,18 @@ def selftest():
         bottom = '╰' + '─' * (width - 2) + '╯'
         return [top] + [mid] * height + [bottom] + list(footer)
 
-    def stream(*screens):
+    def side_by_side(left, right, left_rows, right_rows):
+        """左栏和面板并排,左栏比面板长 —— 用户那个 140 列窗口就是这个样子。"""
+        top = '╭' + '─' * (left - 2) + '╮' + '╭' + '─' * (right - 2) + '╮'
+        mid = ('│' + ' ' * (left - 2) + '│' + '│' + ' ' * (right - 2) + '│')
+        bottom = '╰' + '─' * (left - 2) + '╯' + '╰' + '─' * (right - 2) + '╯'
+        only = '│' + ' ' * (left - 2) + '│'   # 面板已经结束、只剩左栏的那些行
+        return ([top] + [mid] * right_rows + [bottom]
+                + [only] * (left_rows - right_rows))
+
+    def stream(*screens, size='100x30'):
         """把若干画面写成一条流;每个画面写两遍,好让采样认出"画稳了"。"""
-        out = ['MARK_STARTED 100x30\r\n']
+        out = [f'MARK_STARTED {size}\r\n']
         for screen in screens:
             body = '\x1b[H' + '\r\n'.join(screen)
             out.append(body * 2)
@@ -255,6 +313,21 @@ def selftest():
         ("正文压在边框上", stream(['╭' + '─' * 98 + '╮'] * 2
                                   + [' 功能菜单 — 上下键选择，回车返回   ' + '-' * 60 + '+']
                                   + ['│' + ' ' * 98 + '│'] * 8, ), True),
+        # 左栏 31 列 + 面板到 140 列并排,左栏比面板长四行。
+        # 这一条是判据自己欠的账:窗口一超过 104 列,"所有右边框必须同列"这句
+        # 就不成立了 —— 左栏那些比面板长的行,行尾当然落在第 31 列。
+        # 一幅整齐的界面因此每拍都被判成花屏。判据错了不该让真机再跑一遍,
+        # 所以把它写成回归:以后谁再把"并排"判成"叠帧",这里就红。
+        ("左栏比面板长", stream(side_by_side(31, 109, 14, 18), size='140x35'), False),
+        # 而"窄框接在宽框下面"在 140 列窗口里同样得报:第 69 列是凭空冒出来的。
+        ("140 列上窄框叠宽框", stream(card(100, 8) + card(70, 6), size='140x35'), True),
+        # 抓帧脚本自己炸了:远端 PowerShell 吐出一段它自己的报错,界面上一个字都没画。
+        # 这种流必须把"壳子坏了"单独说出来。否则"花屏"的罪名会扣在一个根本没启动的
+        # 界面上 —— 我们真的被这个假故障骗着去改过一版绘制代码。
+        ("抓帧脚本自己没跑起来",
+         'MARK_STARTED 140x35\r\n'
+         'CategoryInfo : (:) [], ParentContainsErrorRecordException\r\n'
+         'FullyQualifiedErrorId : PositionalParameterNotFound\r\n', True),
     ]
     failed = 0
     for name, data, want_problems in cases:

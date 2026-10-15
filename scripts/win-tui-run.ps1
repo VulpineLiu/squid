@@ -16,7 +16,14 @@ param(
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
 )
 
-chcp 65001 > $null
+# 代码页由 SQUID_TUI_CP 决定,默认 65001。
+#
+# 默认 65001 是为了抓回来的字节干净:UTF-8 下 pyte 解码不需要任何猜测。
+# 但用户自己那个窗口跑在 cp936 上,而程序里的探针量的正是"当前这个控制台为一个
+# 字符收几格",所以想让他那台机器上的问价过程在这里重现一遍,就得让控制台真的待
+# 在那个代码页上,而不是只在源码里假设它存在。
+$cp = if ($env:SQUID_TUI_CP) { $env:SQUID_TUI_CP } else { 65001 }
+chcp $cp > $null
 try {
     [Console]::WindowWidth = $Columns
     [Console]::WindowHeight = $Rows
@@ -24,6 +31,7 @@ try {
 catch {
     "MARK_SIZE_FAILED $($_.Exception.Message)"
 }
+"MARK_CODEPAGE $cp"
 "MARK_STARTED $([Console]::WindowWidth)x$([Console]::WindowHeight)"
 
 & $Bin @Arguments

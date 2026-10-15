@@ -6,6 +6,7 @@
 #   TUI_KEYS="5   q" ./scripts/win-tui-capture.sh # 先切面板再退出
 #   TUI_COLS=140 TUI_ROWS=45 ./scripts/win-tui-capture.sh
 #   TUI_CELLS=2 ./scripts/win-tui-capture.sh  # 强制按"一列字符收两格"画(ASCII 边框)
+#   TUI_CP=936 ./scripts/win-tui-capture.sh    # 用用户窗口的代码页跑(复现方块双格)
 #   TUI_REUSE=1 TUI_OUT=/tmp/x.bin ./scripts/win-tui-capture.sh   # 只重算旧帧,不连真机
 #
 # 为什么不能用 scripts/tui_smoke.py:那个脚本自己 forkpty(),是 POSIX 专属。
@@ -30,11 +31,20 @@ OUT="${TUI_OUT:-/tmp/squid-win-tui.bin}"
 COLS="${TUI_COLS:-100}"
 ROWS="${TUI_ROWS:-30}"
 DELAY="${TUI_DELAY:-8}"
-# TUI_CELLS=2 让程序按两格的价画(边框退成 |-+),=1 按一格。远端是 ConPTY,
-# 探针永远量到 1,所以想看 ASCII 那一版只能靠 SQUID_SYMBOL_CELLS 强制。
+# TUI_CELLS=2 让程序按两格的价画(边框退成 |-+),=1 按一格。远端那台机器上的
+# ConPTY 控制台对全部 60 个字符都只收一格(936 与 65001 都一样),所以想看 ASCII
+# 那一版只能靠 SQUID_SYMBOL_CELLS 强制 —— 伪控制台量不到两格,不等于用户那个带
+# 中文字体的窗口也量不到,这条路径正是为后者准备的。
 CELLS="${TUI_CELLS:-}"
+# TUI_CP=936 让远端控制台待在用户真正使用的那个代码页上。
+# 为什么要这个:代码页决定"没被问到"的字符按几格算(936 按两格),而用户自己的
+# 窗口就跑在 936 上;要让他那台机器上的问价过程在这里重现一遍,就得让控制台真的
+# 待在那个代码页,而不是在源码里假设它存在。实测 ConPTY 在 936 上仍对全部字符收
+# 一格 —— 伪控制台没有字体,而"模糊字符收几格"从来不是代码页一个人说了算的。
+CP="${TUI_CP:-}"
 SETUP=""
-if [ -n "$CELLS" ]; then SETUP="set SQUID_SYMBOL_CELLS=$CELLS&& "; fi
+if [ -n "$CELLS" ]; then SETUP="${SETUP}set SQUID_SYMBOL_CELLS=$CELLS&& "; fi
+if [ -n "$CP" ]; then SETUP="${SETUP}set SQUID_TUI_CP=$CP&& "; fi
 
 # TUI_REUSE=1:跳过抓帧,直接重新分析 $OUT 里已有的原始 ANSI 流。
 # 改判据的时候用 —— 判据写错不该逼着真机再跑一遍。
