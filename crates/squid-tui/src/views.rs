@@ -215,14 +215,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_progress(frame, chunks[2], app);
     draw_hints(frame, chunks[3], app);
 
+    // The toast goes under the popups, not over them: a four-second chip must
+    // never be the reason a dialog loses an edge.
+    if let Some(toast) = &app.toast {
+        draw_toast(frame, body, toast);
+    }
     if app.help {
         draw_help(frame, area, app);
     }
     if let Some(confirm) = &app.confirm {
         draw_confirm(frame, area, confirm, app);
-    }
-    if let Some(toast) = &app.toast {
-        draw_toast(frame, area, toast);
     }
 }
 
@@ -1862,16 +1864,34 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(lines).style(Palette::card()), inner);
 }
 
-fn draw_toast(frame: &mut Frame, area: Rect, toast: &Toast) {
+/// A toast is a chip that floats *inside* the panel card, on the card's last
+/// inner row.
+///
+/// It used to be pinned to `height - 3` of the whole frame, and that row is the
+/// card's **bottom border**. `Clear` then punched a hole in the border for the
+/// four seconds the toast lived, and the untouched tail of the border stayed
+/// behind the text — so the line read `功能菜单 — 上下键选择，回车返回
+/// --------------╯`: a border that turns into prose halfway across the screen.
+/// On the Windows console, where a repaint is what the user reads as "the
+/// screen", that hole is indistinguishable from 花屏: the frame looks torn, and
+/// every key that answers with a toast (opening the menu, choosing a function)
+/// tears it again. Inside the card a toast may still cover one row of the list,
+/// which is what a toast is for, but it can no longer eat a border.
+fn draw_toast(frame: &mut Frame, card: Rect, toast: &Toast) {
     let color = match toast.kind {
         ToastKind::Good => Palette::good(),
         ToastKind::Warn => Palette::warn(),
         ToastKind::Info => Palette::accent(),
     };
-    let width = ((toast.text.width() + 6) as u16).min(area.width.saturating_sub(2));
+    // One column inside each border: the chip has to be surrounded by the card,
+    // not by whatever the card is drawn on top of.
+    if card.width < 6 || card.height < 4 {
+        return;
+    }
+    let width = ((toast.text.width() + 4) as u16).min(card.width - 2);
     let popup = Rect {
-        x: area.x,
-        y: area.height.saturating_sub(3),
+        x: card.x + 1,
+        y: card.bottom() - 2,
         width,
         height: 1,
     };
@@ -2349,5 +2369,90 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A toast is four seconds of prose; a card's border is permanent. The chip
+    /// used to be pinned to `height - 3` of the *frame*, and that row is the
+    /// panel card's bottom border — so every toast cut a sentence into the
+    /// border and left the rest of the border standing behind the text. That is
+    /// the exact picture the Windows user reported as 花屏: a frame that reads
+    /// as torn, torn again by every key that answers with a toast (opening the
+    /// menu, choosing a function). A border has to survive a toast unchanged.
+    #[test]
+    fn a_toast_cannot_cut_a_hole_in_the_cards_border() {
+        crate::theme::force_color_mode(ColorMode::TrueColor);
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        use unicode_width::UnicodeWidthChar;
+
+        fn rows(app: &App) -> Vec<String> {
+            let mut term = Terminal::new(TestBackend::new(100, 30)).expect("terminal");
+            term.draw(|frame| draw(frame, app)).expect("draw");
+            let buffer = term.backend().buffer();
+            (0..buffer.area.height)
+                .map(|y| {
+                    let mut line = String::new();
+                    let mut x = 0;
+                    while x < buffer.area.width {
+                        let symbol = buffer[(x, y)].symbol();
+                        line.push_str(symbol);
+                        // 宽字符占两格,第二格被 ratatui 重置成一个空格:跳过去,
+                        // 否则读出来的行里每个汉字中间都夹一个空格,搜也搜不到。
+                        x += if symbol.chars().next().is_some_and(|c| c.width() == Some(2)) {
+                            2
+                        } else {
+                            1
+                        };
+                    }
+                    line
+                })
+                .collect()
+        }
+
+        let mut app = App::new().expect("app");
+        app.toast = None;
+        let quiet = rows(&app);
+        let bottoms: Vec<usize> = quiet
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| line.starts_with('╰'))
+            .map(|(y, _)| y)
+            .collect();
+        assert!(
+            !bottoms.is_empty(),
+            "the cards should have bottom borders:\n{}",
+            quiet.join("\n")
+        );
+
+        app.toast(
+            "功能菜单 — 上下键选择，回车返回",
+            crate::app::ToastKind::Info,
+        );
+        let loud = rows(&app);
+        for y in &bottoms {
+            assert_eq!(
+                &quiet[*y],
+                &loud[*y],
+                "a toast rewrote the border on row {}:\n{}",
+                y + 1,
+                loud.join("\n")
+            );
+        }
+        let screen: String = loud.concat();
+        assert!(
+            screen.contains("上下键选择"),
+            "the toast still has to be readable:\n{}",
+            loud.join("\n")
+        );
+        // And it has to be readable *inside* the card: the left border of the row
+        // carrying the chip must still be a border, not the start of the toast.
+        let carrier = loud
+            .iter()
+            .find(|line| line.contains("上下键选择"))
+            .expect("the toast is on screen");
+        assert!(
+            carrier.starts_with('│'),
+            "the toast should float inside the card, not over its edge: {carrier:?}"
+        );
     }
 }
