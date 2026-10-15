@@ -80,6 +80,35 @@ const DENY_EXACT: &[&str] = &[
     "~/.bash_history",
 ];
 
+/// Windows additions to the exact-deny list. The AppData tree is the
+/// Windows equivalent of `~/Library`: deleting the folder itself is how
+/// you destroy a profile, deleting one cache inside it is the job.
+#[cfg(windows)]
+const WINDOWS_DENY_EXACT: &[&str] = &[
+    "~/AppData",
+    "~/AppData/Local",
+    "~/AppData/LocalLow",
+    "~/AppData/Roaming",
+    "~/AppData/Local/Packages",
+    "~/OneDrive",
+    "~/Links",
+    "~/Favorites",
+    "~/Contacts",
+    "~/Saved Games",
+    "~/Searches",
+];
+
+/// System folders that exist per drive and must never be touched, no
+/// matter which drive the rule was anchored on.
+#[cfg(windows)]
+const WINDOWS_RESERVED_NAMES: &[&str] = &[
+    "$Recycle.Bin",
+    "$Extend",
+    "System Volume Information",
+    "Recovery",
+    "PerfLogs",
+];
+
 /// Folders outside the current user's home that a normal (non-root) user is
 /// still allowed to remove *entries from*.
 ///
@@ -90,7 +119,57 @@ const DENY_EXACT: &[&str] = &[
 /// shared application folder is carved out here. Only its *contents* are
 /// reachable — `/Applications` itself is on the hard-deny list — and a bundle
 /// owned by root is still locked much earlier by `writable_by_us`.
-const OUTSIDE_HOME_OK: &[&str] = &["/Applications"];
+#[cfg(not(windows))]
+fn outside_home_ok() -> Vec<PathBuf> {
+    ["/Applications"].iter().map(PathBuf::from).collect()
+}
+
+/// Windows equivalent of `/Applications`: the machine-wide program data
+/// folders whose *contents* an ordinary user may delete from (they own
+/// the ACL), while the roots themselves are on the hard-deny list.
+#[cfg(windows)]
+fn outside_home_ok() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = ["ProgramData", "PUBLIC"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .collect();
+    out.push(PathBuf::from(r"C:\ProgramData"));
+    out.push(PathBuf::from(r"C:\Users\Public"));
+    out
+}
+
+/// System folders derived from the environment so the deny list follows
+/// non-default installs (Windows on D:, relocated Program Files, …).
+#[cfg(windows)]
+fn windows_hard_deny() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = [
+        "SystemRoot",
+        "windir",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "ProgramData",
+        "PUBLIC",
+        "USERPROFILE",
+    ]
+    .iter()
+    .filter_map(std::env::var_os)
+    .map(PathBuf::from)
+    .collect();
+    out.extend(
+        [
+            r"C:\Windows",
+            r"C:\Program Files",
+            r"C:\Program Files (x86)",
+            r"C:\Users",
+            r"C:\ProgramData",
+            r"C:\Users\Public",
+        ]
+        .iter()
+        .map(PathBuf::from),
+    );
+    out
+}
 
 #[derive(Clone, Debug)]
 pub struct SafetyPolicy {
@@ -104,17 +183,31 @@ pub struct SafetyPolicy {
     pub allow_system_paths: bool,
     /// Never descend into a symlink (default, and the right answer).
     pub follow_symlinks: bool,
+    /// Roots whose contents a non-admin run may still reach — on Unix
+    /// `/Applications`, on Windows `%ProgramData%` and `%PUBLIC%`.
+    pub outside_home_ok: Vec<PathBuf>,
 }
 
 impl Default for SafetyPolicy {
     fn default() -> Self {
+        // mut is only exercised on Windows; keep both targets warning-free.
+        #[cfg_attr(not(windows), allow(unused_mut))]
+        let mut deny_exact: Vec<PathBuf> = DENY_EXACT.iter().map(|p| paths::expand(p)).collect();
+        #[cfg_attr(not(windows), allow(unused_mut))]
+        let mut hard_deny: Vec<PathBuf> = HARD_DENY.iter().map(PathBuf::from).collect();
+        #[cfg(windows)]
+        {
+            deny_exact.extend(WINDOWS_DENY_EXACT.iter().map(|p| paths::expand(p)));
+            hard_deny.extend(windows_hard_deny());
+        }
         Self {
-            deny_exact: DENY_EXACT.iter().map(|p| paths::expand(p)).collect(),
-            hard_deny: HARD_DENY.iter().map(PathBuf::from).collect(),
+            deny_exact,
+            hard_deny,
             min_depth: 1,
             forbidden_mounts: Vec::new(),
             allow_system_paths: true,
             follow_symlinks: false,
+            outside_home_ok: outside_home_ok(),
         }
     }
 }
@@ -142,32 +235,43 @@ impl SafetyPolicy {
     }
 
     fn is_exact_denied(&self, path: &Path) -> bool {
-        let norm = paths::normalized(path);
         self.deny_exact.iter().any(|deny| {
-            let d = paths::normalized(deny);
             // Trailing glob star entries deny the directory itself only.
-            let d = d
+            let d = deny
                 .to_string_lossy()
                 .trim_end_matches('*')
-                .trim_end_matches('/')
+                .trim_end_matches(['/', '\\'])
                 .to_string();
-            norm == Path::new(&d)
+            paths::same_path(path, Path::new(&d))
         })
     }
 
     fn is_hard_denied(&self, path: &Path) -> bool {
-        let norm = paths::normalized(path);
-        if norm.as_os_str().is_empty() {
+        if paths::is_root_like(path) {
             return true;
         }
         self.hard_deny
             .iter()
-            .any(|deny| norm == *deny || norm == Path::new("/"))
+            .any(|deny| paths::same_path(path, deny))
     }
 
     /// Validate a removal target. `anchors` are the roots the rule claims to
     /// own; the target must live strictly below one of them.
     pub fn check(&self, path: &Path, anchors: &[PathBuf]) -> Result<()> {
+        #[cfg(windows)]
+        {
+            let norm = paths::normalized(path);
+            for comp in norm.components() {
+                if let std::path::Component::Normal(name) = comp {
+                    if WINDOWS_RESERVED_NAMES
+                        .iter()
+                        .any(|r| name.to_string_lossy().eq_ignore_ascii_case(r))
+                    {
+                        return Err(SquidError::safety(path, "Windows system folder"));
+                    }
+                }
+            }
+        }
         if self.is_hard_denied(path) {
             return Err(SquidError::safety(path, "protected system location"));
         }
@@ -175,7 +279,7 @@ impl SafetyPolicy {
             return Err(SquidError::safety(path, "protected user data folder"));
         }
         for mount in &self.forbidden_mounts {
-            if paths::normalized(path) == paths::normalized(mount) {
+            if paths::same_path(path, mount) {
                 return Err(SquidError::safety(path, "volume root"));
             }
         }
@@ -201,9 +305,10 @@ impl SafetyPolicy {
 
         if !self.allow_system_paths
             && !paths::is_within(&paths::home_dir(), &norm)
-            && !OUTSIDE_HOME_OK
+            && !self
+                .outside_home_ok
                 .iter()
-                .any(|allowed| paths::is_within(Path::new(allowed), &norm))
+                .any(|allowed| paths::is_within(allowed, &norm))
         {
             return Err(SquidError::safety(
                 path,
@@ -222,7 +327,7 @@ impl SafetyPolicy {
                 let canonical = std::fs::canonicalize(parent).ok();
                 if let Some(canonical) = canonical {
                     let expected = paths::normalized(parent);
-                    if canonical != expected {
+                    if !paths::same_path(&canonical, &expected) {
                         return Err(SquidError::safety(
                             path,
                             format!(

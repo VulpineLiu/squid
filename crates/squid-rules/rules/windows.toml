@@ -1,0 +1,296 @@
+# squid cleanup rules — Windows 10 / 11
+#
+# Every rule declares the anchor it owns (the longest literal prefix of each
+# pattern), so deletion is always validated against that anchor. Patterns use
+# `${VAR}` environment expansion (case-insensitive on Windows) and `\` as the
+# separator; `*` never crosses a path separator. Rules whose variable is not
+# set (or whose paths do not exist) silently match nothing, which keeps one
+# build safe on Home, Pro, and machines where the app was never installed.
+
+# ─────────────────────────────────────────────── system junk / temp files ──
+[[rule]]
+id = "windows-temp"
+category = "system"
+title = "Temp files (%TEMP%)"
+patterns = ['${TEMP}\*']
+mode = "path"
+os = ["windows"]
+note = "Files still in use are skipped, not forced."
+
+[[rule]]
+id = "recent-items"
+category = "system"
+title = "Recent Items shortcuts"
+patterns = ['${APPDATA}\Microsoft\Windows\Recent\*']
+mode = "path"
+os = ["windows"]
+select_by_default = false
+note = "Only the .lnk shortcuts, never the files they point at."
+
+[[rule]]
+id = "windows-update-downloads"
+category = "system"
+title = "Windows Update download cache"
+patterns = ['${SystemRoot}\SoftwareDistribution\Download\*']
+mode = "path"
+os = ["windows"]
+needs_admin = true
+note = "Safe: update payloads are re-downloaded if ever needed again."
+
+[[rule]]
+id = "bits-transfer-cache"
+category = "system"
+title = "Delivery Optimization / BITS cache"
+patterns = ['${ProgramData}\Microsoft\Network\Downloader\*']
+mode = "path"
+os = ["windows"]
+needs_admin = true
+
+[[rule]]
+id = "prefetch"
+category = "system"
+title = "Prefetch files"
+patterns = ['${SystemRoot}\Prefetch\*']
+mode = "path"
+os = ["windows"]
+needs_admin = true
+select_by_default = false
+note = "Freeing is tiny and boot speed drops until they rebuild."
+
+# ─────────────────────────────────────────────── browser caches ─────────────
+[[rule]]
+id = "edge-caches"
+category = "browser-caches"
+title = "Microsoft Edge caches"
+patterns = ['${LOCALAPPDATA}\Microsoft\Edge\User Data\*\Cache', '${LOCALAPPDATA}\Microsoft\Edge\User Data\*\Code Cache']
+mode = "path"
+os = ["windows"]
+skip_if_running = ["msedge.exe"]
+note = "Signed-in state is untouched; pages reload from the network."
+
+[[rule]]
+id = "chrome-caches"
+category = "browser-caches"
+title = "Google Chrome caches"
+patterns = ['${LOCALAPPDATA}\Google\Chrome\User Data\*\Cache', '${LOCALAPPDATA}\Google\Chrome\User Data\*\Code Cache']
+mode = "path"
+os = ["windows"]
+skip_if_running = ["chrome.exe"]
+
+[[rule]]
+id = "firefox-cache"
+category = "browser-caches"
+title = "Firefox cache"
+patterns = ['${LOCALAPPDATA}\Mozilla\Firefox\Profiles\*\cache2']
+mode = "path"
+os = ["windows"]
+skip_if_running = ["firefox.exe"]
+
+[[rule]]
+id = "inet-cache"
+category = "browser-caches"
+title = "Legacy INetCache"
+patterns = ['${LOCALAPPDATA}\Microsoft\Windows\INetCache\*']
+mode = "path"
+os = ["windows"]
+note = "Some entries stay locked while Explorer processes hold them."
+
+# ─────────────────────────────────────────────── shell / app caches ─────────
+[[rule]]
+id = "icon-thumbnail-cache"
+category = "app-caches"
+title = "Icon & thumbnail cache"
+patterns = ['${LOCALAPPDATA}\Microsoft\Windows\Explorer\iconcache_*', '${LOCALAPPDATA}\Microsoft\Windows\Explorer\thumbcache_*']
+mode = "path"
+os = ["windows"]
+skip_if_running = ["explorer.exe"]
+note = "Rebuilt automatically; thumbnails regenerate on browse."
+
+[[rule]]
+id = "discord-cache"
+category = "app-caches"
+title = "Discord caches"
+patterns = ['${APPDATA}\discord\Cache', '${APPDATA}\discord\Code Cache', '${APPDATA}\discord\GPUCache']
+mode = "path"
+os = ["windows"]
+skip_if_running = ["discord.exe"]
+
+[[rule]]
+id = "slack-cache"
+category = "app-caches"
+title = "Slack caches"
+patterns = ['${APPDATA}\Slack\Cache', '${APPDATA}\Slack\Code Cache', '${APPDATA}\Slack\GPUCache']
+mode = "path"
+os = ["windows"]
+skip_if_running = ["Slack.exe"]
+
+[[rule]]
+id = "vscode-cache"
+category = "app-caches"
+title = "VS Code caches"
+patterns = ['${APPDATA}\Code\Cache', '${APPDATA}\Code\CachedData', '${APPDATA}\Code\Code Cache', '${APPDATA}\Code\GPUCache']
+mode = "path"
+os = ["windows"]
+skip_if_running = ["Code.exe"]
+
+[[rule]]
+id = "vscode-logs"
+category = "logs"
+title = "VS Code logs"
+patterns = ['${APPDATA}\Code\logs\*']
+mode = "path"
+os = ["windows"]
+min_age_days = 7
+
+# ─────────────────────────────────────────────── logs & crash reports ───────
+[[rule]]
+id = "user-error-reporting"
+category = "logs"
+title = "Windows Error Reporting (user)"
+patterns = ['${LOCALAPPDATA}\Microsoft\Windows\WER\*']
+mode = "path"
+os = ["windows"]
+
+[[rule]]
+id = "system-error-reporting"
+category = "logs"
+title = "Windows Error Reporting (system)"
+patterns = ['${ProgramData}\Microsoft\Windows\WER\*']
+mode = "path"
+os = ["windows"]
+needs_admin = true
+
+[[rule]]
+id = "crash-dumps"
+category = "logs"
+title = 'Crash dumps (%LOCALAPPDATA%\CrashDumps)'
+patterns = ['${LOCALAPPDATA}\CrashDumps\*']
+mode = "path"
+os = ["windows"]
+min_age_days = 14
+note = "Keep two weeks so a recent crash can still be diagnosed."
+
+[[rule]]
+id = "kernel-dumps"
+category = "logs"
+title = "Kernel / BSOD dumps"
+patterns = ['${SystemRoot}\Minidump\*', '${SystemRoot}\MEMORY.DMP']
+mode = "path"
+os = ["windows"]
+needs_admin = true
+min_age_days = 30
+risky = true
+note = "MEMORY.DMP can be tens of GB; delete once BSODs are a solved problem."
+
+[[rule]]
+id = "connected-devices-platform"
+category = "logs"
+title = "ConnectedDevicesPlatform logs"
+patterns = ['${LOCALAPPDATA}\ConnectedDevicesPlatform\*']
+mode = "path"
+os = ["windows"]
+
+[[rule]]
+id = "onedrive-logs"
+category = "logs"
+title = "OneDrive logs"
+patterns = ['${LOCALAPPDATA}\Microsoft\OneDrive\logs\*']
+mode = "path"
+os = ["windows"]
+min_age_days = 7
+
+[[rule]]
+id = "windows-setup-logs"
+category = "logs"
+title = "Windows setup / servicing logs"
+patterns = ['${SystemRoot}\Logs\*', '${ProgramData}\USOShared\Logs\*']
+mode = "path"
+os = ["windows"]
+needs_admin = true
+min_age_days = 7
+
+# ─────────────────────────────────────────────── developer caches ───────────
+[[rule]]
+id = "npm-cache"
+category = "developer"
+title = "npm cache"
+patterns = ['${LOCALAPPDATA}\npm-cache\*']
+mode = "path"
+os = ["windows"]
+note = "`npm install` refills it on demand."
+
+[[rule]]
+id = "pip-cache"
+category = "developer"
+title = "pip wheel cache"
+patterns = ['${LOCALAPPDATA}\pip\Cache\*']
+mode = "path"
+os = ["windows"]
+
+[[rule]]
+id = "cargo-cache"
+category = "developer"
+title = "cargo registry cache & sources"
+patterns = ['~/.cargo/registry/cache/*', '~/.cargo/registry/src/*']
+mode = "path"
+os = ["windows"]
+note = "Re-downloaded on the next build; index metadata is kept."
+
+[[rule]]
+id = "go-build-cache"
+category = "developer"
+title = "Go build cache"
+patterns = ['${LOCALAPPDATA}\go-build\*']
+mode = "path"
+os = ["windows"]
+note = "`go build` refills it; next build is slower."
+
+[[rule]]
+id = "nuget-cache"
+category = "developer"
+title = "NuGet HTTP cache"
+patterns = ['${LOCALAPPDATA}\NuGet\v3-cache\*']
+mode = "path"
+os = ["windows"]
+
+[[rule]]
+id = "gradle-cache"
+category = "developer"
+title = "Gradle module & transform caches"
+patterns = ['~/.gradle/caches/modules-*', '~/.gradle/caches/transforms-*']
+mode = "path"
+os = ["windows"]
+
+# ─────────────────────────────────────────────── leftovers ──────────────────
+[[rule]]
+id = "windows-old"
+category = "leftovers"
+title = "Previous Windows installations"
+patterns = ['C:\Windows.old\*', 'C:\$WINDOWS.~BT\*', 'C:\$WINDOWS.~WS\*', 'C:\$WinREAgent\*']
+mode = "path"
+os = ["windows"]
+needs_admin = true
+risky = true
+note = "Removes the rollback target of your last major update."
+
+[[rule]]
+id = "package-cache"
+category = "leftovers"
+title = 'Installer repair cache (%ProgramData%\Package Cache)'
+patterns = ['${ProgramData}\Package Cache\*']
+mode = "path"
+os = ["windows"]
+needs_admin = true
+risky = true
+select_by_default = false
+note = "Some installers need these payloads to repair or uninstall themselves."
+
+[[rule]]
+id = "nvidia-installer-archives"
+category = "leftovers"
+title = "NVIDIA driver installer archives"
+patterns = ['C:\NVIDIA\*']
+mode = "path"
+os = ["windows"]
+select_by_default = false
+note = "Unpacked installer leftovers; the installed driver is untouched."

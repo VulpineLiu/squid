@@ -180,6 +180,9 @@ impl RuleSet {
         if cfg!(target_os = "macos") {
             set.parse_str(EMBEDDED_MACOS, "builtin:macos.toml");
         }
+        if cfg!(target_os = "windows") {
+            set.parse_str(EMBEDDED_WINDOWS, "builtin:windows.toml");
+        }
         set
     }
 
@@ -311,16 +314,21 @@ pub fn resolve_variables(pattern: &str) -> Option<String> {
     if text == "~" || text.starts_with("~/") || text.starts_with("~\\") {
         text = text.replacen('~', &paths::home_dir().to_string_lossy(), 1);
     }
-    if let Some(pos) = text.find("${") {
+    let mut cursor = 0usize;
+    while let Some(offset) = text[cursor..].find("${") {
+        let pos = cursor + offset;
         let rest = &text[pos + 2..];
         let end = rest.find('}')?;
         let name = rest[..end].to_string();
         let value = env_value(&name)?;
         text = format!("{}{}{}", &text[..pos], value, &rest[end + 1..]);
+        // Continue after the substituted value so replacement text is never
+        // re-scanned (an env var may itself contain `$`).
+        cursor = pos + value.len();
     }
     if text.starts_with('$') {
         let head = text
-            .find('/')
+            .find(['/', '\\'])
             .map(|idx| text[1..idx].to_string())
             .unwrap_or_else(|| text[1..].to_string());
         let value = env_value(&head)?;
@@ -346,6 +354,9 @@ fn glob_matcher(component: &str) -> Option<GlobMatcher> {
     GlobBuilder::new(component)
         .literal_separator(true)
         .backslash_escape(true)
+        // Windows filenames are matched case-insensitively by the OS; rules
+        // must not silently miss entries that differ only in casing.
+        .case_insensitive(cfg!(windows))
         .build()
         .ok()
         .map(|glob| glob.compile_matcher())
@@ -367,12 +378,25 @@ pub fn anchor_for(pattern: &str) -> Option<PathBuf> {
     for component in path.components() {
         let text = match component {
             Component::RootDir => {
-                anchor.push("/");
+                // Windows spells `C:\…` as Prefix("C:") then RootDir; fold
+                // them into a rooted `C:\` anchor instead of drive-relative
+                // `C:/`. On Unix this is the leading `/`.
+                let existing = anchor.as_os_str().to_string_lossy().into_owned();
+                if !existing.is_empty() && !existing.contains(['/', '\\']) {
+                    anchor = PathBuf::from(format!("{existing}\\", existing = existing));
+                } else {
+                    anchor.push("/");
+                }
                 continue;
             }
             Component::CurDir => continue,
+            // Drive/UNC prefixes are part of the anchor on Windows.
+            Component::Prefix(prefix) => {
+                anchor.push(prefix.as_os_str());
+                continue;
+            }
             Component::Normal(text) => text.to_string_lossy().into_owned(),
-            Component::ParentDir | Component::Prefix(_) => return None,
+            Component::ParentDir => return None,
         };
         if has_glob(&text) {
             saw_glob = true;
@@ -521,14 +545,28 @@ impl Protector {
         let mut absolute = Vec::new();
         let mut relative = Vec::new();
         for raw in &rule.protect {
-            let resolved = resolve_variables(raw).unwrap_or_else(|| raw.clone());
-            if resolved.starts_with('/') {
+            #[cfg_attr(not(windows), allow(unused_mut))]
+            let mut resolved = resolve_variables(raw).unwrap_or_else(|| raw.clone());
+            #[cfg(windows)]
+            {
+                // Matching below funnels through `/`-normalised text; make the
+                // patterns speak the same language.
+                resolved = resolved.replace('\\', "/");
+            }
+            let is_absolute = resolved.starts_with('/')
+                || (cfg!(windows)
+                    && resolved.as_bytes().get(1) == Some(&b':')
+                    && resolved.as_bytes()[0].is_ascii_alphabetic());
+            if is_absolute {
                 if let Some(matcher) = glob_matcher(&resolved) {
                     absolute.push(matcher);
                     continue;
                 }
             }
-            match Glob::new(&format!("**/{resolved}")) {
+            match GlobBuilder::new(&format!("**/{resolved}"))
+                .case_insensitive(cfg!(windows))
+                .build()
+            {
                 Ok(glob) => relative.push(glob.compile_matcher()),
                 Err(_) => {
                     if let Some(matcher) = glob_matcher(raw) {
@@ -550,18 +588,21 @@ impl Protector {
         if self.absolute.is_empty() && self.relative.is_empty() {
             return false;
         }
-        let text = path.to_string_lossy();
+        let text = path.to_string_lossy().into_owned();
+        #[cfg(windows)]
+        let text = text.replace('\\', "/");
         if self.absolute.iter().any(|m| m.is_match(&*text)) {
             return true;
         }
         for ancestor in path.ancestors() {
-            let Ok(rel) = ancestor.strip_prefix(anchor) else {
+            // Case-insensitive containment on Windows; `None` also covers the
+            // anchor itself, whose next ancestor leaves the anchor anyway.
+            let Some(rel) = paths::relative_below(anchor, ancestor) else {
                 break;
             };
-            if rel.as_os_str().is_empty() {
-                continue;
-            }
             let rel = rel.to_string_lossy().into_owned();
+            #[cfg(windows)]
+            let rel = rel.replace('\\', "/");
             if self.relative.iter().any(|m| m.is_match(&*rel)) {
                 return true;
             }
@@ -625,6 +666,7 @@ pub fn globset_of(patterns: &[String]) -> Option<GlobSet> {
 }
 
 const EMBEDDED_MACOS: &str = include_str!("../rules/macos.toml");
+const EMBEDDED_WINDOWS: &str = include_str!("../rules/windows.toml");
 
 #[cfg(test)]
 mod tests {
@@ -689,7 +731,87 @@ mod tests {
                     "{}: anchor {anchor:?} is not absolute",
                     rule.id
                 );
-                assert_ne!(anchor, PathBuf::from("/"), "{}: anchors at /", rule.id);
+                assert!(
+                    !paths::is_root_like(&anchor),
+                    "{}: anchors at a filesystem root",
+                    rule.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn windows_rules_parse_on_every_host() {
+        // The Windows host check only runs in CI's cross-check job, so the
+        // TOML itself must at least parse on every platform.
+        let mut set = RuleSet::default();
+        set.parse_str(EMBEDDED_WINDOWS, "builtin:windows.toml");
+        assert!(
+            set.errors().is_empty(),
+            "windows rules failed: {:?}",
+            set.errors()
+        );
+        assert!(
+            set.len() > 20,
+            "expected dozens of rules, got {}",
+            set.len()
+        );
+        let mut ids: Vec<&str> = set.rules().iter().map(|r| r.id.as_str()).collect();
+        ids.sort();
+        let count = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), count, "duplicate rule ids");
+        for rule in set.rules() {
+            assert_eq!(
+                rule.os,
+                vec!["windows".to_string()],
+                "{}: wrong os tag",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn env_variables_resolve_case_insensitively_and_stop_at_separators() {
+        std::env::set_var("SQUID_TEST_VAR", "C:\\Test Root");
+        // `$VAR` at the head stops at the first separator, either flavour.
+        assert_eq!(
+            resolve_variables("$SQUID_TEST_VAR\\sub\\*").as_deref(),
+            Some("C:\\Test Root\\sub\\*")
+        );
+        // Multiple `${VAR}` occurrences all resolve.
+        assert_eq!(
+            resolve_variables("${SQUID_TEST_VAR}\\a\\${SQUID_TEST_VAR}\\b").as_deref(),
+            Some("C:\\Test Root\\a\\C:\\Test Root\\b")
+        );
+        assert!(resolve_variables("$SQUID_TEST_UNDEFINED\\x").is_none());
+        std::env::remove_var("SQUID_TEST_VAR");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_anchors_are_never_at_a_drive_root() {
+        let mut set = RuleSet::default();
+        set.parse_str(EMBEDDED_WINDOWS, "builtin:windows.toml");
+        for rule in set.rules() {
+            for pattern in &rule.patterns {
+                let anchor = anchor_for(pattern)
+                    .unwrap_or_else(|| panic!("{}: no anchor for {pattern}", rule.id));
+                assert!(
+                    anchor.is_absolute(),
+                    "{}: anchor {anchor:?} is not absolute",
+                    rule.id
+                );
+                assert!(
+                    !paths::is_root_like(&anchor),
+                    "{}: anchors at a volume root: {anchor:?}",
+                    rule.id
+                );
+                assert!(
+                    anchor.components().count() >= 2,
+                    "{}: anchor too shallow: {anchor:?}",
+                    rule.id
+                );
             }
         }
     }
