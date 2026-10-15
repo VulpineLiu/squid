@@ -10,10 +10,13 @@ use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use crossterm::tty::IsTty;
 use squid_core::progress::{CancelToken, Event, Progress};
-use squid_core::{paths, Bytes, Category, CleanupItem, DeleteMode, Locale, ScanReport, Settings};
+use squid_core::{
+    paths, Bytes, Category, CleanSummary, CleanupItem, DeleteMode, Locale, ScanReport, Settings,
+};
 use squid_engine::analyze;
 use squid_engine::delete::{self, DeleteJob};
 use squid_engine::{clean, purge, uninstall, Engine};
+use squid_platform::TrashTarget;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -68,7 +71,7 @@ enum Command {
     Analyze(AnalyzeArgs),
     /// What squid has already removed
     History(HistoryArgs),
-    /// Put a trashed session back
+    #[command(about = format!("Put a session's files back from the {}", bin()))]
     Undo(UndoArgs),
     /// Protect a path from every future scan
     Whitelist(WhitelistArgs),
@@ -98,11 +101,9 @@ struct CleanArgs {
     /// Skip rules that need administrator rights
     #[arg(long)]
     user_only: bool,
-    /// Move to Trash (default)
-    #[arg(long, conflicts_with = "permanent")]
+    #[arg(long, conflicts_with = "permanent", help = format!("Move to {} (default)", bin()))]
     trash: bool,
-    /// Delete for real, skipping the Trash
-    #[arg(long, conflicts_with = "trash")]
+    #[arg(long, conflicts_with = "trash", help = format!("Delete for real, skipping the {}", bin()))]
     permanent: bool,
 }
 
@@ -117,9 +118,9 @@ struct UninstallArgs {
     dry_run: bool,
     #[arg(long, short = 'y')]
     yes: bool,
-    #[arg(long, conflicts_with = "permanent")]
+    #[arg(long, conflicts_with = "permanent", help = format!("Move to {} (default)", bin()))]
     trash: bool,
-    #[arg(long, conflicts_with = "trash")]
+    #[arg(long, conflicts_with = "trash", help = format!("Delete for real, skipping the {}", bin()))]
     permanent: bool,
 }
 
@@ -169,7 +170,7 @@ struct HistoryArgs {
 
 #[derive(Args, Debug)]
 struct UndoArgs {
-    /// Session id; the newest trashed session when omitted
+    #[arg(help = format!("Session id; the newest session with files in the {} when omitted", bin()))]
     session: Option<String>,
 }
 
@@ -202,6 +203,52 @@ fn diag(code: &str, text: &str) {
     } else {
         println!("{}", paint(code, text));
     }
+}
+
+/// One already-formatted human line. The plans and tables are built from
+/// several `paint` fragments, so they cannot go through `diag`, but they obey
+/// the same contract: `--quiet` hides them and `--json` reroutes them. A plan
+/// table that leaks onto stdout is enough to break `squid purge --json --yes
+/// | jq`, and the real machine is what caught it.
+fn say(text: &str) {
+    if QUIET.load(Ordering::Relaxed) {
+        return;
+    }
+    if DIAG_STDERR.load(Ordering::Relaxed) {
+        if !text.is_empty() {
+            eprintln!("{text}");
+        }
+    } else {
+        println!("{text}");
+    }
+}
+
+/// The stream the live progress line may overwrite: stdout while it is still
+/// free, stderr once `--json` has claimed it for JSON alone.
+fn live_stream_is_tty() -> bool {
+    if DIAG_STDERR.load(Ordering::Relaxed) {
+        std::io::stderr().is_tty()
+    } else {
+        std::io::stdout().is_tty()
+    }
+}
+
+/// Rewrite the live progress line, or clear it when `text` is `None`.
+fn live(text: Option<&str>) {
+    let line = match text {
+        Some(text) => format!("\r\x1b[K{text}"),
+        None => "\r\x1b[K".to_string(),
+    };
+    if DIAG_STDERR.load(Ordering::Relaxed) {
+        write_live(&mut std::io::stderr().lock(), &line);
+    } else {
+        write_live(&mut std::io::stdout().lock(), &line);
+    }
+}
+
+fn write_live(sink: &mut dyn Write, line: &str) {
+    let _ = sink.write_all(line.as_bytes());
+    let _ = sink.flush();
 }
 
 fn main() {
@@ -344,6 +391,15 @@ fn fit(text: &str, width: usize) -> String {
     out
 }
 
+/// What this operating system calls the place deleted files wait in.
+///
+/// Windows has no Trash folder: the shell's Recycle Bin is what a user can
+/// actually open, so every sentence that tells a person where a file went, or
+/// how to get it back, has to use their operating system's word.
+fn bin() -> &'static str {
+    squid_platform::current().bin_noun().en()
+}
+
 /// Visible width of a string, counting CJK glyphs as two columns.
 fn display_width(text: &str) -> usize {
     use unicode_width::UnicodeWidthChar;
@@ -361,22 +417,22 @@ fn why(item: &CleanupItem) -> Option<String> {
 }
 
 fn row(size: Bytes, label: &str, path: &str, note: Option<&str>) {
-    if QUIET.load(Ordering::Relaxed) {
-        return;
-    }
     let terminal = terminal_width();
     let label_cell = fit(label, 30);
     let path_width = terminal
         .saturating_sub(11 + display_width(&label_cell) + 2)
         .max(16);
-    println!(
+    say(&format!(
         "  {}  {}  {}",
         paint("33", &format!("{:>9}", size.human())),
         paint("1", &label_cell),
         paint("90", &shrink(path, path_width))
-    );
+    ));
     if let Some(note) = note {
-        println!("             {}", paint("90", &format!("↳ {note}")));
+        say(&format!(
+            "             {}",
+            paint("90", &format!("↳ {note}"))
+        ));
     }
 }
 
@@ -432,7 +488,7 @@ fn with_progress<T>(
                         total,
                         subject,
                     } => {
-                        if std::io::stdout().is_tty() {
+                        if live_stream_is_tty() {
                             let glyph = frames
                                 .next()
                                 .unwrap_or_else(|| label.chars().next().unwrap_or('#'));
@@ -450,8 +506,11 @@ fn with_progress<T>(
                                 .as_ref()
                                 .map(|path| shrink(&paths::pretty(path), 40))
                                 .unwrap_or_default();
-                            print!("\r\x1b[K{} {}", paint("36", &text), paint("90", &tail));
-                            let _ = std::io::stdout().flush();
+                            live(Some(&format!(
+                                "{} {}",
+                                paint("36", &text),
+                                paint("90", &tail)
+                            )));
                         }
                     }
                     Event::Warning(text) => shout("33", &format!("  ! {}", clip(&text, 100))),
@@ -470,9 +529,8 @@ fn with_progress<T>(
                 }
             }
             if stop_now {
-                if std::io::stdout().is_tty() {
-                    print!("\r\x1b[K");
-                    let _ = std::io::stdout().flush();
+                if live_stream_is_tty() {
+                    live(None);
                 }
                 break;
             }
@@ -520,18 +578,15 @@ fn show_scan(report: &ScanReport, title: &str) {
             .filter(|item| item.category == category)
             .collect();
         let total: Bytes = items.iter().map(|item| item.on_disk()).sum();
-        println!(
-            "{}",
-            paint(
-                "1;36",
-                &format!(
-                    "  {}  {}  ·  {}",
-                    TRIANGLE,
-                    category.title(),
-                    total.human_long()
-                )
-            )
-        );
+        say(&paint(
+            "1;36",
+            &format!(
+                "  {}  {}  ·  {}",
+                TRIANGLE,
+                category.title(),
+                total.human_long()
+            ),
+        ));
         for item in items.iter().take(18) {
             row(
                 item.on_disk(),
@@ -553,7 +608,7 @@ fn show_scan(report: &ScanReport, title: &str) {
         .filter(|item| item.selected && item.lock.is_none())
         .map(|item| item.on_disk())
         .sum();
-    println!();
+    say("");
     shout(
         "1",
         &format!(
@@ -608,10 +663,13 @@ fn report_outcome(outcome: &delete::DeleteOutcome) {
     let (verb, where_it_went) = match summary.mode {
         Some(DeleteMode::Trash) => (
             "moved",
-            "into the Trash — still on the disk until you empty it (squid undo restores them)",
+            format!(
+                "into the {b} — still on the disk until you empty it (squid undo restores them)",
+                b = bin()
+            ),
         ),
-        Some(DeleteMode::Permanent) => ("freed", "permanently deleted"),
-        None => ("freed", "done"),
+        Some(DeleteMode::Permanent) => ("freed", "permanently deleted".to_string()),
+        None => ("freed", "done".to_string()),
     };
     shout(
         "1;32",
@@ -651,10 +709,22 @@ fn mode_from(trash: bool, permanent: bool, settings: &Settings) -> DeleteMode {
     }
 }
 
-fn mode_note(mode: DeleteMode) -> &'static str {
+/// The document a run owes `--json` when it deleted nothing. Same shape as
+/// every other run, so a script never has to special-case "nothing was
+/// selected" and stdout is never empty on success.
+fn empty_summary(mode: DeleteMode) -> CleanSummary {
+    CleanSummary {
+        mode: Some(mode),
+        ..Default::default()
+    }
+}
+
+fn mode_note(mode: DeleteMode) -> String {
     match mode {
-        DeleteMode::Trash => "everything goes to the Trash first — squid undo puts it back",
-        DeleteMode::Permanent => "permanent deletion: no Trash, no undo",
+        DeleteMode::Trash => {
+            format!("everything goes to the {} first — squid undo puts it back", bin())
+        }
+        DeleteMode::Permanent => format!("permanent deletion: no {}, no undo", bin()),
     }
 }
 
@@ -704,7 +774,9 @@ fn cmd_clean(args: CleanArgs, json: bool) -> Result<i32> {
     })?;
 
     let (count, size) = selected_of(&report.items);
-    if json && !args.yes {
+    // `--json` without `--yes` promises a plan, never a deletion; a dry run
+    // promises the same even when `--yes` came along for the ride.
+    if json && (!args.yes || args.dry_run) {
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(0);
     }
@@ -723,6 +795,9 @@ fn cmd_clean(args: CleanArgs, json: bool) -> Result<i32> {
         return Ok(0);
     }
     if count == 0 {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&empty_summary(mode))?);
+        }
         shout(
             "90",
             "  nothing is selected; use --dry-run to inspect first",
@@ -735,8 +810,8 @@ fn cmd_clean(args: CleanArgs, json: bool) -> Result<i32> {
             "Delete {count} items ({}), {}",
             size.human_long(),
             match mode {
-                DeleteMode::Trash => "to the Trash",
-                DeleteMode::Permanent => "permanently",
+                DeleteMode::Trash => format!("to the {}", bin()),
+                DeleteMode::Permanent => "permanently".to_string(),
             }
         ))
     {
@@ -769,7 +844,7 @@ fn cmd_uninstall(args: UninstallArgs, json: bool) -> Result<i32> {
         heading(&format!("Applications · {}", apps.len()));
         let total: Bytes = apps.iter().map(|app| app.size).sum();
         for app in &apps {
-            println!(
+            say(&format!(
                 "  {}  {}  {}{} {}",
                 paint("33", &format!("{:>9}", app.size.human())),
                 paint("1", &fit(&app.name, 34)),
@@ -780,9 +855,9 @@ fn cmd_uninstall(args: UninstallArgs, json: bool) -> Result<i32> {
                     "        ".to_string()
                 },
                 paint("90", &shrink(&paths::pretty(&app.path), 44))
-            );
+            ));
         }
-        println!();
+        say("");
         shout(
             "1",
             &format!("  {} apps · {}", apps.len(), total.human_long()),
@@ -820,12 +895,12 @@ fn cmd_uninstall(args: UninstallArgs, json: bool) -> Result<i32> {
             None => {
                 heading(&format!("'{query}' matches {} applications", found.len()));
                 for app in &found {
-                    println!(
+                    say(&format!(
                         "  {}  {}  {}",
                         paint("33", &format!("{:>9}", app.size.human())),
                         paint("1", &clip(&app.name, 34)),
                         paint("90", &shrink(&paths::pretty(&app.path), 50))
-                    );
+                    ));
                 }
                 shout(
                     "33",
@@ -841,7 +916,7 @@ fn cmd_uninstall(args: UninstallArgs, json: bool) -> Result<i32> {
         move |engine, progress, cancel| uninstall::build_plan(engine, &app, progress, cancel)
     })?;
 
-    if json && !args.yes {
+    if json && (!args.yes || args.dry_run) {
         println!("{}", serde_json::to_string_pretty(&plan)?);
         return Ok(0);
     }
@@ -874,7 +949,7 @@ fn cmd_uninstall(args: UninstallArgs, json: bool) -> Result<i32> {
             why(item).as_deref(),
         );
     }
-    println!();
+    say("");
     shout("1", &format!("  {count} items · {}", size.human_long()));
     if args.dry_run {
         shout("33", "  dry run — nothing was deleted");
@@ -915,7 +990,7 @@ fn cmd_purge(args: PurgeArgs, json: bool) -> Result<i32> {
         force: args.all,
         max_depth: None,
     };
-    if json && !args.yes {
+    if json && (!args.yes || args.dry_run) {
         let report = with_progress("purge", {
             let options = options.clone();
             move |engine, progress, cancel| purge::scan(engine, &options, progress, cancel)
@@ -958,6 +1033,9 @@ fn cmd_purge(args: PurgeArgs, json: bool) -> Result<i32> {
         return Ok(0);
     }
     if count == 0 {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&empty_summary(mode))?);
+        }
         shout(
             "90",
             "  nothing safe to remove; --all offers the ambiguous folders too",
@@ -970,8 +1048,8 @@ fn cmd_purge(args: PurgeArgs, json: bool) -> Result<i32> {
             "Delete {count} folders ({}), {}",
             size.human_long(),
             match mode {
-                DeleteMode::Trash => "to the Trash",
-                DeleteMode::Permanent => "permanently",
+                DeleteMode::Trash => format!("to the {}", bin()),
+                DeleteMode::Permanent => "permanently".to_string(),
             }
         ))
     {
@@ -1199,15 +1277,21 @@ fn print_tree(node: &analyze::Node, depth: usize, total: &Bytes) {
 /// What a run did to its bytes, in one word. A run the user restored gets its
 /// own label: still calling it "to Trash" after an undo is how the ledger
 /// starts telling a story that no longer happened.
-fn mode_label(session: &squid_core::ledger::Session) -> &'static str {
+fn mode_label(session: &squid_core::ledger::Session) -> String {
     if session.restored {
-        "restored"
+        "restored".to_string()
     } else {
         match session.mode {
-            DeleteMode::Trash => "to Trash",
-            DeleteMode::Permanent => "for good",
+            DeleteMode::Trash => format!("to {}", bin()),
+            DeleteMode::Permanent => "for good".to_string(),
         }
     }
+}
+
+/// Width of the mode column in `history`: the operating system's own word has
+/// to fit there, and "to Recycle Bin" is wider than "to Trash".
+fn mode_col_width() -> usize {
+    format!("to {}", bin()).len().max(9)
 }
 
 fn cmd_history(args: HistoryArgs, json: bool) -> Result<i32> {
@@ -1275,7 +1359,7 @@ fn cmd_history(args: HistoryArgs, json: bool) -> Result<i32> {
             ),
             paint(
                 "90",
-                &format!("{}{}", fit(mode_label(session), 9), failures)
+                &format!("{}{}", fit(&mode_label(session), mode_col_width()), failures)
             ),
             paint("90", &shrink(&session.id, 18))
         );
@@ -1293,8 +1377,9 @@ fn cmd_history(args: HistoryArgs, json: bool) -> Result<i32> {
         shout(
             "90",
             &format!(
-                "  {} of it is sitting in the Trash — empty the Trash to actually reclaim it",
-                trashed.human_long()
+                "  {} of it is sitting in the {b} — empty the {b} to actually reclaim it",
+                trashed.human_long(),
+                b = bin()
             ),
         );
     }
@@ -1308,7 +1393,13 @@ fn cmd_history(args: HistoryArgs, json: bool) -> Result<i32> {
         "90",
         &format!("  {}", paths::pretty(&squid_core::ledger::history_dir())),
     );
-    shout("90", "  squid undo restores the newest trashed session");
+    shout(
+        "90",
+        &format!(
+            "  squid undo restores the newest session that went to the {}",
+            bin()
+        ),
+    );
     Ok(0)
 }
 
@@ -1323,12 +1414,17 @@ fn cmd_undo(args: UndoArgs, json: bool) -> Result<i32> {
             {
                 Some(session) => session.id.clone(),
                 None => {
-                    shout("33", "no trashed session to restore");
+                    shout("33", &format!("no deletions in the {} to restore", bin()));
                     return Ok(0);
                 }
             }
         }
     };
+    // Whether squid kept a path it can rename back is a property of the
+    // session's mode, so read it from the ledger rather than guessing.
+    let trashed = squid_core::ledger::load_session(&id)
+        .map(|session| session.mode == DeleteMode::Trash)
+        .unwrap_or(false);
     let (restored, skipped) =
         delete::restore_session(&id).with_context(|| format!("could not restore session {id}"))?;
     if json {
@@ -1342,10 +1438,26 @@ fn cmd_undo(args: UndoArgs, json: bool) -> Result<i32> {
             &format!("{restored} items restored from session {id}"),
         );
         if skipped > 0 {
-            shout(
-                "90",
-                &format!("{skipped} could not be put back (path in use)"),
-            );
+            // Trash mode on Windows moves the bytes into the shell's Recycle
+            // Bin, which keeps them under its own names — squid never has a
+            // path to rename back. Saying "path in use" there blamed the user
+            // for a restore that was never squid's to perform.
+            let shell_owns_it = trashed
+                && matches!(
+                    Engine::new().platform().trash_target(),
+                    TrashTarget::RecycleBin
+                );
+            if shell_owns_it {
+                shout(
+                    "90",
+                    &format!("{skipped} are in the Recycle Bin — restore them there"),
+                );
+            } else {
+                shout(
+                    "90",
+                    &format!("{skipped} could not be put back (path in use)"),
+                );
+            }
         }
     }
     Ok(0)
@@ -1551,10 +1663,9 @@ fn cmd_doctor() -> Result<i32> {
     kv(
         "delete mode",
         match engine.settings().delete_mode {
-            DeleteMode::Trash => "Trash (undo available)",
-            DeleteMode::Permanent => "permanent",
-        }
-        .to_string(),
+            DeleteMode::Trash => format!("{} (undo available)", bin()),
+            DeleteMode::Permanent => "permanent".to_string(),
+        },
     );
     let sessions = squid_core::ledger::load_sessions(500);
     let freed: Bytes = sessions.iter().map(|session| session.freed()).sum();
@@ -1567,15 +1678,18 @@ fn cmd_doctor() -> Result<i32> {
             paths::pretty(&squid_core::ledger::history_dir())
         ),
     );
-    let trash = paths::home_dir().join(".Trash");
-    kv(
-        "trash",
-        if trash.is_dir() {
-            paint("32", "reachable")
-        } else {
-            paint("33", "not a folder — deletions fall back to permanent")
-        },
-    );
+    // Ask the platform, not the filesystem: Windows has no ~/.Trash yet its
+    // Recycle Bin works, and claiming otherwise made people think Trash mode
+    // was silently permanent.
+    let trash = match platform.trash_target() {
+        TrashTarget::RecycleBin => paint("32", "Recycle Bin — restorable from Windows itself"),
+        TrashTarget::Folder(dir) => paint("32", &format!("reachable ({})", paths::pretty(&dir))),
+        TrashTarget::Unreachable => paint(
+            "33",
+            &format!("no {} here — deletions fall back to permanent", bin()),
+        ),
+    };
+    kv("trash", trash);
     let volumes = platform.volumes().unwrap_or_default();
     kv("volumes", format!("{}", volumes.len()));
     for volume in &volumes {
