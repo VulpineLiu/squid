@@ -1111,9 +1111,9 @@ impl App {
         let message = format!(
             "{} · {}",
             if trashed {
-                self.strings.t(
-                    &format!("{removed_count} to Trash"),
-                    &format!("移入废纸篓 {removed_count}"),
+                self.strings.bin_t(
+                    &format!("{removed_count} to {{bin}}"),
+                    &format!("移入{{bin}} {removed_count}"),
                 )
             } else {
                 self.strings.t(
@@ -1490,7 +1490,7 @@ impl App {
         }
         let size: Bytes = chosen.iter().map(|item| item.on_disk()).sum();
         let mode = if self.delete_mode == DeleteMode::Trash {
-            self.strings.t("moved to Trash", "移入废纸篓")
+            self.strings.bin_t("moved to {bin}", "移入{bin}")
         } else {
             self.strings.t("deleted permanently", "永久删除")
         };
@@ -1638,7 +1638,7 @@ impl App {
             DeleteMode::Permanent => DeleteMode::Trash,
         };
         let text = match self.delete_mode {
-            DeleteMode::Trash => self.strings.t("Trash", "废纸篓"),
+            DeleteMode::Trash => self.strings.bin().to_string(),
             DeleteMode::Permanent => self.strings.t("Permanent", "永久删除"),
         };
         self.toast(
@@ -1686,8 +1686,8 @@ impl App {
             Some(session) => vec![
                 format!("{} · {}", session.command, session.freed().human_long()),
                 self.strings.t(
-                    &format!("{} items will come back from Trash", session.entries.len()),
-                    &format!("{} 项将从废纸篓还原", session.entries.len()),
+                    &format!("{} items will come back from {{bin}}", session.entries.len()),
+                    &format!("{} 项将从{{bin}}还原", session.entries.len()),
                 ),
             ],
             None => vec![id.clone()],

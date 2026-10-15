@@ -17,6 +17,10 @@ pub enum Lang {
 #[derive(Clone, Debug)]
 pub struct Strings {
     pub lang: Lang,
+    /// What the host OS calls the place deleted files wait in. Copy about
+    /// where a file went, or how to get it back, is a claim about the operating
+    /// system, not about the language.
+    pub bin_noun: squid_platform::BinNoun,
 }
 
 impl Strings {
@@ -26,13 +30,17 @@ impl Strings {
                 Locale::Zh => Lang::Zh,
                 Locale::En => Lang::En,
             },
+            bin_noun: squid_platform::current().bin_noun(),
         }
     }
 
     /// Strings in a chosen language, whatever the terminal and settings say.
     /// The layout tests need to measure both languages on one machine.
     pub fn for_lang(lang: Lang) -> Strings {
-        Strings { lang }
+        Strings {
+            lang,
+            bin_noun: squid_platform::current().bin_noun(),
+        }
     }
 
     pub fn t(&self, en: &str, zh: &str) -> String {
@@ -40,6 +48,22 @@ impl Strings {
             Lang::En => en.to_string(),
             Lang::Zh => zh.to_string(),
         }
+    }
+
+    /// The host's own word for the recycle bin, in the current language.
+    pub fn bin(&self) -> &'static str {
+        match self.lang {
+            Lang::En => self.bin_noun.en(),
+            Lang::Zh => self.bin_noun.zh(),
+        }
+    }
+
+    /// `t`, with every `{bin}` replaced by the host's word for the recycle
+    /// bin. Windows calls it 回收站 / "Recycle Bin"; promising a Windows user
+    /// that they can 「清空废纸篓」 to get space back names a control that does
+    /// not exist on their machine.
+    pub fn bin_t(&self, en: &str, zh: &str) -> String {
+        self.t(en, zh).replace("{bin}", self.bin())
     }
 
     pub fn cleanup(&self) -> String {
@@ -93,8 +117,14 @@ impl Strings {
     /// sidebar is the one place where the interface looked untranslated.
     pub fn category(&self, category: squid_core::Category) -> String {
         use squid_core::Category as C;
-        match self.lang {
-            Lang::En => category.title().to_string(),
+        (match self.lang {
+            // The recycle bin is the one group named after an OS feature
+            // instead of after our own rules, so in either language it takes
+            // the operating system's word for it.
+            Lang::En => match category {
+                C::Trash => self.bin(),
+                _ => category.title(),
+            },
             Lang::Zh => match category {
                 C::SystemJunk => "系统垃圾",
                 C::AppCaches => "应用缓存",
@@ -102,12 +132,12 @@ impl Strings {
                 C::Logs => "日志与崩溃报告",
                 C::Developer => "开发文件",
                 C::ProjectArtifacts => "构建产物",
-                C::Trash => "废纸篓",
                 C::LanguagePacks => "多余语言包",
                 C::Leftovers => "卸载残留",
-            }
-            .to_string(),
-        }
+                C::Trash => self.bin(),
+            },
+        })
+        .to_string()
     }
 
     pub fn free(&self) -> String {
@@ -586,7 +616,12 @@ pub fn flat_block() -> ratatui::widgets::Block<'static> {
 /// Checkbox glyph, mirroring the round toggles of the reference app.
 pub fn checkbox(selected: bool, locked: bool) -> (&'static str, Style) {
     if locked {
-        ("🔒", Palette::locked())
+        // U+1F512 looks right and is the one glyph the real Windows console
+        // cannot carry: any astral-plane character comes back out of a
+        // ConPTY/conhost session as U+FFFD plus the glyph, i.e. one stray
+        // cell that shifts the whole row. `⊘` is in the BMP, one cell wide,
+        // and was measured to survive the same session.
+        ("⊘", Palette::locked())
     } else if selected {
         (
             "●",
@@ -977,8 +1012,8 @@ mod tests {
     /// nobody has acted on yet was read as a claim about the past.
     #[test]
     fn counts_and_labels_cannot_be_mistaken_for_a_size() {
-        let zh = Strings { lang: Lang::Zh };
-        let en = Strings { lang: Lang::En };
+        let zh = Strings::for_lang(Lang::Zh);
+        let en = Strings::for_lang(Lang::En);
         assert_eq!(zh.count(1634), "1,634 项");
         assert_eq!(en.count(1634), "1,634");
         assert_eq!(zh.count(5), "5 项");
@@ -991,8 +1026,8 @@ mod tests {
     #[test]
     fn every_group_has_a_name_in_its_own_language() {
         use squid_core::Category;
-        let zh = Strings { lang: Lang::Zh };
-        let en = Strings { lang: Lang::En };
+        let zh = Strings::for_lang(Lang::Zh);
+        let en = Strings::for_lang(Lang::En);
         for category in Category::ALL {
             let name = zh.category(category);
             assert!(!name.is_empty(), "{category:?} lost its name");
@@ -1004,9 +1039,44 @@ mod tests {
                 unicode_width::UnicodeWidthStr::width(name.as_str()) <= 24,
                 "{name} will not fit the group row"
             );
-            assert_eq!(en.category(category), category.title());
+            let expected_en = match category {
+                // One group is named after an OS feature, so even the English
+                // name comes from the operating system: a Windows user has a
+                // Recycle Bin and no Trash to open.
+                Category::Trash => squid_platform::current().bin_noun().en().to_string(),
+                _ => category.title().to_string(),
+            };
+            assert_eq!(en.category(category), expected_en);
         }
         assert_eq!(zh.category(Category::Developer), "开发文件");
         assert_eq!(zh.category(Category::LanguagePacks), "多余语言包");
+    }
+
+    /// Where a deleted file went, and how to get it back, is a claim about the
+    /// operating system. Windows has no Trash folder, so copy that promises
+    /// 「清空废纸篓」 there sends the user looking for something that is not there.
+    #[test]
+    fn the_recycle_bin_is_called_what_the_os_calls_it() {
+        let en = Strings::for_lang(Lang::En);
+        let zh = Strings::for_lang(Lang::Zh);
+        let noun = squid_platform::current().bin_noun();
+        assert_eq!(en.bin(), noun.en());
+        assert_eq!(zh.bin(), noun.zh());
+        assert_eq!(
+            en.bin_t("moved to {bin}", "移入{bin}"),
+            format!("moved to {}", noun.en())
+        );
+        assert_eq!(
+            zh.bin_t("· 清空{bin}后才真正释放", "· 清空{bin}后才真正释放"),
+            format!("· 清空{}后才真正释放", noun.zh())
+        );
+        // The group row is 24 columns; the longest name the OS can hand us has
+        // to survive it in both languages.
+        for name in [noun.en(), noun.zh()] {
+            assert!(
+                unicode_width::UnicodeWidthStr::width(name) <= 24,
+                "{name} will not fit the group row"
+            );
+        }
     }
 }

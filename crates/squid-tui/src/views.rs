@@ -16,6 +16,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListState, Paragraph, Sparkline, Wrap};
 use ratatui::Frame;
 use squid_core::{Bytes, Category, CleanupItem};
+use squid_platform::Device;
 use unicode_width::UnicodeWidthStr;
 
 // ------------------------------------------------------------------- helpers
@@ -55,13 +56,47 @@ fn spans_width(spans: &[Span<'static>]) -> usize {
 }
 
 /// Left-aligned spans, then filler, then right-aligned spans.
+///
+/// When the two halves do not fit, the left one gives ground. A row that spills
+/// puts them back to back and the terminal cuts off whatever came last, so the
+/// right half — the state the user is acting on, like the delete mode — is the
+/// part that disappears. That is how "empties only with the Recycle Bin"
+/// swallowed "delete to · Recycle Bin" on a Windows box at 100 columns: the
+/// operating system's name for the recycle bin is longer there than on macOS.
 fn joined(left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: usize) -> Line<'static> {
+    let room = width.saturating_sub(spans_width(&right) + 1);
+    let left = clip_left(left, room);
     let gap = width.saturating_sub(spans_width(&left) + spans_width(&right));
     let mut spans = left;
     spans.push(Span::raw(" ".repeat(gap)));
     spans.extend(right);
     close_gaps(&mut spans);
     Line::from(spans)
+}
+
+/// Fit the left half of a row into `room` columns, giving up whole trailing
+/// spans before cutting one in half, so an ellipsis lands between words where
+/// it can.
+fn clip_left(left: Vec<Span<'static>>, room: usize) -> Vec<Span<'static>> {
+    if spans_width(&left) <= room {
+        return left;
+    }
+    let mut kept: Vec<Span<'static>> = Vec::new();
+    let mut used = 0;
+    for span in left {
+        let wide = span.content.width();
+        if used + wide > room {
+            let tail = room - used;
+            if tail > 1 {
+                let cut = crate::theme::truncate(&span.content, tail, false);
+                kept.push(Span::styled(cut, span.style));
+            }
+            break;
+        }
+        used += wide;
+        kept.push(span);
+    }
+    kept
 }
 
 /// Give the unstyled spans of a row the row's own style.
@@ -234,7 +269,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     );
 
     let mode = match app.delete_mode {
-        squid_core::DeleteMode::Trash => app.strings.t("Trash", "废纸篓"),
+        squid_core::DeleteMode::Trash => app.strings.bin().to_string(),
         squid_core::DeleteMode::Permanent => app.strings.t("Permanent", "永久删除"),
     };
     let mut bottom_right = vec![Span::styled(
@@ -269,7 +304,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let pending = app.to_trash;
     let all_trash = !pending.is_zero() && pending == app.reclaimed;
     let label = if all_trash {
-        app.strings.t("moved to Trash", "移入废纸篓")
+        app.strings.bin_t("moved to {bin}", "移入{bin}")
     } else {
         app.strings.t("reclaimed", "已释放")
     };
@@ -283,20 +318,31 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         ),
         Span::styled(format!(" {label} · {}", app.sessions), Palette::muted()),
     ];
+    let mut note = None;
     if !pending.is_zero() {
-        let note = if all_trash {
+        let text = if all_trash {
             app.strings
-                .t("· empties only with the Trash", "· 清空废纸篓后才真正释放")
+                .bin_t("· empties only with the {bin}", "· 清空{bin}后才真正释放")
         } else {
             app.strings.t(
-                &format!("· {} still in Trash", pending.human_fixed()),
-                &format!("· {} 仍在废纸篓", pending.human_fixed()),
+                &format!("· {} still in {{bin}}", pending.human_fixed()),
+                &format!("· {} 仍在{{bin}}", pending.human_fixed()),
             )
         };
-        bottom_left.push(Span::styled(
-            format!(" {note}"),
+        note = Some(Span::styled(
+            format!(" {text}"),
             Style::default().fg(Palette::warn()),
         ));
+    }
+    // The note explains the number; the right half states what the user is
+    // about to do. Given a row too narrow for both, the explanation yields and
+    // says nothing rather than pushing the delete mode off the card.
+    if let Some(note) = note {
+        if spans_width(&bottom_left) + spans_width(&bottom_right) + note.content.width()
+            <= inner.width as usize
+        {
+            bottom_left.push(note);
+        }
     }
     let bottom = joined(bottom_left, bottom_right, inner.width as usize);
     frame.render_widget(
@@ -691,17 +737,29 @@ fn draw_scan(
         // Nothing on the list is either "still working" or "nothing to find",
         // and the two need to be told apart: one asks for patience, the other
         // for a key press.
+        // 「this Mac」 on a Windows box is a copy leak rather than a
+        // translation problem, so the noun comes from the platform and each
+        // platform owns the spacing of its own phrase.
+        let (scanning, scanned) = match app.engine.platform().device() {
+            Device::Mac => ("Scanning this Mac…", "press s to scan this Mac"),
+            Device::Pc => ("Scanning this PC…", "press s to scan this PC"),
+            Device::Machine => ("Scanning this machine…", "press s to scan this machine"),
+        };
+        let (scanning_zh, scanned_zh) = match app.engine.platform().device() {
+            Device::Mac => ("正在扫描这台 Mac…", "按 s 扫描这台 Mac"),
+            Device::Pc => ("正在扫描这台电脑…", "按 s 扫描这台电脑"),
+            Device::Machine => ("正在扫描这台机器…", "按 s 扫描这台机器"),
+        };
         let (title, hint) = if filling {
             (
-                app.strings.t("Scanning this Mac…", "正在扫描这台 Mac…"),
+                app.strings.t(scanning, scanning_zh),
                 app.strings
                     .t("hold on, or press c to cancel", "请稍候，或按 c 取消"),
             )
         } else {
             (
                 app.strings.t("Nothing scanned yet", "尚未扫描"),
-                app.strings
-                    .t("press s to scan this Mac", "按 s 扫描这台 Mac"),
+                app.strings.t(scanned, scanned_zh),
             )
         };
         frame.render_widget(empty_hint(&title, &hint), inner);
@@ -1543,9 +1601,9 @@ fn draw_history(frame: &mut Frame, area: Rect, app: &App) {
     );
     if trashed {
         heading.pop();
-        heading.push_str(&app.strings.t(
-            " · frees once Trash is emptied ",
-            " · 清空废纸篓后才真正释放 ",
+        heading.push_str(&app.strings.bin_t(
+            " · frees once {bin} is emptied ",
+            " · 清空{bin}后才真正释放 ",
         ));
     }
     let card = block(&heading);
@@ -1624,7 +1682,7 @@ fn draw_history(frame: &mut Frame, area: Rect, app: &App) {
                     app.strings.t("restored", "已还原")
                 } else {
                     match session.mode {
-                        squid_core::DeleteMode::Trash => app.strings.t("trash", "废纸篓"),
+                        squid_core::DeleteMode::Trash => app.strings.bin().to_string(),
                         squid_core::DeleteMode::Permanent => {
                             app.strings.t("deleted for good", "已清除")
                         }
@@ -1730,10 +1788,10 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
             "d".to_string(),
             s.t("clean what is checked", "清理已勾选项"),
         ),
-        ("m".to_string(), s.t("Trash ⇄ permanent", "废纸篓 ⇄ 永久")),
+        ("m".to_string(), s.bin_t("{bin} ⇄ permanent", "{bin} ⇄ 永久")),
         (
             "u".to_string(),
-            s.t("restore last Trash session", "还原上次废纸篓会话"),
+            s.bin_t("restore last {bin} session", "还原上次{bin}会话"),
         ),
         ("f".to_string(), s.t("filter applications", "筛选应用")),
         (
