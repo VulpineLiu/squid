@@ -369,10 +369,23 @@ fn category_index(roots: &[squid_platform::LeftoverRoot]) -> Vec<(PathBuf, Categ
     roots
         .iter()
         .map(|root| {
-            let text = root.dir.to_string_lossy().to_lowercase();
-            let category = if text.ends_with("/library/caches") || text.ends_with("/.cache") {
+            // Trailing components, case-insensitively: `ends_with` on the
+            // rendered path string only holds on whichever OS wrote the
+            // separator, and quietly stopped classifying on the other one.
+            let name = root
+                .dir
+                .file_name()
+                .map(|name| name.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            let parent_is_library = root
+                .dir
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .map(|name| name.to_string_lossy().eq_ignore_ascii_case("library"))
+                .unwrap_or(false);
+            let category = if name == ".cache" || (name == "caches" && parent_is_library) {
                 Category::AppCaches
-            } else if text.ends_with("/library/logs") {
+            } else if name == "logs" && parent_is_library {
                 Category::Logs
             } else {
                 root.category

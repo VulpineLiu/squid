@@ -657,26 +657,37 @@ mod tests {
             &cancel,
         )
         .expect("scan");
-        let names: Vec<String> = report
+        let found: Vec<&std::path::Path> = report
             .items
             .iter()
-            .map(|item| item.path.to_string_lossy().into_owned())
+            .map(|item| item.path.as_path())
             .collect();
+        // Compare trailing *components*, never the rendered string: on Windows
+        // `...\demo\node_modules` never ends with "demo/node_modules", which
+        // failed the positive asserts and — far worse — made the negative one
+        // below pass for the wrong reason on every Windows run.
+        let has = |suffix: &str| {
+            found
+                .iter()
+                .any(|path| path.ends_with(std::path::Path::new(suffix)))
+        };
+        let listed = || {
+            found
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert!(has("demo/node_modules"), "{:?}", listed());
+        assert!(has("rust/checkme/target"), "{:?}", listed());
         assert!(
-            names.iter().any(|p| p.ends_with("demo/node_modules")),
-            "{names:?}"
+            has("demo/dist"),
+            "dist inside a project is an artefact: {:?}",
+            listed()
         );
         assert!(
-            names.iter().any(|p| p.ends_with("rust/checkme/target")),
-            "{names:?}"
-        );
-        assert!(
-            names.iter().any(|p| p.ends_with("demo/dist")),
-            "dist inside a project is an artefact: {names:?}"
-        );
-        assert!(
-            !names.iter().any(|p| p.ends_with("loose/dist")),
-            "dist outside a project must not be offered: {names:?}"
+            !has("loose/dist"),
+            "dist outside a project must not be offered: {:?}",
+            listed()
         );
         for item in &report.items {
             assert_eq!(item.kind, ItemKind::Path);

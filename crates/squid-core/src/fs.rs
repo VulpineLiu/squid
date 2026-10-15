@@ -646,7 +646,6 @@ pub type SharedCancel = Arc<CancelToken>;
 mod tests {
     use super::*;
     use std::fs;
-    use std::io::Write as _;
 
     #[test]
     fn measures_contents_and_path() {
@@ -675,9 +674,18 @@ mod tests {
         let root = std::env::temp_dir().join(format!("squid-sparse-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
+        // One gibibyte is plenty to show the property and small enough that a
+        // nearly full CI disk can still extend to it.
+        const SPARSE_LEN: u64 = 1 << 30;
         let raw = root.join("Docker.raw");
         let file = fs::File::create(&raw).unwrap();
-        file.set_len(8 << 30).unwrap();
+        if file.set_len(SPARSE_LEN).is_err() {
+            // Volumes with a space-reservation filter answer `SetEndOfFile`
+            // with ERROR_DISK_FULL instead of handing out a hole.
+            eprintln!("skipped: this volume will not extend a file without the space");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        }
         drop(file);
         if !mark_sparse(&raw) {
             eprintln!("skipped: this volume refuses to make a file sparse");
@@ -687,11 +695,11 @@ mod tests {
         // One block of real data, so the file has both a hole and a tail the
         // volume had to hand over — the shape of an actual thin disk image.
         let mut hole = fs::OpenOptions::new().write(true).open(&raw).unwrap();
-        hole.write_all(&[3u8; 4096]).unwrap();
+        std::io::Write::write_all(&mut hole, &[3u8; 4096]).unwrap();
         drop(hole);
 
         let info = measure(&root, ItemKind::Path);
-        assert!(info.logical.as_u64() >= 8 << 30, "logical length is 8 GiB");
+        assert_eq!(info.logical, Bytes(SPARSE_LEN), "logical length is 1 GiB");
         assert!(
             info.on_disk().as_u64() * 100 < info.logical.as_u64(),
             "the walk reported {}/{}; a sparse file must count as the blocks              it wrote",
@@ -736,7 +744,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let mut file = fs::File::create(root.join("solid.bin")).unwrap();
         file.set_len(ALLOCATION_PROBE_MIN).unwrap();
-        file.write_all(&[9u8; 4096]).unwrap();
+        std::io::Write::write_all(&mut file, &[9u8; 4096]).unwrap();
         drop(file);
 
         let info = measure(&root, ItemKind::Path);
