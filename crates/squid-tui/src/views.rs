@@ -1788,7 +1788,10 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
             "d".to_string(),
             s.t("clean what is checked", "清理已勾选项"),
         ),
-        ("m".to_string(), s.bin_t("{bin} ⇄ permanent", "{bin} ⇄ 永久")),
+        (
+            "m".to_string(),
+            s.bin_t("{bin} ⇄ permanent", "{bin} ⇄ 永久"),
+        ),
         (
             "u".to_string(),
             s.bin_t("restore last {bin} session", "还原上次{bin}会话"),

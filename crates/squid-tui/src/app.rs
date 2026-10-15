@@ -1686,7 +1686,10 @@ impl App {
             Some(session) => vec![
                 format!("{} · {}", session.command, session.freed().human_long()),
                 self.strings.t(
-                    &format!("{} items will come back from {{bin}}", session.entries.len()),
+                    &format!(
+                        "{} items will come back from {{bin}}",
+                        session.entries.len()
+                    ),
                     &format!("{} 项将从{{bin}}还原", session.entries.len()),
                 ),
             ],

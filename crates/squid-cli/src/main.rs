@@ -722,7 +722,10 @@ fn empty_summary(mode: DeleteMode) -> CleanSummary {
 fn mode_note(mode: DeleteMode) -> String {
     match mode {
         DeleteMode::Trash => {
-            format!("everything goes to the {} first — squid undo puts it back", bin())
+            format!(
+                "everything goes to the {} first — squid undo puts it back",
+                bin()
+            )
         }
         DeleteMode::Permanent => format!("permanent deletion: no {}, no undo", bin()),
     }
@@ -1359,7 +1362,11 @@ fn cmd_history(args: HistoryArgs, json: bool) -> Result<i32> {
             ),
             paint(
                 "90",
-                &format!("{}{}", fit(&mode_label(session), mode_col_width()), failures)
+                &format!(
+                    "{}{}",
+                    fit(&mode_label(session), mode_col_width()),
+                    failures
+                )
             ),
             paint("90", &shrink(&session.id, 18))
         );
