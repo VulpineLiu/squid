@@ -1,4 +1,4 @@
-# Build and test squid on a real Windows machine (runner or dev box).
+﻿# Build and test squid on a real Windows machine (runner or dev box).
 # Usage:  pwsh -File scripts/ci-windows.ps1 [-Static]
 param(
     # Statically link the CRT so the exe needs no VC++ redistributable.

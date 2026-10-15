@@ -1,4 +1,4 @@
-# 在 Windows 真机上跑一整套校验:fmt 之外的 test / clippy / release build。
+﻿# 在 Windows 真机上跑一整套校验:fmt 之外的 test / clippy / release build。
 # 由 scripts/win-sync.sh 上传并调用;也可以单独在 PowerShell 里直接跑。
 $ErrorActionPreference = 'Continue'
 # 中文输出必须 UTF-8,否则 SSH 那头看到的全是乱码。
