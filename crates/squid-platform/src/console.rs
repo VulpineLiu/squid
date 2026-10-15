@@ -23,9 +23,20 @@
 //! lying any more: it is simply too small for what was written into it, every
 //! row overflows by the characters it paid one cell for, and the overflow lands
 //! at the start of the row below, which is the same pile of previous frames a
-//! wrong size produces. [`symbol_cells`] asks the cells what they cost instead
-//! of guessing from the locale, so the interface can afford its glyphs where it
-//! can and pay for them in ASCII where it cannot.
+//! wrong size produces.
+//!
+//! [`prices`] asks the cells what they cost instead of guessing from the
+//! locale, and it asks *character by character*. The rules, the shading and the
+//! punctuation an interface is drawn from are priced one at a time by whatever
+//! code page and font the console was left on, and nothing promises they will
+//! all land on the same answer: the first Chinese window this was chased through
+//! had room for the rounded cards and no room for the gauges inside them, which
+//! is one console pricing the two sets differently. One question for the whole
+//! screen is one answer for the wrong character, and the frame overflows by
+//! whichever set the answer was taken from. So the answer is a price list, and
+//! the interface pays ASCII only for the characters this console actually
+//! overcharges, keeping the rounded card it can afford and losing only the
+//! block that it cannot.
 //!
 //! A second question has to be answered before the first one means anything:
 //! *which* buffer is being measured. The alternate screen on a legacy console is
@@ -228,31 +239,180 @@ pub enum SymbolCells {
     Double,
 }
 
-/// Ask the console, once, what it charges for a one-column character.
+/// What a console charges for the characters whose price is not written down.
 ///
-/// The answer is measured rather than looked up, because the two things that
-/// decide it are both set outside this program: the code page the console was
+/// Held as a list rather than as one verdict, because the characters an
+/// interface is drawn from do not all belong to one class: the box-drawing set
+/// and the block-shading set are priced separately, by a code page and a font
+/// together, and nothing binds the two to the same answer. A single verdict can
+/// only be right for one of them, and whichever it gets wrong is the row that
+/// overflows — which is also why the list is measured again for every console
+/// rather than remembered from the last one, since the same box answers one cell
+/// for the lot once it is moved to UTF-8.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prices {
+    /// Where the answers came from, so a log says so.
+    source: &'static str,
+    /// The price of every character that was asked, and no others.
+    measured: Vec<(char, SymbolCells)>,
+    /// The price of a character nobody asked about. This is the pessimistic
+    /// answer on a code page that reprices things, which is the only safe one:
+    /// a character this program forgot to ask about is a character it should
+    /// not have drawn without asking.
+    assumed: SymbolCells,
+}
+
+impl Prices {
+    /// The answer a person named, or a test asked for: one price for every
+    /// character, asked or not.
+    pub fn flat(cells: SymbolCells) -> Prices {
+        Prices {
+            source: "asked",
+            measured: Vec::new(),
+            assumed: cells,
+        }
+    }
+
+    /// The answer for a screen that cannot be asked, which is the one a code
+    /// page implies. See [`charged_by_code_page`] for what that answer is worth.
+    pub fn implied(code_page: u32) -> Prices {
+        Prices {
+            source: "implied",
+            measured: Vec::new(),
+            assumed: charged_by_code_page(code_page),
+        }
+    }
+
+    /// What the cells said, character by character, with the price a code page
+    /// implies standing behind the ones they could not read.
+    pub fn measured(measured: Vec<(char, SymbolCells)>, assumed: SymbolCells) -> Prices {
+        let source = if measured.is_empty() {
+            // Not one character landed where it could be read back, so there is
+            // nothing here but the guess, and the log should say so.
+            "implied"
+        } else {
+            "measured"
+        };
+        Prices {
+            source,
+            measured,
+            assumed,
+        }
+    }
+
+    /// What this console charges for one character.
+    pub fn price(&self, ch: char) -> SymbolCells {
+        self.measured
+            .iter()
+            .find(|(asked, _)| *asked == ch)
+            .map(|(_, cells)| *cells)
+            .unwrap_or(self.assumed)
+    }
+
+    /// Whether anything on this screen costs more than it measures, which is the
+    /// one question a frame can ask before it walks itself.
+    pub fn overcharged(&self) -> bool {
+        self.assumed == SymbolCells::Double
+            || self
+                .measured
+                .iter()
+                .any(|(_, cells)| *cells == SymbolCells::Double)
+    }
+
+    /// One line for the trace: where the answer came from, what an unasked
+    /// character is assumed to cost, and which characters cost two. The last of
+    /// those is the whole reason the line exists — a person working out why a
+    /// gauge came out as `#` needs to be told what the glass charged for `░`.
+    pub fn text(&self) -> String {
+        let double: String = self
+            .measured
+            .iter()
+            .filter(|(_, cells)| *cells == SymbolCells::Double)
+            .map(|(ch, _)| *ch)
+            .collect();
+        format!(
+            "{} of {} characters, unasked={}, two cells={}",
+            self.source,
+            self.measured.len(),
+            word(self.assumed),
+            if double.is_empty() {
+                "none".to_string()
+            } else {
+                double
+            }
+        )
+    }
+}
+
+/// The word for a price, because `{:?}` of an enum variant is a Rust name and a
+/// log is read by a person.
+fn word(cells: SymbolCells) -> &'static str {
+    match cells {
+        SymbolCells::Single => "one",
+        SymbolCells::Double => "two",
+    }
+}
+
+/// The price a cursor's step describes, or no price at all.
+///
+/// One cell and two cells are the only answers a character can give. Anything
+/// else is the console saying something different: nothing at all is a write
+/// that did not land, a step backwards is a cursor that was moved by somebody
+/// else, and a step past two is a reading that has lost the character it was
+/// measuring. Sixty looked like a price once, and was not one — it was the
+/// distance from a cell the console had never agreed to move the cursor to, read
+/// off the sixtieth question in a row, and it is the reason this function
+/// exists: an answer that cannot be a price has to become no answer, so the code
+/// page answers instead of the layout believing a number with no cells behind it.
+// Read by the probe on Windows and by a test anywhere; a non-Windows library
+// build has no console to read a step off, so nothing here calls it.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn price_from_step(step: i32) -> Option<SymbolCells> {
+    match step {
+        1 => Some(SymbolCells::Single),
+        2 => Some(SymbolCells::Double),
+        _ => None,
+    }
+}
+
+/// Ask the console, once per character, what it charges for a one-column
+/// character.
+///
+/// The answers are measured rather than looked up, because the two things that
+/// decide them are both set outside this program: the code page the console was
 /// left on and the font it was left with. They are not even the same question,
 /// since `chcp 65001` moves a box-drawing bar back to one cell on the box that
 /// charges two, and the same console shows that bar as a blank when the font
-/// carries no glyph for it. The only answer worth laying a screen out against
-/// is the one taken from the cells themselves.
+/// carries no glyph for it. The only answers worth laying a screen out against
+/// are the ones taken from the cells themselves.
 ///
-/// Measuring spends one character on whatever screen the console is showing, so
+/// The caller names the characters worth asking about, which are the ones it
+/// means to draw. The price of one of them is not evidence about another: the
+/// list is as long as the question because a frame laid out against a character
+/// it never asked about is laid out against a guess, and it is the guess that the
+/// overflow costs.
+///
+/// Measuring spends characters on whatever screen the console is showing, so
 /// call this when the interface owns the screen rather than while somebody's
-/// shell is still on it.
-pub fn symbol_cells() -> SymbolCells {
+/// shell is still on it. Each character is written, read, and taken back out
+/// again, and the first frame covers the row that is left.
+pub fn prices(witnesses: &[char]) -> Prices {
     if let Some(asked) = asked_for() {
-        note(&format!("symbols={asked:?} asked"));
-        return asked;
+        note(&format!("symbols={} asked", word(asked)));
+        return Prices::flat(asked);
     }
     #[cfg(windows)]
     {
-        windows::symbol_cells()
+        windows::prices(witnesses)
     }
     #[cfg(not(windows))]
     {
-        SymbolCells::Single
+        // No console to ask. A terminal on a writing system that charges two
+        // for these characters also charges two to the layout that measures
+        // them, because both read the same tables, so there is nothing to buy
+        // back and the frame keeps the glyphs it was drawn with.
+        let _ = witnesses;
+        Prices::flat(SymbolCells::Single)
     }
 }
 
@@ -367,10 +527,11 @@ fn append(path: &Path, line: &str) {
 
 #[cfg(windows)]
 mod windows {
-    use super::{charged_by_code_page, Geometry, SymbolCells};
+    use super::{charged_by_code_page, price_from_step, Geometry, Prices, SymbolCells};
+    use std::collections::HashMap;
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::OnceLock;
+    use std::sync::{Mutex, OnceLock};
     use windows_sys::Win32::Foundation::{
         CloseHandle, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE,
     };
@@ -378,9 +539,10 @@ mod windows {
         CreateFileW, GetFileType, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
     use windows_sys::Win32::System::Console::{
-        GetConsoleMode, GetConsoleOutputCP, GetConsoleScreenBufferInfo, GetStdHandle,
-        SetConsoleCursorPosition, SetConsoleScreenBufferSize, WriteConsoleW,
-        CONSOLE_SCREEN_BUFFER_INFO, COORD, ENABLE_VIRTUAL_TERMINAL_PROCESSING, STD_OUTPUT_HANDLE,
+        FillConsoleOutputCharacterW, GetConsoleMode, GetConsoleOutputCP,
+        GetConsoleScreenBufferInfo, GetStdHandle, SetConsoleCursorPosition,
+        SetConsoleScreenBufferSize, WriteConsoleW, CONSOLE_SCREEN_BUFFER_INFO, COORD,
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING, STD_OUTPUT_HANDLE,
     };
 
     type Handle = *mut c_void;
@@ -547,48 +709,123 @@ mod windows {
         )
     }
 
-    /// The character the price is asked with: a box-drawing bar, which measures
-    /// one column in every table that measures characters and is the glyph this
-    /// interface draws more of than any other.
-    const PROBE: char = '│';
-
-    /// The price, measured once. See [`super::symbol_cells`] for why it is
-    /// measured, and why the answer is worth keeping for the life of a run.
-    static SYMBOLS: OnceLock<SymbolCells> = OnceLock::new();
-
-    pub fn symbol_cells() -> SymbolCells {
-        *SYMBOLS.get_or_init(|| {
-            measure_symbol_cells()
-                .unwrap_or_else(|| charged_by_code_page(unsafe { GetConsoleOutputCP() }))
-        })
+    /// The price list, read off the cells of the console this process draws on.
+    ///
+    /// See [`super::prices`] for why the question is asked of every character
+    /// rather than of one, and why the ones that cannot be answered fall back on
+    /// the code page rather than on the average of the others.
+    pub fn prices(witnesses: &[char]) -> Prices {
+        let code_page = unsafe { GetConsoleOutputCP() };
+        // Measure the ruler before measuring the screen. `A` is one cell in
+        // every code page ever written, so a console that charges anything else
+        // for it is not charging anything: it is refusing to be read, and an
+        // answer taken from it is a number with no cells behind it. The code
+        // page answers for the whole screen in that case, which is the guess the
+        // log admits to rather than a measurement the layout trusts by mistake.
+        if price_of('A') != Some(SymbolCells::Single) {
+            super::note("symbols unreadable: A does not cost one cell");
+            return Prices::implied(code_page);
+        }
+        Prices::measured(
+            witnesses
+                .iter()
+                .filter_map(|&ch| Some((ch, price_of(ch)?)))
+                .collect(),
+            charged_by_code_page(code_page),
+        )
     }
 
-    /// Write one character where the console is looking, and read back the cost.
+    /// Paint two spaces over a cell and whatever was standing behind it.
     ///
-    /// `None` when there is no screen to ask, or no answer to read: the
-    /// character did not land, or it landed where a second cell would have had
-    /// to wrap — a place the cursor can be and deliberately not a place this
-    /// function writes to. A cursor that did not move at all is not an answer
-    /// either; a console that writes nothing where it was told to write is not
-    /// one whose prices can be read off it. The caller falls back on the code
-    /// page.
-    fn measure_symbol_cells() -> Option<SymbolCells> {
+    /// Two cells, because the character being taken back out may have cost two,
+    /// and clearing only the first is the half-clear that leaves a spacer on the
+    /// glass for the next frame to inherit.
+    fn blank(owned: Handle, at: COORD) {
+        let mut written = 0u32;
+        unsafe {
+            FillConsoleOutputCharacterW(owned, b' ' as u16, 2, at, &mut written);
+        }
+    }
+
+    /// What one character costs: measured the first time it is asked about, and
+    /// remembered afterwards — including the cases where no answer could be
+    /// read, because a character the console refuses to price is not worth
+    /// writing to the screen again every beat.
+    fn price_of(ch: char) -> Option<SymbolCells> {
+        static PRICES: OnceLock<Mutex<HashMap<char, Option<SymbolCells>>>> = OnceLock::new();
+        let answers = PRICES.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Some(known) = answers
+            .lock()
+            .ok()
+            .and_then(|known| known.get(&ch).copied())
+        {
+            return known;
+        }
+        let measured = measure_symbol_cells(ch);
+        if let Ok(mut known) = answers.lock() {
+            known.insert(ch, measured);
+        }
+        measured
+    }
+
+    /// Write one character and read its price off the step the cursor took.
+    ///
+    /// The cursor is asked to sit in the top-left cell of the window first,
+    /// because that is the safest cell to spend a character in: a wide one in the
+    /// last cell of the last row has nowhere to put its second cell, and a wrap
+    /// there scrolls the screen this program is about to draw on. Asking is not
+    /// getting. Measured on the 18363 box, through the buffer the console is
+    /// showing, while the alternate screen is up: `SetConsoleCursorPosition`
+    /// answers that it succeeded and leaves the cursor exactly where it was. The
+    /// first version of this function anchored its arithmetic to the cell it had
+    /// *asked* for rather than to the cell the cursor was actually standing on,
+    /// so what it read off sixty characters was not sixty prices but sixty
+    /// distances from an anchor nobody moved: one cell for the first character,
+    /// two for the second, sixty for the sixtieth. A console that was charging
+    /// one cell for every ambiguous character on code page 65001 therefore
+    /// reported itself a screenful of two-cell ones, the layout quietly gave up
+    /// the rounded frames it could afford, and the probe built to catch one
+    /// overflow produced a different one.
+    ///
+    /// So the anchor is the cursor *found*, read back after the request, and the
+    /// price is the *step* between two readings of it — a price that does not
+    /// care whether the reset was obeyed. Where it was, every character is asked
+    /// in the same cell; where it was not, the questions walk the top row one
+    /// step at a time, and [`blank`] takes each one back out the moment it has
+    /// been answered, so what is left behind is a row of empty cells that the
+    /// first frame paints over regardless.
+    ///
+    /// `None` — no answer, fall back on the code page — when there is no screen
+    /// to ask, when the character did not land, when the cursor did not move,
+    /// when it ended up anywhere other than one or two columns further along the
+    /// same row, and when the row has no room left to answer in. A price of zero
+    /// is deliberately not an answer: a console that writes nothing where it was
+    /// told to write is not one whose prices can be read off it.
+    fn measure_symbol_cells(ch: char) -> Option<SymbolCells> {
         let owned = shown_handle()?;
         let before = info(owned.0)?;
-        // The top-left cell of what is on the glass, not where the cursor
-        // happens to be: on the last column of the last row a second cell
-        // wraps, and a wrap scrolls the very screen this program is about to
-        // draw on. The cell is painted over by the first frame anyway, which is
-        // what makes it worth spending one character of somebody's screen to
-        // keep the rest of the frame from being wrong.
         let at = COORD {
             X: before.srWindow.Left,
             Y: before.srWindow.Top,
         };
-        if unsafe { SetConsoleCursorPosition(owned.0, at) } == 0 {
+        // Ask, and then find out where the cursor really is. The request is
+        // worth making even on a console that ignores it, because on the ones
+        // that obey all sixty questions are asked in one cell instead of in
+        // sixty of them.
+        unsafe {
+            SetConsoleCursorPosition(owned.0, at);
+        }
+        let room = info(owned.0)?;
+        let here = room.dwCursorPosition;
+        // Leave room for the widest answer this function can read. Walking into
+        // the last column of the window would spend a character on a guess the
+        // console cannot confirm, and the cell after the window's edge is where
+        // a wrap begins.
+        if i32::from(here.X) > i32::from(room.srWindow.Right) - 2 {
             return None;
         }
-        let glyph: Vec<u16> = PROBE.to_string().encode_utf16().collect();
+        blank(owned.0, here);
+        let glyph: Vec<u16> = ch.to_string().encode_utf16().collect();
         let mut written = 0u32;
         let ok = unsafe {
             WriteConsoleW(
@@ -600,19 +837,22 @@ mod windows {
             )
         };
         let after = info(owned.0);
+        // Take the character back out of the screen, so the next character is
+        // asked in an empty cell for the same reason this one was, and so a
+        // program that is only borrowing somebody's console leaves no debt.
+        blank(owned.0, here);
         unsafe { SetConsoleCursorPosition(owned.0, before.dwCursorPosition) };
         if ok == 0 || written != 1 {
             return None;
         }
-        // Whatever the cursor moved past is what the character cost. Reading it
+        // Whatever the cursor stepped past is what the character cost. Reading it
         // back from the console instead of counting bytes is the point: the
         // console is the thing this program has to agree with.
-        let cost = after?.dwCursorPosition.X.checked_sub(at.X)?;
-        match cost {
-            0 => None,
-            1 => Some(SymbolCells::Single),
-            _ => Some(SymbolCells::Double),
+        let after = after?;
+        if after.dwCursorPosition.Y != here.Y {
+            return None;
         }
+        price_from_step(i32::from(after.dwCursorPosition.X) - i32::from(here.X))
     }
 
     /// Make the buffer agree with the window, and report whether it did.
@@ -664,7 +904,9 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
-    use super::{charged_by_code_page, measurement, spend, Geometry, SymbolCells};
+    use super::{
+        charged_by_code_page, measurement, price_from_step, spend, Geometry, Prices, SymbolCells,
+    };
 
     /// A console with room above the window, so the limit is not what holds
     /// this one back.
@@ -690,6 +932,28 @@ mod tests {
     }
 
     #[test]
+    fn a_step_that_cannot_be_a_price_is_not_an_answer() {
+        // The two real prices, and the readings that are not prices at all: a
+        // write that never landed, a cursor that went the wrong way, and a step
+        // so large it can only be the probe losing the character it was asked
+        // about. That last one is not hypothetical — this probe once reported
+        // `cost=60` for a middot, because the cursor had been asked rather than
+        // told to go home and the sixty questions were therefore measured from
+        // wherever the fifty-ninth had left it. Every character past the second
+        // came back "two cells", and a console that charged one for all of them
+        // was drawn as if it charged two.
+        assert_eq!(price_from_step(1), Some(SymbolCells::Single));
+        assert_eq!(price_from_step(2), Some(SymbolCells::Double));
+        for not_a_price in [0, -1, 3, 60] {
+            assert_eq!(
+                price_from_step(not_a_price),
+                None,
+                "{not_a_price} is a cursor moving, not a character costing"
+            );
+        }
+    }
+
+    #[test]
     fn a_far_eastern_code_page_charges_two_cells_for_a_one_column_character() {
         // Shift-JIS, GBK, Unified Hangul and Big5: the four consoles this
         // fallback exists for, and the reason the interface does not trust its
@@ -701,6 +965,58 @@ mod tests {
                 "code page {code_page} spells every rule and arrow in two bytes"
             );
         }
+    }
+
+    #[test]
+    fn a_console_can_price_the_rules_fairly_and_the_shading_dishonestly() {
+        // The reason a price is a list and not a verdict: the two sets a frame is
+        // drawn from can land on different answers, and a frame that treats them
+        // as one question overflows by whichever set its single answer was taken
+        // from. This is the unlucky shape of it — rules affordable, shading not —
+        // which is what the first Chinese window looked like, rounded cards that
+        // fitted and gauges that did not. Whether any particular console charges
+        // this way is measured rather than assumed here; the list exists so the
+        // layout never has to decide which half of the screen it is spending.
+        let prices = Prices::measured(
+            vec![
+                ('│', SymbolCells::Single),
+                ('─', SymbolCells::Single),
+                ('█', SymbolCells::Double),
+                ('░', SymbolCells::Double),
+            ],
+            SymbolCells::Single,
+        );
+        assert_eq!(prices.price('│'), SymbolCells::Single);
+        assert_eq!(prices.price('█'), SymbolCells::Double);
+        assert!(prices.overcharged());
+        let line = prices.text();
+        assert!(
+            line.contains("█░"),
+            "{line} should name the glyphs at fault"
+        );
+        assert!(
+            line.contains("measured"),
+            "{line} should say where it came from"
+        );
+    }
+
+    #[test]
+    fn a_character_nobody_asked_about_costs_what_the_code_page_charges() {
+        // Forgetting to ask is not forgetting to pay. The fallback is the
+        // pessimistic answer, so a glyph added to a card without its price being
+        // asked comes out as ASCII rather than as a row off the edge of a
+        // Chinese console.
+        let chinese = Prices::implied(936);
+        assert_eq!(chinese.price('█'), SymbolCells::Double);
+        assert!(chinese.overcharged());
+        assert!(chinese.text().starts_with("implied"));
+
+        let utf8 = Prices::implied(65001);
+        assert_eq!(utf8.price('█'), SymbolCells::Single);
+        assert!(!utf8.overcharged());
+
+        let asked = Prices::flat(SymbolCells::Double);
+        assert_eq!(asked.price('a'), SymbolCells::Double);
     }
 
     #[test]
