@@ -301,7 +301,7 @@ Homebrew formula 的校验和。
 | --- | --- | --- |
 | macOS | 完整实现（规则、App 残留、卷、卸载钩子）| Developer ID 签名与公证流水线 |
 | Linux | `squid-platform/src/linux.rs` 已实现 `.desktop` / Flatpak / Snap 应用清单与 XDG 残留目录 | `rules/linux.toml`、真机验证 |
-| Windows | 平台层已实现：注册表卸载表（HKLM 64/32 位 + HKCU）、AppData 残留目录、卷枚举、回收站（`IFileOperation`）；CI 每次提交做 MSVC 目标交叉编译检查 | 真机验证、`rules/windows.toml`、UAC 提权、winget 发布 |
+| Windows | 平台层已实现：注册表卸载表（HKLM 64/32 位 + HKCU）、AppData 残留目录、卷枚举、回收站（`IFileOperation`）；安全层按 Windows 语义比较路径（大小写不敏感、盘符根/`$Recycle.Bin` 等硬封禁）；内置 30 条清理规则（临时文件、WER 崩溃报告、浏览器/Shell/开发缓存、Windows.old 等）；CI 每次提交做 MSVC 目标交叉编译检查 | 真机验证、UAC 提权、长路径 manifest、winget 发布 |
 
 其他：规则贡献流程与规则覆盖度基准、TUI 主题自定义、Linux/Windows 冒烟测试。
 
