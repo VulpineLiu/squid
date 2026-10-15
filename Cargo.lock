@@ -1035,6 +1035,7 @@ dependencies = [
  "squid-core",
  "sysinfo",
  "walkdir",
+ "windows-sys 0.59.0",
  "winreg",
 ]
 

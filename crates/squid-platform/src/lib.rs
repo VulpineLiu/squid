@@ -11,6 +11,7 @@ use squid_core::{AppInfo, Bytes, Volume};
 use std::path::{Path, PathBuf};
 
 pub mod apps;
+pub mod console;
 pub mod leftovers;
 #[cfg(unix)]
 pub mod volumes;
