@@ -12,7 +12,7 @@ class Squid < Formula
   version "0.1.0"
   sha256 "REPLACE_WITH_DIST_SQUID_TARBALL_SHA256"
   url "https://github.com/nexdev/squid/releases/download/v#{version}/squid-#{version}-universal-apple-darwin.tar.gz"
-  license "MIT OR Apache-2.0"
+  license "GPL-3.0-only"
 
   # 也可以直接从源码装(不需要预先发 release):
   #   depends_on "rust" => :build

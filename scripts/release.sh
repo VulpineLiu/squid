@@ -58,7 +58,7 @@ TARBALL="$SLUG.tar.gz"
 STAGING="$(mktemp -d)"
 mkdir -p "$STAGING/$SLUG"
 cp "$BIN" "$STAGING/$SLUG/"
-cp LICENSE LICENSE-MIT LICENSE-APACHE README.md "$STAGING/$SLUG/" 2>/dev/null || true
+cp LICENSE README.md "$STAGING/$SLUG/" 2>/dev/null || true
 tar -C "$STAGING" -czf "$DIST/$TARBALL" "$SLUG"
 rm -rf "$STAGING"
 

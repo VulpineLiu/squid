@@ -248,11 +248,8 @@ UndoSession(String)` 三个变体。`ask_delete()` 必须构造其中一个才�
 把「静默」变成「可见」。`app.rs` 里那三个回归测试直接驱动 `ask_delete() → confirm_delete() → poll()`
 到任务结束，断言 `outcome.summary.removed == N`，覆盖卸载、清理/深度清理、以及空确认框三条路径。
 
-## 关于 Mole（GPL v3）的边界
+## 许可证
 
-仓库根目录的 `Mole/` 是 GPL v3 的参考实现，已写入 `.gitignore`。squid 是净室实现：
-
-- 没有任何一行 Rust 代码来自 Mole（Mole 也不是 Rust 写的）；
-- 参考的是**行为**：哪些路径值得清理、哪些目录是雷区、卸载残留该去哪儿找；
-- 规则表是本项目的 `macos.toml`，模式与文案均为本仓库独立编写；
-- 分发 squid（MIT OR Apache-2.0）时不携带、不链接 GPL 代码。
+squid 以 `GPL-3.0-only` 发布，全文见仓库根目录的 [`LICENSE`](../LICENSE)。七个 crate 通过
+`[workspace.package] license` 继承同一份许可，`scripts/release.sh` 把 `LICENSE` 与 `README.md`
+一起打进发布包，`packaging/homebrew/squid.rb` 声明同一 SPDX 标识符。
