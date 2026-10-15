@@ -1,9 +1,9 @@
 //! Filesystem primitives: fast size measurement, safe removal, Trash support.
 //!
 //! Sizes are measured twice over: `logical` (the `st_size` sum the Finder
-//! shows) and `allocated` (`st_blocks`, what the volume actually gave up).
-//! squid reports `allocated` whenever it can because that is the number that
-//! matches `df`.
+//! shows) and `allocated` (what the volume actually gave up — `st_blocks` on
+//! Unix, `GetCompressedFileSizeW` on Windows). squid reports `allocated`
+//! whenever it can because that is the number that matches `df`.
 
 use crate::bytes::Bytes;
 use crate::error::{Result, SquidError};
@@ -75,13 +75,10 @@ pub use crate::bytes::format_thousands;
 /// Bytes the volume really gave up for one file, or 0 when the platform
 /// cannot say.
 ///
-/// Unix answers from `st_blocks`, which `stat` already handed us. Windows only
-/// answers through a handle, and opening one per file would dominate the walk,
-/// so we ask only for files large enough to distort a total and let the rest
-/// count as their length. The cutoff is not a precision trade-off so much as a
-/// correctness one: NTFS keeps small files inside the MFT record, where they
-/// report an allocation of 0, and summing that over a cache full of 2 KB
-/// entries would announce a cleanup that gave back nothing.
+/// Unix answers from `st_blocks`, which `stat` already handed us; Windows from
+/// [`windows_allocation`], which costs one path-based query. Both ask about
+/// every file, because whole-volume compression and APFS block cloning both
+/// make the logical length a lie at every size, not just for big files.
 fn allocated_bytes(path: &Path, meta: &Metadata) -> u64 {
     #[cfg(unix)]
     {
@@ -91,7 +88,7 @@ fn allocated_bytes(path: &Path, meta: &Metadata) -> u64 {
     }
     #[cfg(windows)]
     {
-        windows_allocation(path, meta.len())
+        windows_allocation(path, meta)
     }
     #[cfg(not(any(unix, windows)))]
     {
@@ -100,32 +97,38 @@ fn allocated_bytes(path: &Path, meta: &Metadata) -> u64 {
     }
 }
 
-/// Anything below this cannot change a reported total by more than the odd
-/// cluster, and is far too common to be worth a syscall each.
+/// `GetCompressedFileSizeW`, the one cheap Windows answer to "how many bytes
+/// did the volume hand over".
 ///
-/// Only Windows consults it — `stat` hands Unix the answer for free — but the
-/// size test uses it on every platform so the two stay tied together.
-#[cfg_attr(not(windows), allow(dead_code))]
-const ALLOCATION_PROBE_MIN: u64 = 8 << 20;
-
-/// `GetFileInformationByHandleEx(FileStandardInfo).AllocationSize`.
+/// Measured on a real NTFS volume (Windows 10 1909), because the documented
+/// alternatives were all wrong for this:
 ///
-/// `FILE_READ_ATTRIBUTES` is the cheapest access right that still hands back a
-/// handle: it needs no read access to the contents, so it succeeds on files
-/// another process holds open for writing — exactly the cache files a scan
-/// walks past. `FILE_FLAG_BACKUP_SEMANTICS` keeps it working when the ACL only
-/// grants us permission to look at the entry.
+/// * `FILE_STANDARD_INFO.AllocationSize` — what this function used to call — is
+///   blind to NTFS compression. It reported the full 8 MiB for a file
+///   `compact` accounted as 1,572,864 stored bytes; `GetCompressedFileSizeW`
+///   returned 1,572,864.
+/// * `FSCTL_QUERY_ALLOCATED_RANGES` reported the same 8 MiB window as fully
+///   allocated. It answers "which clusters exist", not "what do they weigh".
+/// * Nothing rounds up: files from 100 bytes (small enough to live inside the
+///   `$MFT` record) to 1 GiB extended by `SetEndOfFile` all report exactly
+///   their length, so there is no cluster quantum to correct for here — unlike
+///   `st_blocks`, which does round.
+///
+/// Taking a path rather than a handle matters twice over. It is one query
+/// instead of a `CreateFileW`/`GetFileInformationByHandleEx` pair per file, and
+/// it keeps answering while another process holds the file open exclusively —
+/// which is the normal state of the cache files this walk exists to size.
+///
+/// The failure modes fall back to the logical length: a path over the legacy
+/// limit without a `\\\\?` prefix, a volume that will not tell us, a file that
+/// vanished mid-walk. Overstating by the logical size is the survivable
+/// direction; understating a cleanup the user is about to approve is not.
 #[cfg(windows)]
-fn windows_allocation(path: &Path, len: u64) -> u64 {
-    if len < ALLOCATION_PROBE_MIN {
-        return len;
-    }
-    use std::ffi::c_void;
+fn windows_allocation(path: &Path, meta: &Metadata) -> u64 {
+    use std::os::windows::fs::MetadataExt;
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FileStandardInfo, GetFileInformationByHandleEx, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_READ_ATTRIBUTES, FILE_SHARE_MODE, FILE_STANDARD_INFO, OPEN_EXISTING,
+        GetCompressedFileSizeW, FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_SPARSE_FILE,
     };
 
     let wide: Vec<u16> = path
@@ -133,33 +136,26 @@ fn windows_allocation(path: &Path, len: u64) -> u64 {
         .encode_utf16()
         .chain(Some(0))
         .collect();
-    unsafe {
-        let Ok(handle) = CreateFileW(
-            PCWSTR(wide.as_ptr()),
-            FILE_READ_ATTRIBUTES.0,
-            FILE_SHARE_MODE(0),
-            None,
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS,
-            None,
-        ) else {
-            return len;
-        };
-        let mut info = FILE_STANDARD_INFO::default();
-        let read = GetFileInformationByHandleEx(
-            handle,
-            FileStandardInfo,
-            &mut info as *mut FILE_STANDARD_INFO as *mut c_void,
-            std::mem::size_of::<FILE_STANDARD_INFO>() as u32,
-        );
-        let _ = CloseHandle(handle);
-        match read {
-            // A deleted-but-still-open file reports 0; never let that shrink a
-            // total the user is about to act on.
-            Ok(()) if info.AllocationSize > 0 => info.AllocationSize as u64,
-            _ => len,
-        }
+    let mut high = 0u32;
+    let low = unsafe { GetCompressedFileSizeW(PCWSTR(wide.as_ptr()), Some(&mut high)) };
+    // The API signals failure with 0xFFFFFFFF, then clears the last error on
+    // success, so a file that really is 4 GiB minus one long survives.
+    if low == u32::MAX && io::Error::last_os_error().raw_os_error().unwrap_or(0) != 0 {
+        return meta.len();
     }
+    let reported = (u64::from(high) << 32) | u64::from(low);
+    if reported != 0 || meta.len() == 0 {
+        return reported;
+    }
+    // Only a compressed or sparse file may legitimately hold data the volume
+    // charges nothing for. Any other file answering 0 bytes is the
+    // deleted-but-still-open case: the clusters are gone but the entry is still
+    // in our walk, and zeroing it would hide space the user is not getting.
+    let flagged = FILE_ATTRIBUTE_COMPRESSED.0 | FILE_ATTRIBUTE_SPARSE_FILE.0;
+    if meta.file_attributes() & flagged == 0 {
+        return meta.len();
+    }
+    reported
 }
 
 /// Measure one path. `Contents` skips the directory entry itself so the size
@@ -669,13 +665,18 @@ mod tests {
     /// A thin-provisioned disk image is the reason `max(logical, allocated)`
     /// is forbidden: Docker's `Docker.raw` reports a terabyte of logical
     /// length while the SSD behind it holds 256 GB in total.
+    ///
+    /// Holes come free on POSIX — `set_len` extends without allocating — so the
+    /// fixture needs no privilege here. Windows needs a different fixture and
+    /// gets its own test below.
     #[test]
+    #[cfg(unix)]
     fn a_sparse_file_counts_for_what_it_really_uses() {
         let root = std::env::temp_dir().join(format!("squid-sparse-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         // One gibibyte is plenty to show the property and small enough that a
-        // nearly full CI disk can still extend to it.
+        // nearly full disk can still extend to it.
         const SPARSE_LEN: u64 = 1 << 30;
         let raw = root.join("Docker.raw");
         let file = fs::File::create(&raw).unwrap();
@@ -687,11 +688,6 @@ mod tests {
             return;
         }
         drop(file);
-        if !mark_sparse(&raw) {
-            eprintln!("skipped: this volume refuses to make a file sparse");
-            let _ = fs::remove_dir_all(&root);
-            return;
-        }
         // One block of real data, so the file has both a hole and a tail the
         // volume had to hand over — the shape of an actual thin disk image.
         let mut hole = fs::OpenOptions::new().write(true).open(&raw).unwrap();
@@ -702,35 +698,74 @@ mod tests {
         assert_eq!(info.logical, Bytes(SPARSE_LEN), "logical length is 1 GiB");
         assert!(
             info.on_disk().as_u64() * 100 < info.logical.as_u64(),
-            "the walk reported {}/{}; a sparse file must count as the blocks              it wrote",
+            "the walk reported {}/{}; a sparse file must count as the blocks \
+             it wrote",
             info.on_disk(),
             info.logical
         );
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// Ask the volume to make a file sparse.
+    /// NTFS is the other way round: extending a file really does allocate the
+    /// whole thing (a 1 GiB `SetEndOfFile` file reported 1 GiB allocated and
+    /// moved free space by 1 GiB), so a hole is not how Windows hides size.
+    /// Compression is, and it is common — `compact`/CompactOS ships on devices
+    /// with small eMMC, where a whole profile is stored compressed.
     ///
-    /// `fsutil` is the only way to do this without pulling a second set of
-    /// Windows bindings into a dev-dependency just for one `DeviceIoControl`.
-    /// It fails when the volume is not NTFS or we lack the right, and the
-    /// caller treats that as "this machine cannot demonstrate the property"
-    /// rather than as a failure.
+    /// `compact` is the only supported way to provoke it from a test: the
+    /// `FSCTL_SET_COMPRESSION` request answers `ERROR_ACCESS_DENIED` on this
+    /// volume even for a file we created ourselves, and setting
+    /// `FILE_ATTRIBUTE_COMPRESSED` on a file that already has clusters leaves
+    /// those clusters uncompressed. Both were measured, not assumed.
+    #[test]
     #[cfg(windows)]
-    fn mark_sparse(path: &std::path::Path) -> bool {
-        std::process::Command::new("fsutil")
-            .args(["file", "setSparse", &path.to_string_lossy()])
+    fn a_compressed_file_counts_for_what_the_volume_stored() {
+        use std::os::windows::fs::MetadataExt;
+        use std::process::Command;
+
+        let root = std::env::temp_dir().join(format!("squid-compressed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        // A short repeating period: compresses several fold, so the assertion
+        // cannot pass merely because a volume ignored the request the way
+        // random bytes would let it.
+        const LEN: usize = 8 << 20;
+        let path = root.join("pattern.bin");
+        let payload: Vec<u8> = (0..LEN).map(|i| (i % 509) as u8).collect();
+        fs::write(&path, &payload).unwrap();
+
+        // Run from inside the directory so the volume never sees a path that
+        // needs quoting.
+        let ran = Command::new("compact")
+            .args(["/c", "/i", "/s:."])
+            .current_dir(&root)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
+            .status();
+        let compressed_flag = 0x0800; // FILE_ATTRIBUTE_COMPRESSED
+        let marked = fs::metadata(&path)
+            .map(|meta| meta.file_attributes() & compressed_flag != 0)
+            .unwrap_or(false);
+        if !ran.map(|status| status.success()).unwrap_or(false) || !marked {
+            eprintln!("skipped: this volume will not compress the fixture");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        }
 
-    /// POSIX holes a file by extending it, which is all `set_len` has to do.
-    #[cfg(not(windows))]
-    fn mark_sparse(_: &std::path::Path) -> bool {
-        true
+        let info = measure(&root, ItemKind::Path);
+        assert_eq!(
+            info.logical,
+            Bytes(LEN as u64),
+            "logical length is unchanged"
+        );
+        assert!(
+            info.on_disk().as_u64() * 2 < info.logical.as_u64(),
+            "the walk reported {}/{}; a compressed file must count as the bytes \
+             the volume stored",
+            info.on_disk(),
+            info.logical
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     /// The invariant both platforms must satisfy: a file that was really
@@ -742,13 +777,14 @@ mod tests {
         let root = std::env::temp_dir().join(format!("squid-alloc-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
+        const SOLID_LEN: u64 = 8 << 20;
         let mut file = fs::File::create(root.join("solid.bin")).unwrap();
-        file.set_len(ALLOCATION_PROBE_MIN).unwrap();
-        std::io::Write::write_all(&mut file, &[9u8; 4096]).unwrap();
+        std::io::Write::write_all(&mut file, &[9u8; 1 << 20]).unwrap();
+        file.set_len(SOLID_LEN).unwrap();
         drop(file);
 
         let info = measure(&root, ItemKind::Path);
-        assert_eq!(info.logical, Bytes(ALLOCATION_PROBE_MIN));
+        assert_eq!(info.logical, Bytes(SOLID_LEN));
         assert!(
             info.allocated >= info.logical,
             "a freshly written file reported {} of {} allocated; clusters only round up",

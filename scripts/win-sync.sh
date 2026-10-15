@@ -20,8 +20,13 @@ scp_to()  { scp -i "$WIN_KEY" -o BatchMode=yes -q "$1" "$WIN_HOST:$2"; }
 TARBALL="$(mktemp -t nexsquid).tgz"
 trap 'rm -f "$TARBALL"' EXIT
 
-printf '\033[1;36m==>\033[0m 打包 HEAD (%s)\n' "$(git rev-parse --short HEAD)"
-git archive --format=tar HEAD | gzip > "$TARBALL"
+# 同步的是工作区,不是 HEAD:调试阶段一半的改动都还没提交,用 `git archive
+# HEAD` 会把远端留在上一个 commit 上,然后跑出一些看着像真机 bug、其实是本地
+# 忘了提交的失败。tracked + 未被忽略的 untracked,正好等于你以为传过去的那些。
+DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
+printf '\033[1;36m==>\033[0m 打包工作区 (%s, %s 处未提交改动)\n' "$(git rev-parse --short HEAD)" "$DIRTY"
+git ls-files -z --cached --others --exclude-standard |
+  LC_ALL=C tar --format=ustar -czf "$TARBALL" --null -T -
 scp_to "$TARBALL" "$REMOTE_TMP"
 
 printf '\033[1;36m==>\033[0m 解压到 %s\n' "$WIN_DIR"
