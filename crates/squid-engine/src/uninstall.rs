@@ -145,9 +145,10 @@ pub fn build_plan(
             .locked(LockReason::AppRunning)
             .with_note("quit the app first");
     } else if !crate::writable_by_us(&app.path) && !crate::is_root() {
-        bundle_item = bundle_item
-            .locked(LockReason::NotOwned)
-            .with_note("run squid uninstall with sudo to remove this copy");
+        bundle_item = bundle_item.locked(LockReason::NotOwned).with_note(format!(
+            "{} to remove this copy",
+            squid_core::elevation_hint()
+        ));
     }
     plan.push(bundle_item);
 

@@ -100,9 +100,10 @@ pub fn scan(
                     && rule.needs_admin
                     && !writable_by_us(&item.path)
                 {
-                    item = item
-                        .locked(LockReason::NotOwned)
-                        .with_note("needs admin rights — run squid with sudo to include it");
+                    item = item.locked(LockReason::NotOwned).with_note(format!(
+                        "needs admin rights — {} to include it",
+                        squid_core::elevation_hint()
+                    ));
                 } else if engine.is_whitelisted(&item.path) {
                     item = item.locked(LockReason::Whitelisted);
                 } else if let Some(reason) = engine.block_reason(&item) {

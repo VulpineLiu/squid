@@ -5,6 +5,16 @@ use std::path::PathBuf;
 
 pub type Result<T> = std::result::Result<T, SquidError>;
 
+/// How a user gains administrator rights on this platform. Keeps the
+/// "needs admin" hints truthful on Windows, where there is no sudo.
+pub fn elevation_hint() -> &'static str {
+    if cfg!(windows) {
+        "run squid from an elevated (Administrator) terminal"
+    } else {
+        "run squid with sudo"
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SquidError {
     #[error("io error while accessing {path}: {source}")]
@@ -29,9 +39,11 @@ pub enum SquidError {
         what: &'static str,
     },
 
-    #[error(
-        "permission denied for {path} — grant Full Disk Access to squid, or run again with sudo"
-    )]
+    #[error("permission denied for {path} — {}", if cfg!(windows) {
+        "run squid from an elevated (Administrator) terminal"
+    } else {
+        "grant Full Disk Access to squid, or run again with sudo"
+    })]
     Permission { path: PathBuf },
 
     #[error("{0}")]

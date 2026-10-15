@@ -16,7 +16,7 @@ pub mod safety;
 pub mod settings;
 
 pub use bytes::Bytes;
-pub use error::{Result, SquidError};
+pub use error::{elevation_hint, Result, SquidError};
 pub use model::{
     AppInfo, Category, CleanSummary, CleanupItem, DeleteMode, ItemKind, LockReason, ScanReport,
     UninstallPlan, Volume,

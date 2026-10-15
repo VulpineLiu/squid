@@ -312,7 +312,10 @@ impl SafetyPolicy {
         {
             return Err(SquidError::safety(
                 path,
-                "outside the current user's home (use sudo to clean system paths)",
+                format!(
+                    "outside the current user's home ({} to clean system paths)",
+                    crate::elevation_hint()
+                ),
             ));
         }
 
