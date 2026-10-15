@@ -12,8 +12,12 @@ use crate::paths;
 use crate::progress::CancelToken;
 use crate::safety::SafetyPolicy;
 use rayon::prelude::*;
-use std::fs::{File, Metadata, OpenOptions};
-use std::io::{self, Read, Write};
+use std::fs::Metadata;
+#[cfg(not(windows))]
+use std::fs::{File, OpenOptions};
+use std::io;
+#[cfg(not(windows))]
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -297,6 +301,31 @@ fn remove_contents(dir: &Path) -> Result<()> {
 /// Roots a cleanup target may legitimately live under when no rule anchors are
 /// attached (interactive deletion from the TUI, history restore, …).
 pub fn default_anchors() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        windows_anchors()
+    }
+    #[cfg(not(windows))]
+    unix_default_anchors()
+}
+
+#[cfg(windows)]
+fn windows_anchors() -> Vec<PathBuf> {
+    let env = |key: &str| std::env::var_os(key).map(PathBuf::from);
+    let home = paths::home_dir();
+    let mut anchors = vec![
+        env("LOCALAPPDATA").unwrap_or_else(|| home.join("AppData").join("Local")),
+        env("APPDATA").unwrap_or_else(|| home.join("AppData").join("Roaming")),
+        env("ProgramData").unwrap_or_else(|| PathBuf::from(r"C:\ProgramData")),
+        env("TEMP").unwrap_or_else(|| home.join("AppData").join("Local").join("Temp")),
+        home,
+    ];
+    anchors.retain(|p| p.exists());
+    anchors
+}
+
+#[cfg(not(windows))]
+fn unix_default_anchors() -> Vec<PathBuf> {
     let home = paths::home_dir();
     let mut anchors = vec![
         home.join("Library"),
@@ -319,7 +348,25 @@ pub fn default_anchors() -> Vec<PathBuf> {
 }
 
 /// Where `path` would land in the Trash, honouring per-volume `.Trashes`.
-pub fn trash_target_for(path: &Path) -> PathBuf {
+///
+/// Returns `None` on Windows: the shell Recycle Bin is written through
+/// `IFileOperation`, which does not hand out a destination path, so the
+/// ledger records no physical trash location there and undo relies on the
+/// Recycle Bin UI.
+pub fn trash_target_for(path: &Path) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let _ = path;
+        None
+    }
+    #[cfg(not(windows))]
+    {
+        Some(unix_trash_target_for(path))
+    }
+}
+
+#[cfg(not(windows))]
+fn unix_trash_target_for(path: &Path) -> PathBuf {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -340,6 +387,7 @@ pub fn trash_target_for(path: &Path) -> PathBuf {
     candidate
 }
 
+#[cfg(not(windows))]
 fn split_name(name: &str) -> (String, String) {
     // Only the last extension of bundles/apps is cosmetic; ".app" stays whole.
     if let Some(rest) = name.strip_suffix(".app") {
@@ -353,6 +401,7 @@ fn split_name(name: &str) -> (String, String) {
     }
 }
 
+#[cfg(not(windows))]
 fn trash_dir_for(path: &Path) -> PathBuf {
     let uid = unsafe { libc::getuid() };
     let volume_root = volume_root_for(path);
@@ -369,6 +418,7 @@ fn trash_dir_for(path: &Path) -> PathBuf {
     paths::home_dir().join(".Trash")
 }
 
+#[cfg(not(windows))]
 fn can_write(dir: &Path) -> bool {
     let probe = dir.join(format!(".squid-probe-{}", std::process::id()));
     match OpenOptions::new().create_new(true).write(true).open(&probe) {
@@ -380,6 +430,7 @@ fn can_write(dir: &Path) -> bool {
     }
 }
 
+#[cfg(not(windows))]
 fn ensure_dir(dir: &Path) -> bool {
     if dir.is_dir() {
         return true;
@@ -407,10 +458,23 @@ pub fn volume_root_for(path: &Path) -> PathBuf {
 }
 
 /// Move to Trash, copying first when the target lives on another volume.
-pub fn trash_path(path: &Path) -> Result<PathBuf> {
-    let destination = trash_target_for(path);
+/// The returned path is where the item physically landed, or `None` on
+/// Windows where the shell keeps the Recycle Bin bookkeeping.
+pub fn trash_path(path: &Path) -> Result<Option<PathBuf>> {
+    #[cfg(windows)]
+    {
+        recycle_bin::move_to_recycle_bin(path)?;
+        Ok(None)
+    }
+    #[cfg(not(windows))]
+    trash_path_unix(path)
+}
+
+#[cfg(not(windows))]
+fn trash_path_unix(path: &Path) -> Result<Option<PathBuf>> {
+    let destination = unix_trash_target_for(path);
     match std::fs::rename(path, &destination) {
-        Ok(()) => Ok(destination),
+        Ok(()) => Ok(Some(destination)),
         Err(_) => {
             copy_tree(path, &destination)?;
             let kind = if path.is_dir() {
@@ -426,11 +490,12 @@ pub fn trash_path(path: &Path) -> Result<PathBuf> {
                     std::fs::remove_file(path).map_err(|e| SquidError::io(path, e))?;
                 }
             }
-            Ok(destination)
+            Ok(Some(destination))
         }
     }
 }
 
+#[cfg(not(windows))]
 fn copy_tree(from: &Path, to: &Path) -> Result<()> {
     let meta = std::fs::symlink_metadata(from).map_err(|e| SquidError::io(from, e))?;
     if meta.file_type().is_symlink() {
@@ -556,14 +621,77 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn trash_target_avoids_collisions() {
         let dir = std::env::temp_dir().join(format!("squid-trash-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let victim = dir.join("victim");
         fs::write(&victim, b"hi").unwrap();
-        let first = trash_target_for(&victim);
+        let first = trash_target_for(&victim).expect("unix trash targets are predictable");
         assert!(first.starts_with(trash_dir_for(&victim)));
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+/// Windows Recycle Bin backend built on `IFileOperation`. The shell owns the
+/// `$Recycle.Bin` bookkeeping (`$I`/`$R` metadata), so squid only asks it to
+/// recycle the item and never touches the bin directory itself.
+#[cfg(windows)]
+mod recycle_bin {
+    use crate::error::{Result, SquidError};
+    use std::io;
+    use std::path::Path;
+
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::E_INVALIDARG;
+    use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::{
+        FileOperation, IFileOperation, IShellItem, SHCreateItemFromParsingName, FOF_NOCONFIRMATION,
+        FOF_NOCONFIRMMKDIR, FOF_NOERRORUI, FOF_SILENT,
+    };
+
+    fn to_wide(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    pub fn move_to_recycle_bin(path: &Path) -> Result<()> {
+        // IFileOperation needs a COM apartment. The engine deletes from a
+        // dedicated worker, so we own the lifetime here unless the thread is
+        // already initialised in a different model.
+        let init = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        let uninit = init != RPC_E_CHANGED_MODE;
+        let result = unsafe { recycle_inner(path) };
+        if uninit {
+            unsafe { CoUninitialize() };
+        }
+        result.map_err(|err| SquidError::Io {
+            path: path.to_path_buf(),
+            source: io::Error::from_raw_os_error(err.code().0),
+        })
+    }
+
+    unsafe fn recycle_inner(path: &Path) -> windows::core::Result<()> {
+        // IShellItem parsing does not accept verbatim (`\\?\`) paths.
+        let display = path
+            .to_str()
+            .ok_or_else(|| windows::core::Error::from_hresult(E_INVALIDARG))?;
+        let wide = to_wide(display);
+        let operation: IFileOperation =
+            CoCreateInstance(&FileOperation, None, CLSCTX_INPROC_SERVER)?;
+        operation.SetOperationFlags(
+            FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_NOCONFIRMMKDIR,
+        )?;
+        let item = SHCreateItemFromParsingName::<
+            PCWSTR,
+            Option<&windows::Win32::System::Com::IBindCtx>,
+            IShellItem,
+        >(PCWSTR(wide.as_ptr()), None)?;
+        operation.DeleteItem(Some(&item), None)?;
+        operation.PerformOperations()
     }
 }

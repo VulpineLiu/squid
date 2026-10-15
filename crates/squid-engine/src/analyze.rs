@@ -342,7 +342,7 @@ fn is_mountpoint(path: &Path) -> bool {
     #[cfg(not(target_os = "macos"))]
     {
         const SKIP: &[&str] = &["/dev", "/proc", "/sys", "/run", "/snap", "/mnt", "/media"];
-        return SKIP.iter().any(|skip| path.as_os_str() == *skip);
+        SKIP.iter().any(|skip| path.as_os_str() == *skip)
     }
 }
 

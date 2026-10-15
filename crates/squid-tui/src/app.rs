@@ -475,6 +475,9 @@ pub enum ConfirmAction {
 /// dialog closed, no toast, no log, app still installed. One enum makes the
 /// "uninstall approved but the plan is missing" state unrepresentable.
 #[derive(Clone, Debug)]
+// The item list is boxed where the approval is stored; the variants stay
+// intentionally plain data for the dialog code.
+#[allow(clippy::large_enum_variant)]
 pub enum Approval {
     Items {
         items: Vec<CleanupItem>,

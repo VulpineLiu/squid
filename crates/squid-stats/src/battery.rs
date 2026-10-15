@@ -192,6 +192,7 @@ fn linux_battery() -> Option<Battery> {
     })
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn parse_hhmm(text: &str) -> Option<u64> {
     let (hours, minutes) = text.split_once(':')?;
     let hours: u64 = hours.parse().ok()?;
@@ -228,6 +229,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn hhmm_parsing() {
         assert_eq!(parse_hhmm("4:12"), Some(252));
         assert_eq!(parse_hhmm("0:00"), Some(0));

@@ -1,0 +1,53 @@
+# squid CI.
+#
+# The windows cross-check is the important one for portability: `cargo check`
+# against the MSVC target needs no linker and no Windows SDK, so a plain Linux
+# runner compiles the entire Windows code path (squid-core recycle bin,
+# squid-platform registry adapter, ...) and catches regressions. Real builds
+# and test runs happen on the windows-latest runner below, or on any Windows
+# machine via `scripts/ci-windows.ps1`.
+
+stages: [check]
+
+variables:
+  CARGO_TERM_COLOR: always
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+
+default:
+  interruptible: true
+
+rust-lint-test:
+  stage: check
+  image: rust:1.85
+  cache:
+    key:
+      files: [Cargo.lock]
+    paths: [.cargo/registry, .cargo/index, target/]
+  script:
+    - rustup component add rustfmt clippy
+    - cargo fmt --all -- --check
+    - cargo clippy --workspace --all-targets -- -D warnings
+    - cargo test --workspace
+
+windows-cross-check:
+  stage: check
+  image: rust:1.85
+  cache:
+    key:
+      files: [Cargo.lock]
+    policy: pull
+    paths: [.cargo/registry, .cargo/index, target/]
+  script:
+    - rustup target add x86_64-pc-windows-msvc
+    - cargo check --workspace --all-targets --target x86_64-pc-windows-msvc
+
+# Needs a registered Windows GitLab runner (tag: windows). Not required for
+# merge until the Windows port is declared stable.
+windows-build-test:
+  stage: check
+  tags: [windows]
+  rules:
+    - when: manual
+      allow_failure: true
+  script:
+    - pwsh -File scripts/ci-windows.ps1

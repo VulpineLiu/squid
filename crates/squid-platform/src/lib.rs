@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 pub mod apps;
 pub mod leftovers;
+#[cfg(unix)]
 pub mod volumes;
 
 #[cfg(target_os = "linux")]
@@ -163,7 +164,7 @@ pub fn current() -> Box<dyn Platform> {
     }
     #[cfg(windows)]
     {
-        Box::new(windows::Windows::default())
+        Box::new(windows::Windows)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
@@ -208,7 +209,8 @@ impl Platform for Unsupported {
     }
 }
 
-/// Convenience: is this path owned by the effective user?
+/// Convenience: can the current user write this path?
+#[cfg(not(windows))]
 pub fn is_user_writable(path: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     match std::fs::metadata(path) {
@@ -219,6 +221,16 @@ pub fn is_user_writable(path: &Path) -> bool {
             }
             meta.uid() == uid && meta.mode() & 0o200 != 0
         }
+        Err(_) => false,
+    }
+}
+
+/// Windows has no uid; the read-only attribute is the portable signal and
+/// ACL checks would need a token walk we cannot afford per path.
+#[cfg(windows)]
+pub fn is_user_writable(path: &Path) -> bool {
+    match std::fs::metadata(path) {
+        Ok(meta) => !meta.permissions().readonly(),
         Err(_) => false,
     }
 }

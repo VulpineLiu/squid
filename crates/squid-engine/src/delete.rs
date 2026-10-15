@@ -106,8 +106,10 @@ pub fn execute(
         // Resolve the Trash destination *before* moving so the ledger can
         // reverse the move later. `trash_target_for` only invents a name that
         // does not exist yet, so this matches what `remove_item_with` does.
+        // On Windows the shell owns the Recycle Bin bookkeeping and returns
+        // `None`; restore then falls back to the Recycle Bin UI.
         let trash_destination = match job.mode {
-            DeleteMode::Trash => Some(fs::trash_target_for(&item.path)),
+            DeleteMode::Trash => fs::trash_target_for(&item.path),
             DeleteMode::Permanent => None,
         };
 
@@ -125,7 +127,7 @@ pub fn execute(
                     kind: item.kind,
                     logical: item.size.0,
                     allocated: item.allocated.0,
-                    trash_path: trash_destination.filter(|_| job.mode == DeleteMode::Trash),
+                    trash_path: trash_destination,
                     category: Some(item.category.id().to_string()),
                 });
             }
@@ -272,7 +274,12 @@ mod tests {
     /// Trash is the default mode, so the undo path has to work end to end:
     /// delete → the file leaves its folder and lands in the Trash → `undo`
     /// puts it back with its bytes intact.
+    ///
+    /// Unix-only: on Windows the shell Recycle Bin owns the destination, so
+    /// the ledger records no physical path and restore goes through the
+    /// Recycle Bin UI instead of `ledger::restore_session`.
     #[test]
+    #[cfg(unix)]
     fn trashing_then_restoring_round_trips_the_file() {
         isolate_state();
         let dir = scratch_dir("undo");

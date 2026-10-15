@@ -126,6 +126,7 @@ impl HostInfo {
     }
 }
 
+#[cfg(unix)]
 fn hostname() -> String {
     const BUF: usize = 256;
     let mut buf = vec![0u8; BUF];
@@ -142,6 +143,11 @@ fn hostname() -> String {
     } else {
         name
     }
+}
+
+#[cfg(not(unix))]
+fn hostname() -> String {
+    std::env::var("COMPUTERNAME").unwrap_or_else(|_| "localhost".into())
 }
 
 /// Seconds → "3d 4h 12m".
