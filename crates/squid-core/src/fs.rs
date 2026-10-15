@@ -97,6 +97,48 @@ fn allocated_bytes(path: &Path, meta: &Metadata) -> u64 {
     }
 }
 
+/// UTF-16, NUL-terminated spelling for a Win32 path-taking API.
+///
+/// Two things the plain spelling gets wrong. It is lossless: `encode_wide`
+/// keeps every unit, where going through `String` would mangle anything a
+/// `OsString` can hold but a `String` cannot. And past 260 characters the
+/// legacy limit answers `ERROR_PATH_NOT_FOUND`, which the deep `node_modules`
+/// trees this tool exists to measure cross routinely.
+///
+/// The verbatim prefix buys the long path by also switching off normalisation,
+/// so it is only honest on an absolute, dot-free path. The walk builds exactly
+/// that; `squid purge ..\..\somewhere` does not, so anything else keeps the
+/// plain spelling and takes the failure — which lands on `meta.len()`.
+/// The systemic fix is a `longPathAware` manifest on the executable; until
+/// then every other Win32 call here still sees the old limit.
+#[cfg(windows)]
+fn wide_path(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Component;
+
+    let raw: Vec<u16> = path.as_os_str().encode_wide().collect();
+    let quotable = path.is_absolute()
+        && !path
+            .components()
+            .any(|c| matches!(c, Component::ParentDir | Component::CurDir));
+    let verbatim = &[0x5C, 0x5C, 0x3F, 0x5C]; // `\\?\`
+    let unc = &[0x5C, 0x5C]; // `\\`
+    let needs_prefix = raw.len() >= 250 && quotable && !raw.starts_with(verbatim);
+
+    let mut wide: Vec<u16> = if !needs_prefix {
+        raw
+    } else if raw.starts_with(unc) {
+        r"\\?\UNC\"
+            .encode_utf16()
+            .chain(raw[2..].iter().copied())
+            .collect()
+    } else {
+        r"\\?\".encode_utf16().chain(raw.iter().copied()).collect()
+    };
+    wide.push(0);
+    wide
+}
+
 /// `GetCompressedFileSizeW`, the one cheap Windows answer to "how many bytes
 /// did the volume hand over".
 ///
@@ -131,11 +173,7 @@ fn windows_allocation(path: &Path, meta: &Metadata) -> u64 {
         GetCompressedFileSizeW, FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_SPARSE_FILE,
     };
 
-    let wide: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
-        .chain(Some(0))
-        .collect();
+    let wide = wide_path(path);
     let mut high = 0u32;
     let low = unsafe { GetCompressedFileSizeW(PCWSTR(wide.as_ptr()), Some(&mut high)) };
     // The API signals failure with 0xFFFFFFFF, then clears the last error on
@@ -643,23 +681,49 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// Scratch directory that goes away even when an assertion panics halfway
+    /// through the test.
+    ///
+    /// This is not housekeeping: a file extended with `set_len` is charged as
+    /// if it were written in full, so a fixture that survives a failure sits on
+    /// a real disk at its full logical size. One did — 11 GB of them, in
+    /// `AppData\Local\Temp`, where squid then did exactly the right thing and
+    /// offered them up as Temp junk.
+    struct TempRoot {
+        path: PathBuf,
+    }
+
+    impl TempRoot {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("squid-{tag}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("scratch dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
     #[test]
     fn measures_contents_and_path() {
-        let root = std::env::temp_dir().join(format!("squid-size-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
+        let tmp = TempRoot::new("size");
+        let root = &tmp.path;
         fs::create_dir_all(root.join("a/b")).unwrap();
         fs::write(root.join("a/b/file.bin"), vec![7u8; 4096]).unwrap();
 
-        let whole = measure(&root, ItemKind::Path);
+        let whole = measure(root, ItemKind::Path);
         assert!(whole.logical.as_u64() >= 4096);
         assert_eq!(whole.files, 1);
 
         // `Contents` still counts the children; the directory entry has no size
         // of its own, so totals match but the top dir is not counted.
-        let contents = measure(&root, ItemKind::Contents);
+        let contents = measure(root, ItemKind::Contents);
         assert_eq!(contents.files, 1);
         assert!(contents.dirs < whole.dirs);
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// A thin-provisioned disk image is the reason `max(logical, allocated)`
@@ -672,9 +736,8 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_sparse_file_counts_for_what_it_really_uses() {
-        let root = std::env::temp_dir().join(format!("squid-sparse-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
+        let tmp = TempRoot::new("sparse");
+        let root = &tmp.path;
         // One gibibyte is plenty to show the property and small enough that a
         // nearly full disk can still extend to it.
         const SPARSE_LEN: u64 = 1 << 30;
@@ -684,7 +747,6 @@ mod tests {
             // Volumes with a space-reservation filter answer `SetEndOfFile`
             // with ERROR_DISK_FULL instead of handing out a hole.
             eprintln!("skipped: this volume will not extend a file without the space");
-            let _ = fs::remove_dir_all(&root);
             return;
         }
         drop(file);
@@ -694,7 +756,7 @@ mod tests {
         std::io::Write::write_all(&mut hole, &[3u8; 4096]).unwrap();
         drop(hole);
 
-        let info = measure(&root, ItemKind::Path);
+        let info = measure(root, ItemKind::Path);
         assert_eq!(info.logical, Bytes(SPARSE_LEN), "logical length is 1 GiB");
         assert!(
             info.on_disk().as_u64() * 100 < info.logical.as_u64(),
@@ -703,7 +765,6 @@ mod tests {
             info.on_disk(),
             info.logical
         );
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// NTFS is the other way round: extending a file really does allocate the
@@ -723,9 +784,8 @@ mod tests {
         use std::os::windows::fs::MetadataExt;
         use std::process::Command;
 
-        let root = std::env::temp_dir().join(format!("squid-compressed-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
+        let tmp = TempRoot::new("compressed");
+        let root = &tmp.path;
         // A short repeating period: compresses several fold, so the assertion
         // cannot pass merely because a volume ignored the request the way
         // random bytes would let it.
@@ -738,7 +798,7 @@ mod tests {
         // needs quoting.
         let ran = Command::new("compact")
             .args(["/c", "/i", "/s:."])
-            .current_dir(&root)
+            .current_dir(root)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
@@ -748,11 +808,10 @@ mod tests {
             .unwrap_or(false);
         if !ran.map(|status| status.success()).unwrap_or(false) || !marked {
             eprintln!("skipped: this volume will not compress the fixture");
-            let _ = fs::remove_dir_all(&root);
             return;
         }
 
-        let info = measure(&root, ItemKind::Path);
+        let info = measure(root, ItemKind::Path);
         assert_eq!(
             info.logical,
             Bytes(LEN as u64),
@@ -765,33 +824,37 @@ mod tests {
             info.on_disk(),
             info.logical
         );
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// The invariant both platforms must satisfy: a file that was really
     /// written occupies at least what it logically holds. A port that forgets
     /// to answer the allocation question returns 0 here, and every "freed"
     /// number downstream quietly becomes the logical size.
+    ///
+    /// Written end to end, deliberately not extended with `set_len`: a hole
+    /// makes the expected answer platform-specific again (POSIX may or may not
+    /// count reserved blocks, and macOS was observed to disagree with itself
+    /// depending on when the stat landed), and holes are what the two tests
+    /// above are for.
     #[test]
     fn a_written_file_reports_what_the_volume_gave_it() {
-        let root = std::env::temp_dir().join(format!("squid-alloc-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        const SOLID_LEN: u64 = 8 << 20;
+        let tmp = TempRoot::new("alloc");
+        let root = &tmp.path;
+        const SOLID_LEN: usize = 8 << 20;
         let mut file = fs::File::create(root.join("solid.bin")).unwrap();
-        std::io::Write::write_all(&mut file, &[9u8; 1 << 20]).unwrap();
-        file.set_len(SOLID_LEN).unwrap();
+        let payload = vec![9u8; SOLID_LEN];
+        std::io::Write::write_all(&mut file, &payload).unwrap();
+        file.sync_all().unwrap();
         drop(file);
 
-        let info = measure(&root, ItemKind::Path);
-        assert_eq!(info.logical, Bytes(SOLID_LEN));
+        let info = measure(root, ItemKind::Path);
+        assert_eq!(info.logical, Bytes(SOLID_LEN as u64));
         assert!(
             info.allocated >= info.logical,
             "a freshly written file reported {} of {} allocated; clusters only round up",
             info.allocated,
             info.logical
         );
-        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -804,14 +867,12 @@ mod tests {
     #[test]
     #[cfg(not(windows))]
     fn trash_target_avoids_collisions() {
-        let dir = std::env::temp_dir().join(format!("squid-trash-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+        let tmp = TempRoot::new("trash");
+        let dir = &tmp.path;
         let victim = dir.join("victim");
         fs::write(&victim, b"hi").unwrap();
         let first = trash_target_for(&victim).expect("unix trash targets are predictable");
         assert!(first.starts_with(trash_dir_for(&victim)));
-        let _ = fs::remove_dir_all(&dir);
     }
 }
 
@@ -825,15 +886,15 @@ mod recycle_bin {
     use std::path::Path;
 
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::E_INVALIDARG;
     use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
+    use windows::Win32::Foundation::{E_ABORT, E_INVALIDARG};
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED,
     };
     use windows::Win32::UI::Shell::{
-        FileOperation, IFileOperation, IShellItem, SHCreateItemFromParsingName, FOF_NOCONFIRMATION,
-        FOF_NOCONFIRMMKDIR, FOF_NOERRORUI, FOF_SILENT,
+        FileOperation, IFileOperation, IShellItem, SHCreateItemFromParsingName, FOF_ALLOWUNDO,
+        FOF_NOCONFIRMATION, FOF_NOCONFIRMMKDIR, FOF_NOERRORUI, FOF_SILENT,
     };
 
     fn to_wide(value: &str) -> Vec<u16> {
@@ -864,8 +925,15 @@ mod recycle_bin {
         let wide = to_wide(display);
         let operation: IFileOperation =
             CoCreateInstance(&FileOperation, None, CLSCTX_INPROC_SERVER)?;
+        // `FOF_ALLOWUNDO` is the whole point, and it is not implied. Measured on
+        // a real box: without it `DeleteItem` returns S_OK, the bytes are gone
+        // from the disk, `C:\$Recycle.Bin` does not move by a single byte, and
+        // squid's ledger says `mode: trash` — a cleanup that silently broke its
+        // own "everything goes to the Trash first" promise. `IFileOperation`
+        // also has a `RecycleItem` verb, which would say it out loud, but
+        // windows-rs does not project that vtable slot yet.
         operation.SetOperationFlags(
-            FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_NOCONFIRMMKDIR,
+            FOF_ALLOWUNDO | FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_NOCONFIRMMKDIR,
         )?;
         let item = SHCreateItemFromParsingName::<
             PCWSTR,
@@ -873,6 +941,14 @@ mod recycle_bin {
             IShellItem,
         >(PCWSTR(wide.as_ptr()), None)?;
         operation.DeleteItem(Some(&item), None)?;
-        operation.PerformOperations()
+        operation.PerformOperations()?;
+        // A shell verb can report S_OK and still have declined the work — the
+        // progress sink abort path, a cancelled UAC prompt. Ask, because
+        // claiming a Trash entry that does not exist is how undo later tells
+        // the user to go looking in a Recycle Bin that never got the file.
+        if operation.GetAnyOperationsAborted()?.as_bool() {
+            return Err(windows::core::Error::from_hresult(E_ABORT));
+        }
+        Ok(())
     }
 }

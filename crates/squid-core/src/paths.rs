@@ -43,7 +43,12 @@ pub fn pretty(path: &Path) -> String {
         return "~".to_string();
     }
     match relative_below(&home, path) {
-        Some(rel) => format!("~/{}", rel.display()),
+        Some(rel) => {
+            // Windows renders the tail with `\`, so `~/AppData\Roaming` reads
+            // like a typo. Follow the separator the platform itself uses.
+            let sep = if cfg!(windows) { '\\' } else { '/' };
+            format!("~{sep}{}", rel.display())
+        }
         None => path.display().to_string(),
     }
 }
