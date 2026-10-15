@@ -18,8 +18,10 @@ macOS 磁盘清理与系统监控工具：清理缓存与系统垃圾、卸载 A
 - 语言：Rust 1.80+，workspace 由 7 个 crate 组成
 - 界面：中英双语文案，跟随系统语言；真彩色 / 256 色 / 无色三档自动适配
 - 结构：命令行与 TUI 共用同一套扫描与删除通道，行为、确认、账本完全一致
-- 平台：macOS 完整支持；Windows 10 / 11 用同一个构建，已在 Windows 10 真机验证
-  （回收站删除与还原、中英文 TUI 在真实控制台下的渲染）；UAC 提权与 Linux 见[路线图](#路线图)
+- 平台：macOS 完整支持；Windows 10 / 11 用同一个构建，已在 Windows 10（1909）真机验证
+  （回收站删除与还原、中英文 TUI 在 legacy conhost + cp936 下的排版：界面启动时自己量一次
+  「一个字形在这里占几格」，被收两格就整屏改用 ASCII 边框，不再叠成花屏）；
+  UAC 提权与 Linux 见[路线图](#路线图)
 
 ---
 
@@ -302,7 +304,7 @@ Homebrew formula 的校验和。
 | --- | --- | --- |
 | macOS | 完整实现（规则、App 残留、卷、卸载钩子）| Developer ID 签名与公证流水线 |
 | Linux | `squid-platform/src/linux.rs` 已实现 `.desktop` / Flatpak / Snap 应用清单与 XDG 残留目录 | `rules/linux.toml`、真机验证 |
-| Windows | 平台层已实现：注册表卸载表（HKLM 64/32 位 + HKCU）、AppData 残留目录、卷枚举、回收站（`IFileOperation`）；安全层按 Windows 语义比较路径（大小写不敏感、盘符根/`$Recycle.Bin` 等硬封禁）；内置 30 条清理规则（临时文件、WER 崩溃报告、浏览器/Shell/开发缓存、Windows.old 等）；CI 每次提交做 MSVC 目标交叉编译检查；已在局域网内的真机验证通过：回收站真实删除（按卷核算字节数、可在资源管理器里还原）、`undo` 的措辞与行为、`--json` 输出只含一份 JSON、TUI 在 OpenSSH 分配的 ConPTY 下中英文都排版正确 | UAC 提权、长路径 manifest、winget 发布 |
+| Windows | 平台层已实现：注册表卸载表（HKLM 64/32 位 + HKCU）、AppData 残留目录、卷枚举、回收站（`IFileOperation`）；安全层按 Windows 语义比较路径（大小写不敏感、盘符根/`$Recycle.Bin` 等硬封禁）；内置 30 条清理规则（临时文件、WER 崩溃报告、浏览器/Shell/开发缓存、Windows.old 等）；CI 每次提交做 MSVC 目标交叉编译检查；已在局域网内的真机验证通过：回收站真实删除（按卷核算字节数、可在资源管理器里还原）、`undo` 的措辞与行为、`--json` 输出只含一份 JSON、TUI 的排版由判据守住而不是靠肉眼：`win-tui-capture.sh` 把真机 ConPTY 吐出的原始 ANSI 抓回本地用 pyte 复放，`tui-frame-check.py` 逐帧问「右边框落在第几列」，`--selftest` 先证明判据本身没坏 | UAC 提权、长路径 manifest、winget 发布 |
 
 其他：规则贡献流程与规则覆盖度基准、TUI 主题自定义、Linux/Windows 冒烟测试。
 

@@ -78,6 +78,8 @@ fn running_executables(&self) -> Vec<String>;                    // 供 skip_if_
 - 匹配前大小写要归一化（`Xmind` vs `xmind`）；
 - `KNOWN_SUFFIXES` 带点而文件名切分后不带点，两侧必须用同一种归一化形式比较（`has_known_suffix`）。另外 `.pdf/.png/.mp3` 这类文档后缀绝不能出现在「按名称匹配」的后缀表里，否则 `Xmind-notes.pdf` 会被当成残留删掉。
 
+`console` 不在 `Platform` trait 里，但它回答的是同一类问题——「这台机器上的现实是什么」：控制台自称的窗口尺寸、它背后那块屏幕缓冲区的尺寸、它最大允许多大的窗口，以及一个「按 Unicode 只有 1 列宽」的字符在这里到底占几格。legacy conhost 在这两件事上都会给出错答案：进备用屏换掉的只是「正在显示的那块缓冲区」，进程的 stdout 句柄仍指着没人看的那一块，于是窗口比真正存在的格子更宽，写出一行的格子就落到下一行开头；cp936 码页又把 `─│·…↑↓✓` 这批 East Asian Ambiguous 字符收两格，而 ratatui 按一格排版。两者最后都表现为同一种花屏——屏上同时留着好几帧。所以 TUI 每一拍重新量一次尺寸（缓冲区被滚走、窗口被人拖大都算变化，只有真的变了才擦屏重画），并在量到「两格」时把整屏退成 ASCII 边框；`SQUID_SYMBOL_CELLS` 供人强制指定，`SQUID_CONSOLE_TRACE` 把控制台自己的几个数字写进文件留证。
+
 ### squid-rules
 
 规则是 TOML，内置于 `crates/squid-rules/rules/macos.toml`（39 条），通过 `include_str!` 编译进二进制；用户规则从 `<config_dir>/rules/*.toml` 合并，同 `id` 覆盖内置。
@@ -221,11 +223,11 @@ rules/*.toml ┘                         │
 5. 回收站语义：`fs::trash_target_for` 需要该系统的回收站位置与命名规则（macOS 是 `~/.Trash` 与卷根 `.Trashes/<uid>`；Linux 是 XDG `~/.local/share/Trash/files`；Windows 需要 `$Recycle.Bin` 或 Shell API）。
 6. 提权：macOS/Linux 用 `sudo` 重跑（`needs_admin` 的规则在非 root 时只报告不执行）；Windows 需要 UAC。
 
-现状：macOS 完整；Linux 有 `.desktop`/Flatpak/Snap 与 XDG 残留实现，缺规则文件与真机验证；Windows 是占位实现。
+现状：macOS 完整；Linux 有 `.desktop`/Flatpak/Snap 与 XDG 残留实现，缺规则文件与真机验证；Windows 平台层已实现并在真机跑通（注册表卸载表、AppData 残留、卷枚举、`IFileOperation` 回收站、`console` 的尺寸与字形探测），缺 UAC 提权与长路径 manifest。
 
 ## 测试策略
 
-86 个测试（`cargo test --workspace`）。三类：
+166 个测试（`cargo test --workspace`）。三类：
 
 - **纯逻辑**：字节格式化、glob 与锚点、规则解析、名称匹配、安全策略拒绝表 —— 这些是最有价值的，因为它们把「曾经出过的事故」变成断言。
 - **引擎级**：在临时目录 / `~/Library/Caches/squid-delete-test-*` 里搭沙盒，跑真实 scan + delete。
