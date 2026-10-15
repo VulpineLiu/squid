@@ -150,6 +150,79 @@ pub trait Platform: Send + Sync {
 
     /// Open the system Trash (Finder / explorer / xdg-open).
     fn reveal_trash(&self) {}
+
+    /// What would happen to a file sent to the Trash *right now*. Cheap: one
+    /// metadata check at most, since the status line calls it per render.
+    fn trash_target(&self) -> TrashTarget {
+        TrashTarget::Unreachable
+    }
+
+    /// What to call the machine when squid talks to a person about it. This is
+    /// a property of the platform, not of the locale: the Chinese UI on a
+    /// Windows box must not inherit "这台 Mac" from the macOS build either.
+    fn device(&self) -> Device {
+        Device::Machine
+    }
+
+    /// What the operating system calls the place deleted files wait in.
+    ///
+    /// Explorer says 回收站 / "Recycle Bin", and that is the only name a Windows
+    /// user can act on: there is no Trash folder to open, so copy that promises
+    /// "empty the Trash" points at something the user cannot find.
+    fn bin_noun(&self) -> BinNoun {
+        BinNoun::Trash
+    }
+}
+
+/// What the operating system calls the place deleted files wait in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinNoun {
+    /// macOS and the freedesktop trash: 「废纸篓」.
+    Trash,
+    /// Windows: 回收站.
+    RecycleBin,
+}
+
+impl BinNoun {
+    /// The name as an English speaker of the interface would see it.
+    pub fn en(self) -> &'static str {
+        match self {
+            BinNoun::Trash => "Trash",
+            BinNoun::RecycleBin => "Recycle Bin",
+        }
+    }
+
+    /// The name as a Chinese speaker of the interface would see it.
+    pub fn zh(self) -> &'static str {
+        match self {
+            BinNoun::Trash => "废纸篓",
+            BinNoun::RecycleBin => "回收站",
+        }
+    }
+}
+
+/// What the machine squid runs on is called when squid addresses a person.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Device {
+    Mac,
+    Pc,
+    Machine,
+}
+
+/// Where a file sent to the Trash actually lands, as far as the user can tell.
+///
+/// `doctor` used to probe `~/.Trash` unconditionally and conclude on Windows
+/// that "deletions fall back to permanent", which was wrong: the shell Recycle
+/// Bin is there, it is just not a folder squid can name or list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TrashTarget {
+    /// The shell Recycle Bin. Reachable and restorable, but the shell owns the
+    /// bookkeeping, so there is no folder path to show.
+    RecycleBin,
+    /// A real trash folder that exists right now.
+    Folder(PathBuf),
+    /// Nothing reachable — sending to the Trash would end up permanent.
+    Unreachable,
 }
 
 /// Concrete adapter for the host we are running on.

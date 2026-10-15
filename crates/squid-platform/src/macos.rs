@@ -1,7 +1,9 @@
 //! macOS adapter: `.app` bundles, sandbox containers, launch services.
 
 use crate::apps::{app_from_bundle, discover_bundles};
-use crate::{AppSource, LeftoverRoot, LifecycleReport, Naming, Platform, PlatformId};
+use crate::{
+    AppSource, Device, LeftoverRoot, LifecycleReport, Naming, Platform, PlatformId, TrashTarget,
+};
 use rayon::prelude::*;
 use squid_core::progress::CancelToken;
 use squid_core::{AppInfo, Category, Result, SquidError, Volume};
@@ -318,6 +320,19 @@ impl Platform for MacOs {
 
     fn reveal_trash(&self) {
         quiet("open", &[&home().join(".Trash").to_string_lossy()]);
+    }
+
+    fn device(&self) -> Device {
+        Device::Mac
+    }
+
+    fn trash_target(&self) -> TrashTarget {
+        let trash = home().join(".Trash");
+        if trash.is_dir() {
+            TrashTarget::Folder(trash)
+        } else {
+            TrashTarget::Unreachable
+        }
     }
 
     fn inspect_path(&self, path: &Path) -> Option<String> {

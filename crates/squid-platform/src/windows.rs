@@ -2,7 +2,10 @@
 //! (HKLM 64-bit + 32-bit views, HKCU), leftovers from the well-known
 //! AppData/ProgramData folders, volumes and processes from `sysinfo`.
 
-use crate::{AppSource, LeftoverRoot, LifecycleReport, Naming, Platform, PlatformId};
+use crate::{
+    AppSource, BinNoun, Device, LeftoverRoot, LifecycleReport, Naming, Platform, PlatformId,
+    TrashTarget,
+};
 use squid_core::progress::CancelToken;
 use squid_core::{AppInfo, Bytes, Category, Result, Volume};
 use std::path::{Path, PathBuf};
@@ -296,5 +299,21 @@ impl Platform for Windows {
         let _ = Command::new("explorer")
             .arg("shell:RecycleBinFolder")
             .spawn();
+    }
+
+    fn device(&self) -> Device {
+        Device::Pc
+    }
+
+    fn bin_noun(&self) -> BinNoun {
+        BinNoun::RecycleBin
+    }
+
+    fn trash_target(&self) -> TrashTarget {
+        // Every interactive Windows desktop has a Recycle Bin for its drive;
+        // squid writes it through `IFileOperation` rather than a folder, so
+        // there is no path to report. `SHEmptyRecycleBinW` failing is the only
+        // signal that the shell refused, and that is a per-deletion error.
+        TrashTarget::RecycleBin
     }
 }

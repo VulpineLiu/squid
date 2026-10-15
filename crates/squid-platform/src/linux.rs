@@ -1,6 +1,6 @@
 //! Linux adapter: `.desktop` entries, Flatpak/Snap awareness, XDG leftovers.
 
-use crate::{AppSource, LeftoverRoot, LifecycleReport, Naming, Platform, PlatformId};
+use crate::{AppSource, LeftoverRoot, LifecycleReport, Naming, Platform, PlatformId, TrashTarget};
 use squid_core::progress::CancelToken;
 use squid_core::{AppInfo, Bytes, Category, Result, Volume};
 use std::collections::BTreeMap;
@@ -306,5 +306,19 @@ impl Platform for Linux {
             .arg(home().join(".local/share/Trash/files"))
             .spawn();
         let _ = trash;
+    }
+
+    fn trash_target(&self) -> TrashTarget {
+        // The XDG spec puts it under $XDG_DATA_HOME; in practice ~/.local/share.
+        let root = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .unwrap_or_else(|| home().join(".local").join("share"));
+        let trash = root.join("Trash");
+        if trash.is_dir() {
+            TrashTarget::Folder(trash)
+        } else {
+            TrashTarget::Unreachable
+        }
     }
 }
