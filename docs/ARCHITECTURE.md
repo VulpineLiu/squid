@@ -34,7 +34,7 @@
        └──────┬─────┘ └─┬────────┘ │
               │         │          │
          ┌────▼─────────▼───────┐  │   ┌────────────┐
-         │     squid-engine     │◄─┼───┤ squid-stats│ ← 只依赖 core
+         │     squid-engine     │◄─┼───┤ squid-stats│ ← 依赖 core 与 platform
          └────┬────────────┬────┘  │   └─────┬──────┘
       ┌───────▼──┐    ┌────▼───────▼──┐      │
       │ squid-tui│    │   squid-cli   │◄─────┘
@@ -80,6 +80,8 @@ fn running_executables(&self) -> Vec<String>;                    // 供 skip_if_
 
 `console` 不在 `Platform` trait 里，但它回答的是同一类问题——「这台机器上的现实是什么」：控制台自称的窗口尺寸、它背后那块屏幕缓冲区的尺寸、它最大允许多大的窗口，以及一个「按 Unicode 只有 1 列宽」的字符在这里到底占几格。legacy conhost 在这两件事上都会给出错答案：进备用屏换掉的只是「正在显示的那块缓冲区」，进程的 stdout 句柄仍指着没人看的那一块，于是窗口比真正存在的格子更宽，写出一行的格子就落到下一行开头；cp936 码页又把 `─│·…↑↓✓` 这批 East Asian Ambiguous 字符收两格，而 ratatui 按一格排版。两者最后都表现为同一种花屏——屏上同时留着好几帧。所以 TUI 每一拍重新量一次尺寸（缓冲区被滚走、窗口被人拖大都算变化，只有真的变了才擦屏重画）。字形的价格归 `currency`：`Exchange` 按码位存一张兑换表，只在控制台确实多收钱时建，`afford` 在单格终端上原样返回。价是谁问的要分开说——`console::prices` 逐字符把答案量回来给界面，`squid_tui::glyphs` 因此只剩 ratatui 那一半：`witnesses` 从界面源码和 widget 里收集本界面会画的所有歧义字符，`Carry` 走一遍成品帧把付不起的字符换成 ASCII；`console::prices_unasked` 只取码页隐含的悲观答案给命令行，因为测量要往控制台上正显示的东西写一个字符再擦掉，而命令行是那台屏幕上的客人，它不该买这个答案，代价是在单格终端被码页误伤的机器上少一个 `█`、多一个 `#`。两边各有一条测试钉住「画的字符」与「问过的字符」是同一份：界面是 `every_glyph_this_interface_draws_has_a_price` 和 `the_probe_asks_the_price_of_everything_that_ends_up_on_the_screen`，命令行是 `no_line_of_chrome_escapes_the_counter`，它扫描 `main.rs`，要求除 JSON 和空行之外每个 print 都过 `priced`。`SQUID_SYMBOL_CELLS` 供人强制指定，`SQUID_CONSOLE_TRACE` 把控制台自己的几个数字写进文件留证。
 
+`process` 也只回答一个「这台机器上怎么停掉一个进程」的问题，而它值一个模块的理由是「为什么没停掉」必须由操作系统来回答。`force_stop(pid)` 在 unix 上发 `SIGKILL`，在 Windows 上 `OpenProcess(PROCESS_TERMINATE)` + `TerminateProcess`，两边是同一个承诺：立刻停，不保存任何东西——所以界面在三套系统上都写「强制结束」，而不是它并没做过的「退出」。`sysinfo` 的 `Process::kill()` 也能办成这件事，但它只回一个 `false`，而 `EPERM`（你不是那个用户 → 换个提权的终端）和 `ESRCH`（它自己早走了 → 什么都不用做）要求的动作恰恰相反，把两种结果压成同一句报错，等于教用户从此不再信报错。规则也放在这里，因为操作系统并不拦下一切：非提权进程本来就碰不到 macOS 的 `WindowServer`，但提权后的 `squid` 在 Windows 上是真的能打开 `csrss.exe` 的，一次按错的回车换来一次不带询问的重启，六个名字的表换这个结果是划算的（`svchost` 故意不在表里：它承载的服务用户确实可能要重启，且少一个也不至于起不来）。`pid_refusal` 与 `refusal` 拆成两个问题，因为它们被问的时刻不同：前者问的是界面手里那个数字，后者要等真正读到进程的名字。这个模块只对着 pid 说话——「此刻的 pid 还是不是用户读到的那个进程」是关于 sample 的问题，问在 sample 待着的地方。
+
 ### squid-rules
 
 规则是 TOML，内置于 `crates/squid-rules/rules/macos.toml`（39 条），通过 `include_str!` 编译进二进制；用户规则从 `<config_dir>/rules/*.toml` 合并，同 `id` 覆盖内置。
@@ -111,6 +113,8 @@ note = "Xcode 会重新生成。"
 ### squid-stats
 
 `Sampler::{new, prime, refresh}` 基于 `sysinfo`，两次采样之间才有 CPU%/网速，因此 `prime()` 是必须的预热步骤。产出 `SystemSnapshot{cpu, memory, network, disk, uptime_secs, top_processes, volumes, battery, host}` 与 `TrendStore`（滚动历史，给 TUI 的迷你折线/柱状图）。`battery.rs`、`human_uptime()` 提供 iStat 式细节。
+
+界面既然能列出谁在跑，就会被要求停掉谁，`Sampler::stop(sample)` 是这件事唯一的入口。它先按 pid 挡掉 squid 自己、机器的第一个进程和 Windows 的 System，再用 `sample_of(pid)` 重读一次：读不到就是「已经不在了」，读到的名字对不上也算「已经不在了」（用户指着的那个进程确实没了，无论 pid 朝哪个方向移动），只有名字仍然相符，才轮到 `squid_platform::process::force_stop`。名字之所以能当这个凭据，靠的是 `top_processes`、`applications` 与 `sample_of` 共用同一个 `shown_name`——三处各自截一次尾段，凭据就有三份写法。`sample_of` 是公开的：它给的正是界面此刻会为这个 pid 画出来的那一行，测试拿它造一条诚实的行，界面将来只重画一行也用得上。键位是 `x`：它在文件面板上一直是「删除」，系统状态面板上没有可删的东西、只有进程，同样的手指落到同样的动词上。规则当场命中的那些（自己、第一个进程、Windows 的引导进程）直接 toast 原因、不弹确认框：为一个规则注定会拒绝的动作去要许可，是把确认框变成戏剧。
 
 ### squid-engine
 
@@ -246,7 +250,7 @@ TUI 的「按 d → 确认 → 执行」曾经出过一次典型的静默失败�
 
 修复方式不是补一行赋值，而是让非法状态无法表达：两个字段合并成
 `pending: Option<Approval>`，`Approval` 是 `Items { items, purge } | Plan(UninstallPlan) |
-UndoSession(String)` 三个变体。`ask_delete()` 必须构造其中一个才能打开确认框；确认框能打开，
+UndoSession(String) | StopProcess(ProcessSample)` 四个变体。多出来的那个是系统状态面板的「强制结束进程」，它同样必须先构造出自己才问得出确认框；它带的是 sample 而不是 pid，因为 pid 是重复发放的座位号、不是人：用户读到的是名字，会被杀掉的是号码，把两者分开的唯一办法是把它们一起带到执行处（复核在 `squid_stats::Sampler::stop`）。`ask_delete()` 与 `ask_stop_process()` 都必须构造其中一个才问得出确认框；确认框能打开，
 就必然有可执行的内容。`confirm_delete()` 对 `None` 的情况显式 toast「没有待确认的内容，请重新按 d」，
 把「静默」变成「可见」。`app.rs` 里那三个回归测试直接驱动 `ask_delete() → confirm_delete() → poll()`
 到任务结束，断言 `outcome.summary.removed == N`，覆盖卸载、清理/深度清理、以及空确认框三条路径。

@@ -626,7 +626,10 @@ fn hint_text(app: &App) -> String {
                 parts.push(s.t("enter open · f files", "回车进入 · f 大文件"));
                 parts.push(s.t("r refresh", "r 刷新"));
             }
-            Panel::Stats => parts.push(s.t("r refresh", "r 刷新")),
+            Panel::Stats => {
+                parts.push(s.t("r refresh", "r 刷新"));
+                parts.push(s.t("x stop process", "x 结束进程"));
+            }
             Panel::History => {
                 parts.push(s.t("u restore", "u 还原"));
                 parts.push(s.t("r refresh", "r 刷新"));
@@ -1820,6 +1823,13 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
         (
             "d".to_string(),
             s.t("clean what is checked", "清理已勾选项"),
+        ),
+        (
+            "x".to_string(),
+            s.t(
+                "stop the process on the system panel",
+                "在系统状态面板结束进程",
+            ),
         ),
         (
             "m".to_string(),

@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use squid_core::{Bytes, Volume};
+use squid_platform::process::StopError;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -317,6 +318,59 @@ impl Sampler {
         self.had_first_sample
     }
 
+    /// The row the panel would draw for one pid right now, or `None` once no
+    /// process holds that number.
+    ///
+    /// Re-reading one pid is cheap, and it is the only way to find out whether a
+    /// sample taken on an earlier beat still describes what is running: a row is
+    /// a claim about a moment, not about a process, because pids are handed out
+    /// again. [`Sampler::stop`] asks this question before it kills anything, and
+    /// a test or an interface that wants one honest row asks it the same way.
+    pub fn sample_of(&mut self, pid: u32) -> Option<ProcessSample> {
+        let key = sysinfo::Pid::from_u32(pid);
+        self.system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[key]),
+            true,
+            ProcessRefreshKind::nothing().with_cpu().with_memory(),
+        );
+        let process = self.system.process(key)?;
+        Some(ProcessSample {
+            pid,
+            name: shown_name(process.name()),
+            cpu: process.cpu_usage(),
+            memory: Bytes(process.memory()),
+        })
+    }
+
+    /// Force the process behind one sample to stop.
+    ///
+    /// The sample is what the user read; the pid inside it is what would be
+    /// killed, and those two are not the same promise. Pids are recycled, so a
+    /// list drawn a second ago can already be pointing a name at somebody
+    /// else's process. The pid is therefore read again here, the rule from
+    /// [`squid_platform::process::refusal`] is applied to the process that is
+    /// really there, and a name that no longer matches is reported as *gone* —
+    /// the thing that was pointed at is gone, whichever direction the pid moved.
+    ///
+    /// Nothing here asks the process politely. There is no TERM-then-KILL
+    /// handshake, because the interface says 强制结束 / force quit and a dialog
+    /// that promises the bytes on disk are the only thing kept.
+    pub fn stop(&mut self, target: &ProcessSample) -> Result<(), StopError> {
+        if let Some(rule) = squid_platform::process::pid_refusal(target.pid) {
+            return Err(StopError::Refused(rule));
+        }
+        let Some(current) = self.sample_of(target.pid) else {
+            return Err(StopError::Gone { pid: target.pid });
+        };
+        if let Some(rule) = squid_platform::process::refusal(target.pid, &current.name) {
+            return Err(StopError::Refused(rule));
+        }
+        if current.name != target.name {
+            return Err(StopError::Gone { pid: target.pid });
+        }
+        squid_platform::process::force_stop(target.pid)
+    }
+
     /// Per-application CPU totals. iStat Menus shows this next to the gauges.
     pub fn applications(&mut self, limit: usize) -> Vec<AppUsage> {
         self.system.refresh_processes_specifics(
@@ -327,13 +381,7 @@ impl Sampler {
         let mut merged: std::collections::HashMap<String, (f32, u64, usize, u32)> =
             std::collections::HashMap::new();
         for process in self.system.processes().values() {
-            let name = process
-                .name()
-                .to_string_lossy()
-                .split('/')
-                .next_back()
-                .unwrap_or("?")
-                .to_string();
+            let name = shown_name(process.name());
             let entry = merged
                 .entry(name)
                 .or_insert((0.0, 0, 0, process.pid().as_u32()));
@@ -587,19 +635,29 @@ fn disk_rates(disks: &Disks, seconds: f64) -> DiskRate {
     }
 }
 
+/// The name a process is listed by: the last component of whatever the OS
+/// handed over, which is a path on macOS and already a bare name on Windows.
+///
+/// One function because the name is also the proof. A sample is a snapshot of a
+/// pid at one moment, and pids are recycled; before squid stops anything it
+/// re-reads the pid and compares, which only means something if both sides
+/// spell the name the same way.
+fn shown_name(name: &std::ffi::OsStr) -> String {
+    name.to_string_lossy()
+        .split(['/', '\\'])
+        .next_back()
+        .filter(|part| !part.is_empty())
+        .unwrap_or("?")
+        .to_string()
+}
+
 fn top_processes(system: &System, limit: usize) -> Vec<ProcessSample> {
     let mut processes: Vec<ProcessSample> = system
         .processes()
         .values()
         .map(|process| ProcessSample {
             pid: process.pid().as_u32(),
-            name: process
-                .name()
-                .to_string_lossy()
-                .split('/')
-                .next_back()
-                .unwrap_or("?")
-                .to_string(),
+            name: shown_name(process.name()),
             cpu: process.cpu_usage(),
             memory: Bytes(process.memory()),
         })
@@ -790,5 +848,102 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(stats.percent_used(), 100);
+    }
+
+    /// The feature, end to end: a sample that still describes its pid stops it.
+    #[test]
+    fn a_process_stops_when_its_sample_asks_it_to() {
+        let mut sampler = Sampler::new();
+        let mut child = sleeper();
+        let sample = sample_of(&mut sampler, child.id());
+        assert!(
+            child.try_wait().expect("child is running").is_none(),
+            "the sleeper died on its own: {}",
+            sample.name
+        );
+        sampler
+            .stop(&sample)
+            .expect("stopping a child of this test must be allowed");
+        let status = child.wait().expect("the child is reaped");
+        assert!(!status.success(), "a stopped process exited cleanly");
+    }
+
+    /// The guard, end to end: a pid that no longer belongs to the name the user
+    /// read stops nothing at all.
+    ///
+    /// Pids are recycled, so this is not a hypothetical race — a list is drawn
+    /// when the panel opens and read from seconds later, which is long enough
+    /// for an app to close and a new one to be handed its number. Killing on the
+    /// number alone would punish whoever inherited it.
+    #[test]
+    fn a_sample_that_no_longer_describes_its_pid_stops_nothing() {
+        let mut sampler = Sampler::new();
+        let mut child = sleeper();
+        let pid = child.id();
+        let mut sample = sample_of(&mut sampler, pid);
+        sample.name = "WhateverWasOnScreen".into();
+        let error = sampler
+            .stop(&sample)
+            .expect_err("the name does not belong to this pid");
+        assert!(
+            matches!(error, StopError::Gone { pid: gone } if gone == pid),
+            "expected Gone({pid}), got {error:?}"
+        );
+        assert!(
+            child.try_wait().expect("child is still running").is_none(),
+            "the process that inherited the pid was punished for it"
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    /// The rules are checked against the process that is really there, which is
+    /// why this one needs no name to be right: pid zero answers to the kernel on
+    /// unix and to the System Idle Process on Windows, and neither is a target.
+    #[test]
+    fn squid_leaves_the_untouchable_processes_alone() {
+        let mut sampler = Sampler::new();
+        let myself = ProcessSample {
+            pid: std::process::id(),
+            name: "whatever the list said".into(),
+            cpu: 0.0,
+            memory: Bytes(0),
+        };
+        assert_eq!(
+            sampler.stop(&myself).expect_err("this is the test itself"),
+            StopError::Refused(squid_platform::process::OffLimits::Itself)
+        );
+        let first = ProcessSample { pid: 0, ..myself };
+        assert_eq!(
+            sampler.stop(&first).expect_err("pid zero"),
+            StopError::Refused(squid_platform::process::OffLimits::First)
+        );
+    }
+
+    /// A process long enough to be seen, harmless enough to lose.
+    fn sleeper() -> std::process::Child {
+        let mut command = if cfg!(windows) {
+            let mut command = std::process::Command::new("ping");
+            command.args(["-n", "60", "127.0.0.1"]);
+            command
+        } else {
+            let mut command = std::process::Command::new("sleep");
+            command.arg("60");
+            command
+        };
+        command
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("a loopback ping / sleep should start")
+    }
+
+    /// The row as the panel would have drawn it, name included: read from
+    /// the operating system rather than guessed, because the name is the proof
+    /// `stop` checks and a guessed name would fail for the wrong reason.
+    fn sample_of(sampler: &mut Sampler, pid: u32) -> ProcessSample {
+        sampler
+            .sample_of(pid)
+            .expect("a child of this test is a process")
     }
 }

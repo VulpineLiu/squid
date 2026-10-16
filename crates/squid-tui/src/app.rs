@@ -19,7 +19,8 @@ use squid_engine::delete::DeleteJob;
 use squid_engine::delete::DeleteOutcome;
 use squid_engine::Engine;
 use squid_engine::{analyze, clean, delete, purge, uninstall};
-use squid_stats::{Sampler, SystemSnapshot, TrendStore};
+use squid_platform::process::{OffLimits, StopError};
+use squid_stats::{ProcessSample, Sampler, SystemSnapshot, TrendStore};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -465,6 +466,11 @@ pub enum ConfirmAction {
     Purge,
     Uninstall,
     UndoSession(String),
+    /// Stop one process the system panel is listing. The sample travels with
+    /// the approval, not just the pid: the pid is what would be killed and the
+    /// sample is what the user read, and telling those apart is the whole
+    /// safety of the operation.
+    StopProcess(ProcessSample),
 }
 
 /// What the user approved, carrying everything needed to carry it out.
@@ -485,6 +491,7 @@ pub enum Approval {
     },
     Plan(UninstallPlan),
     UndoSession(String),
+    StopProcess(ProcessSample),
 }
 
 #[derive(Clone, Debug)]
@@ -1538,13 +1545,79 @@ impl App {
                 items: chosen,
                 purge: false,
             },
-            ConfirmAction::UndoSession(_) => return,
+            ConfirmAction::UndoSession(_) | ConfirmAction::StopProcess(_) => return,
         };
         self.pending = Some(approval);
         self.confirm = Some(Confirm {
             title,
             lines,
             action,
+        });
+    }
+
+    /// Ask before stopping the process the system panel is pointing at.
+    ///
+    /// The same gate as a delete, for the same reason: what the user pressed is
+    /// a key on a row, and what happens next is irreversible. The row says
+    /// `pid 4242`, and a pid is a seat number rather than a person — the process
+    /// that sat there when the list was drawn may have left and handed the seat
+    /// to another. That is why the sample, not the number, is what travels into
+    /// the approval, and why [`squid_stats::Sampler::stop`] reads the pid again
+    /// before it acts on it.
+    pub fn ask_stop_process(&mut self) {
+        if self.confirm.is_some() || self.busy_refusal(Slot::Delete) {
+            return;
+        }
+        if self.panel != Panel::Stats {
+            self.toast(
+                self.strings.t("no process list here", "这里没有进程列表"),
+                ToastKind::Info,
+            );
+            return;
+        }
+        let Some(process) = self
+            .stats
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.top_processes.get(self.stats.cursor))
+            .cloned()
+        else {
+            self.toast(
+                self.strings
+                    .t("press r to take a reading first", "先按 r 采样一次"),
+                ToastKind::Info,
+            );
+            return;
+        };
+        // The rules squid applies to itself are checked here as well as in the
+        // sampler. Asking permission for a stop that a rule will refuse is worse
+        // than pressing the key on an empty row: it teaches the user that the
+        // dialog is theatre.
+        if let Some(rule) = squid_platform::process::refusal(process.pid, &process.name) {
+            let text = self.stop_refusal(&StopError::Refused(rule));
+            self.toast(text, ToastKind::Warn);
+            return;
+        }
+        let lines = vec![
+            format!(
+                "pid {} · {:.1}% · {}",
+                process.pid,
+                process.cpu,
+                process.memory.human()
+            ),
+            self.strings.t(
+                "it gets no chance to save anything",
+                "它不会有机会保存任何内容",
+            ),
+        ];
+        self.pending = Some(Approval::StopProcess(process.clone()));
+        self.confirm = Some(Confirm {
+            title: self.strings.t(
+                &format!("Stop {}?", process.name),
+                &format!("结束 {}？", process.name),
+            ),
+            lines,
+            action: ConfirmAction::StopProcess(process),
         });
     }
 }
@@ -1624,6 +1697,69 @@ impl App {
                     self.toast(err.to_string(), ToastKind::Warn);
                 }
             },
+            Approval::StopProcess(sample) => self.stop_process(sample),
+        }
+    }
+
+    /// Carry out the kill the dialog just approved.
+    ///
+    /// The reading is taken again afterwards whatever the outcome. A process
+    /// that stopped has to leave the list, and a process that refused has to
+    /// stay in it looking exactly as it did; a stale row in between the two is
+    /// a row the user then points at twice.
+    fn stop_process(&mut self, sample: ProcessSample) {
+        let outcome = self.stats.sampler.stop(&sample);
+        self.stats.refresh();
+        let left = self.list_len();
+        self.stats.cursor = self.stats.cursor.min(left.saturating_sub(1));
+        match outcome {
+            Ok(()) => {
+                let text = self.strings.t(
+                    &format!("{} stopped", sample.name),
+                    &format!("已结束 {}", sample.name),
+                );
+                self.toast(text.clone(), ToastKind::Good);
+                self.push_log(format!("stop {} · pid {}", sample.name, sample.pid));
+            }
+            Err(error) => {
+                let text = self.stop_refusal(&error);
+                self.toast(text.clone(), ToastKind::Warn);
+                self.push_log(format!(
+                    "stop {} · pid {} · refused: {text}",
+                    sample.name, sample.pid
+                ));
+            }
+        }
+    }
+
+    /// Why a process could not be stopped, in the language the interface is
+    /// speaking.
+    ///
+    /// The rule variants are matched rather than printed through their
+    /// `Display`, so one rule cannot end up meaning two things; the operating
+    /// system's own words are quoted inside a sentence this program owns,
+    /// because those words arrive in the language of the OS and translate no
+    /// further than the frame around them.
+    fn stop_refusal(&self, error: &StopError) -> String {
+        match error {
+            StopError::Gone { .. } => self
+                .strings
+                .t("that process had already stopped", "该进程已经退出了"),
+            StopError::Refused(OffLimits::Itself) => self
+                .strings
+                .t("squid cannot stop itself", "squid 不能结束自己"),
+            StopError::Refused(OffLimits::First) => self.strings.t(
+                "that is the first process of the machine",
+                "那是系统的第一个进程，不能结束",
+            ),
+            StopError::Refused(OffLimits::Boot(name)) => self.strings.t(
+                &format!("{name} is a process Windows needs to start"),
+                &format!("{name} 是 Windows 启动必需的进程，不能结束"),
+            ),
+            StopError::Denied { reason } => self.strings.t(
+                &format!("the system refused: {reason}"),
+                &format!("系统拒绝了请求：{reason}"),
+            ),
         }
     }
 
@@ -2093,8 +2229,20 @@ impl App {
                 self.scan();
                 Action::Redraw
             }
-            KeyCode::Char('d') | KeyCode::Char('x') => {
+            KeyCode::Char('d') => {
                 self.ask_delete();
+                Action::Redraw
+            }
+            // `x` means "the thing under the cursor goes away". On the three
+            // file panels that is a delete; on the system panel there is
+            // nothing to delete and there is a process, so the same finger
+            // reaches the same verb and the verb means stopping it.
+            KeyCode::Char('x') => {
+                if self.panel == Panel::Stats {
+                    self.ask_stop_process();
+                } else {
+                    self.ask_delete();
+                }
                 Action::Redraw
             }
             KeyCode::Char('a') | KeyCode::Char('A') => {
@@ -3377,6 +3525,206 @@ mod tests {
         assert!(
             report.items.iter().all(|item| item.path != file),
             "the file that was deleted must not come back"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A process long enough to be seen and harmless enough to lose. The same
+    /// twelve lines live in `squid-platform` and `squid-stats` for the same
+    /// reason: the thing being tested has to be a process, and pretending with a
+    /// struct is how a kill feature ships without ever killing.
+    fn sleeper() -> std::process::Child {
+        let mut command = if cfg!(windows) {
+            let mut command = std::process::Command::new("ping");
+            command.args(["-n", "60", "127.0.0.1"]);
+            command
+        } else {
+            let mut command = std::process::Command::new("sleep");
+            command.arg("60");
+            command
+        };
+        command
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("a loopback ping / sleep should start")
+    }
+
+    /// Whether the child really left, without hanging the suite if it did not.
+    fn waits_for_exit(child: &mut std::process::Child) -> bool {
+        let started = Instant::now();
+        loop {
+            if child
+                .try_wait()
+                .expect("the child belongs to this test")
+                .is_some()
+            {
+                return true;
+            }
+            if started.elapsed() > Duration::from_secs(10) {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// The system panel adds a second door into something irreversible, and
+    /// every door in this interface has the same two failures available: the
+    /// dialog opens and nothing happens, or something happens to the wrong row.
+    /// Both are tried here against a real process, since a row is only as honest
+    /// as the number inside it.
+    #[test]
+    fn the_system_panel_stops_the_process_the_row_named() {
+        isolate_state();
+        let mut app = App::new().expect("app");
+        app.strings = Strings::for_lang(crate::theme::Lang::En);
+        app.toast = None;
+        let mut child = sleeper();
+        let row = app
+            .stats
+            .sampler
+            .sample_of(child.id())
+            .expect("a child of this test is a process");
+        app.panel = Panel::Stats;
+        app.stats.snapshot = Some(SystemSnapshot {
+            top_processes: vec![row.clone()],
+            ..Default::default()
+        });
+        app.stats.cursor = 0;
+
+        app.handle_key(KeyCode::Char('x'), KeyModifiers::empty());
+        assert!(
+            matches!(app.pending, Some(Approval::StopProcess(_))),
+            "x on a process row must ask about stopping a process, not about deleting one: {:?}",
+            app.confirm.as_ref().map(|confirm| confirm.title.clone())
+        );
+        let title = app
+            .confirm
+            .as_ref()
+            .expect("x must ask before killing anything")
+            .title
+            .clone();
+        assert!(
+            title.contains(&row.name),
+            "the dialog must name what it is about to stop: {title}"
+        );
+
+        app.handle_key(KeyCode::Char('y'), KeyModifiers::empty());
+        assert!(app.confirm.is_none(), "answering must close the dialog");
+        assert!(
+            app.toast
+                .as_ref()
+                .is_some_and(|toast| toast.text.contains(&row.name)),
+            "the panel must report the process it stopped, got {:?}",
+            app.toast.as_ref().map(|toast| toast.text.clone())
+        );
+        assert!(
+            waits_for_exit(&mut child),
+            "the dialog said it stopped and nothing stopped"
+        );
+    }
+
+    /// A row is a claim about a moment rather than a process: pids are handed out
+    /// again, so the name the user read can already belong to somebody else by
+    /// the time `y` is pressed. The answer is to say so — never to kill whoever
+    /// inherited the number.
+    #[test]
+    fn a_row_that_no_longer_describes_its_pid_kills_nobody() {
+        isolate_state();
+        let mut app = App::new().expect("app");
+        app.strings = Strings::for_lang(crate::theme::Lang::En);
+        app.toast = None;
+        let mut child = sleeper();
+        let mut row = app
+            .stats
+            .sampler
+            .sample_of(child.id())
+            .expect("a child of this test is a process");
+        row.name = "WhateverWasOnScreen".into();
+        app.panel = Panel::Stats;
+        app.stats.snapshot = Some(SystemSnapshot {
+            top_processes: vec![row.clone()],
+            ..Default::default()
+        });
+        app.stats.cursor = 0;
+
+        app.handle_key(KeyCode::Char('x'), KeyModifiers::empty());
+        assert!(
+            app.confirm.is_some(),
+            "a row that looks ordinary must still be asked about"
+        );
+        app.handle_key(KeyCode::Char('y'), KeyModifiers::empty());
+        assert!(app.confirm.is_none());
+        assert!(
+            app.toast
+                .as_ref()
+                .is_some_and(|toast| toast.text.contains("already stopped")),
+            "a row whose process left should be reported as gone, got {:?}",
+            app.toast.as_ref().map(|toast| toast.text.clone())
+        );
+        assert!(
+            child.try_wait().expect("the child is ours").is_none(),
+            "the process that inherited the pid was punished for it"
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    /// The rules are applied before the question, not after the answer. Asking
+    /// permission for something a rule will refuse anyway teaches the user that
+    /// the dialog is theatre, which is worth less than the toast that says why.
+    #[test]
+    fn an_untouchable_process_is_refused_before_it_is_asked_about() {
+        isolate_state();
+        let mut app = App::new().expect("app");
+        app.strings = Strings::for_lang(crate::theme::Lang::En);
+        app.toast = None;
+        app.panel = Panel::Stats;
+        app.stats.snapshot = Some(SystemSnapshot {
+            top_processes: vec![ProcessSample {
+                pid: std::process::id(),
+                name: "squid".into(),
+                cpu: 0.0,
+                memory: Bytes(0),
+            }],
+            ..Default::default()
+        });
+        app.handle_key(KeyCode::Char('x'), KeyModifiers::empty());
+        assert!(
+            app.confirm.is_none() && app.pending.is_none(),
+            "squid must not ask permission to stop itself"
+        );
+        assert!(
+            app.toast
+                .as_ref()
+                .is_some_and(|toast| toast.text.contains("itself")),
+            "the refusal should say which rule applied, got {:?}",
+            app.toast.as_ref().map(|toast| toast.text.clone())
+        );
+    }
+
+    /// `x` has meant "the row under the cursor goes away" on the file panels
+    /// since the first version; meeting a process table must not have moved the
+    /// finger that was already there.
+    #[test]
+    fn x_is_still_the_delete_key_on_a_list_of_files() {
+        isolate_state();
+        let dir = scratch("x-still-deletes");
+        let (info, items) = fake_app(&dir);
+        let mut app = App::new().expect("app");
+        app.delete_mode = DeleteMode::Permanent;
+        app.panel = Panel::Uninstall;
+        app.uninstall.view = UninstallView::Plan;
+        app.uninstall.plan = Some(UninstallPlan {
+            app: info,
+            items,
+            warnings: Vec::new(),
+        });
+        app.handle_key(KeyCode::Char('x'), KeyModifiers::empty());
+        assert!(
+            matches!(app.pending, Some(Approval::Plan(_))),
+            "x on a plan must still approve deleting files: {:?}",
+            app.confirm.as_ref().map(|confirm| confirm.title.clone())
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

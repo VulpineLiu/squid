@@ -14,6 +14,7 @@ pub mod apps;
 pub mod console;
 pub mod currency;
 pub mod leftovers;
+pub mod process;
 #[cfg(unix)]
 pub mod volumes;
 
