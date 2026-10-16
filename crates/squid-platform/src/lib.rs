@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 pub mod apps;
 pub mod console;
+pub mod currency;
 pub mod leftovers;
 #[cfg(unix)]
 pub mod volumes;

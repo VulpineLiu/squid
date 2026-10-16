@@ -274,7 +274,8 @@ impl Prices {
     }
 
     /// The answer for a screen that cannot be asked, which is the one a code
-    /// page implies. See [`charged_by_code_page`] for what that answer is worth.
+    /// page implies. The function that guesses it, `charged_by_code_page`, says
+    /// for itself what that answer is worth.
     pub fn implied(code_page: u32) -> Prices {
         Prices {
             source: "implied",

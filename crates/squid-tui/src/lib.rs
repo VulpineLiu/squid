@@ -28,6 +28,7 @@ use crossterm::{
         LeaveAlternateScreen,
     },
 };
+use glyphs::Carry as _;
 use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal, TerminalOptions, Viewport};
 use squid_platform::console::Geometry;
 use std::io::{stdout, Stdout, Write};
@@ -216,7 +217,7 @@ fn run_inner() -> anyhow::Result<()> {
     // with, and only now: measuring spends one character on whatever the console
     // is showing, and the screen is not ours to spend until the alternate one is
     // up. The character it writes is covered by the first frame.
-    let fit = glyphs::Fit::measure();
+    let exchange = glyphs::measure();
 
     let mut next_tick = Instant::now() + TICK;
     while !app.should_quit {
@@ -229,7 +230,7 @@ fn run_inner() -> anyhow::Result<()> {
             views::draw(frame, &app);
             // The last moment at which a row that is too long for this console
             // can still be made to fit is after the widgets and before the wire.
-            fit.carry(frame.buffer_mut());
+            exchange.carry(frame.buffer_mut());
         })?;
         if poll(next_tick.saturating_duration_since(Instant::now()))? {
             match read()? {

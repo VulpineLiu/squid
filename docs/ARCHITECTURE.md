@@ -78,7 +78,7 @@ fn running_executables(&self) -> Vec<String>;                    // 供 skip_if_
 - 匹配前大小写要归一化（`Xmind` vs `xmind`）；
 - `KNOWN_SUFFIXES` 带点而文件名切分后不带点，两侧必须用同一种归一化形式比较（`has_known_suffix`）。另外 `.pdf/.png/.mp3` 这类文档后缀绝不能出现在「按名称匹配」的后缀表里，否则 `Xmind-notes.pdf` 会被当成残留删掉。
 
-`console` 不在 `Platform` trait 里，但它回答的是同一类问题——「这台机器上的现实是什么」：控制台自称的窗口尺寸、它背后那块屏幕缓冲区的尺寸、它最大允许多大的窗口，以及一个「按 Unicode 只有 1 列宽」的字符在这里到底占几格。legacy conhost 在这两件事上都会给出错答案：进备用屏换掉的只是「正在显示的那块缓冲区」，进程的 stdout 句柄仍指着没人看的那一块，于是窗口比真正存在的格子更宽，写出一行的格子就落到下一行开头；cp936 码页又把 `─│·…↑↓✓` 这批 East Asian Ambiguous 字符收两格，而 ratatui 按一格排版。两者最后都表现为同一种花屏——屏上同时留着好几帧。所以 TUI 每一拍重新量一次尺寸（缓冲区被滚走、窗口被人拖大都算变化，只有真的变了才擦屏重画），并在量到「两格」时把整屏退成 ASCII 边框；`SQUID_SYMBOL_CELLS` 供人强制指定，`SQUID_CONSOLE_TRACE` 把控制台自己的几个数字写进文件留证。
+`console` 不在 `Platform` trait 里，但它回答的是同一类问题——「这台机器上的现实是什么」：控制台自称的窗口尺寸、它背后那块屏幕缓冲区的尺寸、它最大允许多大的窗口，以及一个「按 Unicode 只有 1 列宽」的字符在这里到底占几格。legacy conhost 在这两件事上都会给出错答案：进备用屏换掉的只是「正在显示的那块缓冲区」，进程的 stdout 句柄仍指着没人看的那一块，于是窗口比真正存在的格子更宽，写出一行的格子就落到下一行开头；cp936 码页又把 `─│·…↑↓✓` 这批 East Asian Ambiguous 字符收两格，而 ratatui 按一格排版。两者最后都表现为同一种花屏——屏上同时留着好几帧。所以 TUI 每一拍重新量一次尺寸（缓冲区被滚走、窗口被人拖大都算变化，只有真的变了才擦屏重画）。字形的价格归 `currency`：`Exchange` 按码位存一张兑换表，只在控制台确实多收钱时建，`afford` 在单格终端上原样返回。价是谁问的要分开说——`console::prices` 逐字符把答案量回来给界面，`squid_tui::glyphs` 因此只剩 ratatui 那一半：`witnesses` 从界面源码和 widget 里收集本界面会画的所有歧义字符，`Carry` 走一遍成品帧把付不起的字符换成 ASCII。界面有两条测试钉住「画的字符」与「问过的字符」是同一份：`every_glyph_this_interface_draws_has_a_price` 和 `the_probe_asks_the_price_of_everything_that_ends_up_on_the_screen`。`SQUID_SYMBOL_CELLS` 供人强制指定，`SQUID_CONSOLE_TRACE` 把控制台自己的几个数字写进文件留证。
 
 ### squid-rules
 
