@@ -136,6 +136,7 @@ ratatui + crossterm。六个面板 `Cleanup / Uninstall / Purge / Storage / Stat
   与细体 `○` 两条冗余通道。`close_gaps` 负责让高亮行成为连续的一整条：列分隔用的是无样式
   `Span::raw(" ")`，反白时会在行里留下一道道暗缝，所以只在「整行非空白 span 样式一致」时把空白也染上；
   路径列只截断不补齐，因此 `item_row` 末尾还会按显示宽度补一段同色空格，让高亮条一直顶到卡片右边框。
+- **一个 widget 只有一套下标**：`ListState::selected` 是 ratatui 用来定位滚动窗口的行号，高亮却由每一行自己画，两者必须数同一批行。卸载列表把「大小/名称/版本」表头（筛选时还多一行 filter chip）和条目一起塞进同一个 `List`，`selected` 就此比样式多算了一两行：第一屏看不出来，列表一超过一页，窗口按「光标上面那一行」定位，高亮行被挤出可视区，用户看到的是「下翻之后没有高亮了」——Mac 与 Windows 同因，因为它跟终端无关。清理面板从不出现这个现象，`ScanPanel::lines` 里只有条目，标题挂在 card 的 block 上。现在的写法把表头和 filter chip 当作 chrome 单独走一段 `Layout`：`Paragraph` 拿上面，`List` 只拿条目。`the_app_under_the_cursor_is_the_row_that_is_on_screen` 遍历每一个光标位置（含筛选态）断言「光标那一行就是屏幕上那一行、且带着强调色与加粗」，因为它无法靠猜某个卡片高度通过。
 
 ### squid-cli
 

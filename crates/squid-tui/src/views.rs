@@ -995,7 +995,14 @@ fn draw_uninstall(frame: &mut Frame, area: Rect, app: &App) {
     let source_w = width
         .saturating_sub(2 + size_w + 1 + name_w + 1 + version_w + 1)
         .max(8);
-    let mut lines = vec![Line::from(Span::styled(
+    // The column header and the filter chip are chrome: they label the columns,
+    // they are not rows the cursor can rest on. They used to be pushed into the
+    // `List` ahead of the entries, which handed the widget one or two rows the
+    // app never counted. ratatui uses `selected` for nothing but scrolling here
+    // (the row paints its own highlight), so from the first page turn onwards it
+    // centred the window on the row above the cursor and pushed the highlighted
+    // row out of view.
+    let mut chrome = vec![Line::from(Span::styled(
         format!(
             "{} {} {} {}",
             right(&app.strings.t("size", "大小"), size_w),
@@ -1006,7 +1013,7 @@ fn draw_uninstall(frame: &mut Frame, area: Rect, app: &App) {
         Palette::muted(),
     ))];
     if !app.uninstall.filter.is_empty() {
-        lines.push(Line::from(Span::styled(
+        chrome.push(Line::from(Span::styled(
             format!(
                 "  {}{}",
                 app.strings.t("filter", "筛选"),
@@ -1015,66 +1022,77 @@ fn draw_uninstall(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Palette::warn()).bg(Palette::card_bg()),
         )));
     }
-    lines.extend(visible.iter().enumerate().map(|(row, index)| {
-        let app_info = &app.uninstall.apps[*index];
-        let highlight = row == app.uninstall.cursor;
-        let running = app_info.running;
-        let left = vec![
-            Span::styled(
-                if running { "▶ " } else { "  " },
-                dim(highlight, Palette::warn()),
-            ),
-            Span::styled(
-                right(&app_info.size.human(), size_w),
-                if highlight {
-                    Palette::selected()
-                } else {
-                    Palette::size_color(app_info.size)
-                },
-            ),
-            Span::raw(" "),
-            Span::styled(
-                pad(&truncate(&app_info.name, name_w, false), name_w),
-                if highlight {
-                    Palette::selected()
-                } else {
-                    Style::default().fg(Palette::text())
-                },
-            ),
-            Span::raw(" "),
-            Span::styled(
-                pad(app_info.version.as_deref().unwrap_or("—"), version_w),
-                dim(highlight, Palette::muted_fg()),
-            ),
-        ];
-        let note = if running {
-            app.strings.t("running", "运行中")
-        } else {
-            app_info.source.clone()
-        };
-        joined(
-            left,
-            vec![Span::styled(
-                truncate(&note, source_w, false),
-                dim(
-                    highlight,
-                    if running {
-                        Palette::warn()
+    // Chrome above, entries below: one widget, one index space, so
+    // `ListState::selected` and the highlight style count the same rows. The
+    // cleanup list has always done this — its heading lives in the card
+    // block — which is why paging never lost a cursor there.
+    let strip = Layout::vertical([Constraint::Length(chrome.len() as u16), Constraint::Min(1)])
+        .split(inner);
+    frame.render_widget(Paragraph::new(chrome).style(Palette::list()), strip[0]);
+    let lines: Vec<Line<'static>> = visible
+        .iter()
+        .enumerate()
+        .map(|(row, index)| {
+            let app_info = &app.uninstall.apps[*index];
+            let highlight = row == app.uninstall.cursor;
+            let running = app_info.running;
+            let left = vec![
+                Span::styled(
+                    if running { "▶ " } else { "  " },
+                    dim(highlight, Palette::warn()),
+                ),
+                Span::styled(
+                    right(&app_info.size.human(), size_w),
+                    if highlight {
+                        Palette::selected()
                     } else {
-                        Palette::muted_fg()
+                        Palette::size_color(app_info.size)
                     },
                 ),
-            )],
-            width,
-        )
-        .style(band(row, highlight))
-    }));
+                Span::raw(" "),
+                Span::styled(
+                    pad(&truncate(&app_info.name, name_w, false), name_w),
+                    if highlight {
+                        Palette::selected()
+                    } else {
+                        Style::default().fg(Palette::text())
+                    },
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    pad(app_info.version.as_deref().unwrap_or("—"), version_w),
+                    dim(highlight, Palette::muted_fg()),
+                ),
+            ];
+            let note = if running {
+                app.strings.t("running", "运行中")
+            } else {
+                app_info.source.clone()
+            };
+            joined(
+                left,
+                vec![Span::styled(
+                    truncate(&note, source_w, false),
+                    dim(
+                        highlight,
+                        if running {
+                            Palette::warn()
+                        } else {
+                            Palette::muted_fg()
+                        },
+                    ),
+                )],
+                width,
+            )
+            .style(band(row, highlight))
+        })
+        .collect();
     let list = List::new(lines)
         .style(Palette::list())
         .highlight_symbol("")
         .highlight_style(Style::default());
     let mut state = ListState::default().with_selected(Some(app.uninstall.cursor));
-    frame.render_stateful_widget(list, inner, &mut state);
+    frame.render_stateful_widget(list, strip[1], &mut state);
 }
 
 fn draw_uninstall_plan(frame: &mut Frame, area: Rect, app: &App) {
@@ -2519,5 +2537,97 @@ mod tests {
             carrier.starts_with('│'),
             "the toast should float inside the card, not over its edge: {carrier:?}"
         );
+    }
+
+    /// The app list prints a column header above its rows, and while the user
+    /// is filtering it prints a filter chip below that header. Both are drawn
+    /// *inside* the `List` widget, which means they spend row numbers of the
+    /// list, while the highlight style is picked in the space of
+    /// the visible-apps list — two index spaces one (or two) apart.
+    /// ratatui only uses `selected` to decide how far to scroll
+    /// (`highlight_style` is deliberately empty, the row paints itself), so the
+    /// damage stayed invisible until the list grew past one page: the window is
+    /// positioned for the row above the cursor, the highlighted row falls off
+    /// the bottom, and the user pages down into a list with no cursor at all.
+    ///
+    /// Cleanup never showed this because `ScanPanel::lines` holds nothing but
+    /// entries — its heading lives in the card block. Same widget, one index
+    /// space, no drift.
+    #[test]
+    fn the_app_under_the_cursor_is_the_row_that_is_on_screen() {
+        crate::theme::force_color_mode(ColorMode::TrueColor);
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        use squid_core::AppInfo;
+
+        fn render(app: &App) -> Terminal<TestBackend> {
+            let mut term = Terminal::new(TestBackend::new(140, 34)).expect("terminal");
+            term.draw(|frame| draw(frame, app)).expect("draw");
+            term
+        }
+        /// Where a needle sits, if it sits anywhere at all.
+        fn locate(term: &Terminal<TestBackend>, needle: &str) -> Option<(u16, u16)> {
+            let buf = term.backend().buffer();
+            for row in 0..buf.area().height {
+                let mut text = String::new();
+                let mut columns = Vec::new();
+                for col in 0..buf.area().width {
+                    for ch in buf[(col, row)].symbol().chars() {
+                        text.push(ch);
+                        columns.push(col);
+                    }
+                }
+                if let Some(offset) = text.find(needle) {
+                    return Some((row, columns[text[..offset].chars().count()]));
+                }
+            }
+            None
+        }
+
+        let mut app = App::new().expect("app");
+        app.toast = None;
+        app.panel = Panel::Uninstall;
+        app.uninstall.view = UninstallView::List;
+        app.uninstall.apps = (0..30)
+            .map(|index| AppInfo {
+                name: format!("Sq{index:02}"),
+                path: format!("/Applications/Sq{index:02}.app").into(),
+                source: "Applications".into(),
+                size: Bytes(1 << 20),
+                ..Default::default()
+            })
+            .collect();
+
+        // Every cursor position, so the test cannot pass by being lucky about
+        // how tall the card happens to be: what matters is that the window
+        // always covers the row the cursor is on.
+        app.uninstall.filter = "sq1".into();
+        let filtered = app.uninstall.visible().len();
+        app.uninstall.filter.clear();
+        assert!(filtered > 1, "the filter should still match a page or so");
+        let cases: Vec<(&str, usize)> = (0..app.uninstall.apps.len())
+            .map(|cursor| ("", cursor))
+            .chain((0..filtered).map(|cursor| ("sq1", cursor)))
+            .collect();
+        for (filter, cursor) in cases {
+            app.uninstall.filter = filter.to_string();
+            app.uninstall.cursor = cursor;
+            let visible = app.uninstall.visible();
+            let name = app.uninstall.apps[visible[cursor]].name.clone();
+            let term = render(&app);
+            let label = format!("filter={filter:?} cursor={cursor} ({name})");
+            let (row, col) = locate(&term, &name)
+                .unwrap_or_else(|| panic!("the app under the cursor is off screen: {label}"));
+            let style = term.backend().buffer()[(col, row)].style();
+            assert_eq!(
+                style.bg,
+                Some(Palette::accent()),
+                "the row on screen is not the row the cursor is on: {label}"
+            );
+            assert!(
+                style.add_modifier.contains(Modifier::BOLD),
+                "the cursor row lost its emphasis: {label}"
+            );
+        }
     }
 }
