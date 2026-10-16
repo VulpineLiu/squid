@@ -8,6 +8,7 @@
 #   TUI_CELLS=2 ./scripts/win-tui-capture.sh  # 强制按"一列字符收两格"画(ASCII 边框)
 #   TUI_CP=936 ./scripts/win-tui-capture.sh    # 用用户窗口的代码页跑(复现方块双格)
 #   TUI_REUSE=1 TUI_OUT=/tmp/x.bin ./scripts/win-tui-capture.sh   # 只重算旧帧,不连真机
+#   TUI_ARGS="status" ./scripts/win-tui-capture.sh  # 抓命令行的输出而不是界面(判据见下)
 #
 # 为什么不能用 scripts/tui_smoke.py:那个脚本自己 forkpty(),是 POSIX 专属。
 # 真机上没有 pty 可以 fork,只能反过来:让 sshd 用 CreatePseudoConsole 分配一个
@@ -36,6 +37,10 @@ DELAY="${TUI_DELAY:-8}"
 # 那一版只能靠 SQUID_SYMBOL_CELLS 强制 —— 伪控制台量不到两格,不等于用户那个带
 # 中文字体的窗口也量不到,这条路径正是为后者准备的。
 CELLS="${TUI_CELLS:-}"
+# 默认抓 state 界面。TUI_ARGS 换成命令行子命令就能抓 `squid status` 这类纯文本:
+# 那种输出没有帧可判(帧判据会说"屏上没画框"),它的判据是剥掉 ANSI 之后还剩几
+# 个 █ —— cp936 下应当一个不剩(换成 # 和 .),65001 下一个不少(控制台付得起)。
+TUI_ARGS="${TUI_ARGS:-state}"
 # TUI_CP=936 让远端控制台待在用户真正使用的那个代码页上。
 # 为什么要这个:代码页决定"没被问到"的字符按几格算(936 按两格),而用户自己的
 # 窗口就跑在 936 上;要让他那台机器上的问价过程在这里重现一遍,就得让控制台真的
@@ -61,10 +66,14 @@ TUI_HOLD="${TUI_HOLD:-6}"
 { sleep "$DELAY"; for key in $TUI_KEYS; do printf '%s' "$key"; sleep "$TUI_HOLD"; done; sleep 2; } |
   ssh -tt -i "$WIN_KEY" -o BatchMode=yes "$WIN_HOST" \
       "${SETUP}powershell" -NoProfile -ExecutionPolicy Bypass -File "$RUNNER" \
-      "$COLS" "$ROWS" "$BIN" state "$@" \
+      "$COLS" "$ROWS" "$BIN" $TUI_ARGS "$@" \
       > "$OUT" 2>&1
 rc=$?
 printf '\033[1;36m==>\033[0m 原始 ANSI 已存 %s (%s 字节, ssh rc=%s)\n' "$OUT" "$(wc -c < "$OUT" | tr -d ' ')" "$rc"
 fi
 
-python3 scripts/tui-frame-check.py "$OUT"
+if [ "$TUI_ARGS" = state ]; then
+  python3 scripts/tui-frame-check.py "$OUT"
+else
+  printf '\033[1;36m==>\033[0m 命令行输出按字符判,不按帧判(TUI_ARGS=%s)\n' "$TUI_ARGS"
+fi

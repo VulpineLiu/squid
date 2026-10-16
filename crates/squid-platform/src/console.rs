@@ -417,6 +417,44 @@ pub fn prices(witnesses: &[char]) -> Prices {
     }
 }
 
+/// What a screen costs that this program does not own.
+///
+/// [`prices`] buys its answers by spending characters: it writes one into a
+/// corner of the buffer, reads how far the cursor took itself, and paints the
+/// cell back out again. On a screen the interface has taken over, that is
+/// invisible. On a screen still showing a shell it is somebody else's row for
+/// the length of a measurement — sixty characters, written and erased, in the
+/// one place a person is looking.
+///
+/// A command-line program is a guest on that screen, often a pipe nobody is
+/// watching at all, so it does not buy the answer. It takes the one the code
+/// page hands over for free, which is the pessimistic one: a Far-Eastern code
+/// page charges two cells for every rule, gauge and arrow, and a command line
+/// that believes it prints `#` where a measured console would have printed
+/// `█`. Being wrong that way costs a plainer table. Being wrong the other way
+/// costs a table whose rows are each a screen and a half long, which is the
+/// complaint this whole exchange exists to answer.
+///
+/// A person who can see the screen this program cannot — over ssh, in a
+/// terminal that reprices things behind its back — still has the last word
+/// through `SQUID_SYMBOL_CELLS`, obeyed here exactly as it is by [`prices`].
+pub fn prices_unasked() -> Prices {
+    if let Some(asked) = asked_for() {
+        note(&format!("symbols={} asked", word(asked)));
+        return Prices::flat(asked);
+    }
+    #[cfg(windows)]
+    {
+        let code_page = windows::output_code_page();
+        note(&format!("symbols implied by cp={code_page}"));
+        Prices::implied(code_page)
+    }
+    #[cfg(not(windows))]
+    {
+        Prices::flat(SymbolCells::Single)
+    }
+}
+
 /// The price somebody named, rather than the one the console charges.
 ///
 /// `SQUID_SYMBOL_CELLS=2` charges two cells for every ambiguous character and
@@ -681,6 +719,14 @@ mod windows {
         if let Some(geometry) = shown() {
             OWNED.store(geometry.is_own_screen(), Ordering::Relaxed);
         }
+    }
+
+    /// The code page the console writes in, without touching the screen.
+    ///
+    /// See [`super::prices_unasked`] for why a program that only prints is
+    /// content with this one number instead of measuring.
+    pub(super) fn output_code_page() -> u32 {
+        unsafe { GetConsoleOutputCP() }
     }
 
     pub fn report() -> String {

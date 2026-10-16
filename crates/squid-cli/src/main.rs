@@ -16,11 +16,12 @@ use squid_core::{
 use squid_engine::analyze;
 use squid_engine::delete::{self, DeleteJob};
 use squid_engine::{clean, purge, uninstall, Engine};
+use squid_platform::currency::Exchange;
 use squid_platform::TrashTarget;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 // ------------------------------------------------------------------------ CLI
@@ -196,12 +197,68 @@ static QUIET: AtomicBool = AtomicBool::new(false);
 /// stderr so `squid clean --json | jq` never sees a progress message.
 static DIAG_STDERR: AtomicBool = AtomicBool::new(false);
 
+/// What to print when this console cannot afford the characters a report is
+/// drawn out of.
+///
+/// The interface walks a finished frame; a command line has no frame, so its
+/// frame is one line, and this is where a line stops being text and starts
+/// being cells. It is the same exchange the interface spends, reached from the
+/// other side — a gauge here repeats `█` twenty-eight times, and on the console
+/// that turns the interface into a pile of half-frames it prints a Storage
+/// table whose rows are each a screen and a half long.
+///
+/// The price is not measured here, even though measuring is what the interface
+/// does. Measuring spends characters on whatever the console is showing at the
+/// time, and a command line is a guest on that screen: it is in a pipeline, or
+/// somebody's shell is still sitting there waiting for its next prompt, and a
+/// row of sixty test characters written and erased in front of them is somebody
+/// else's work interrupted. So the command line takes the pessimistic price the
+/// code page implies and buys nothing, which costs it a plainer gauge on a
+/// console that a measurement might have cleared. A table that fits is worth
+/// more than a prettier one that does not.
+///
+/// See [`squid_platform::console::prices_unasked`] for that reasoning at the
+/// counter, and `squid_tui::glyphs` for the half that walks a frame.
+fn change() -> &'static Exchange {
+    static CHANGE: OnceLock<Exchange> = OnceLock::new();
+    CHANGE.get_or_init(|| Exchange::new(squid_platform::console::prices_unasked()))
+}
+
+/// One line a person is shown, in the characters their console can pay for.
+///
+/// Nobody is stopped from seeing what a report actually says. Point the output
+/// at a file or a pipe and the text comes back as it was, because a file is not
+/// a console: whatever glass reads it tomorrow may well be able to afford the
+/// `█`, and an archive of `#` is a worse record for the sake of a screen that
+/// was never looking. Only a screen is offered the exchange.
+fn priced(text: &str) -> String {
+    if !human_stream_is_tty() {
+        return text.to_string();
+    }
+    change().afford(text)
+}
+
+/// Print one row of a report.
+///
+/// [`diag`] and [`say`] own the lines that carry a colour code, obey `--quiet`
+/// or dodge `--json`; what is left is the body of the tables, which is printed
+/// straight out because a report's rows belong to the report whoever asked for
+/// it. That leftover is also where every gauge, bullet and rule in this
+/// program's output is drawn, which is why there is one macro for it rather
+/// than thirteen `println!`s of which twelve remember the console and one does
+/// not. `no_line_of_chrome_escapes_the_counter` is what keeps it that way.
+macro_rules! row {
+    ($($arg:tt)*) => {
+        println!("{}", $crate::priced(&format!($($arg)*)))
+    };
+}
+
 /// One human-readable diagnostic line.
 fn diag(code: &str, text: &str) {
     if DIAG_STDERR.load(Ordering::Relaxed) {
-        eprintln!("{}", paint(code, text));
+        eprintln!("{}", priced(&paint(code, text)));
     } else {
-        println!("{}", paint(code, text));
+        println!("{}", priced(&paint(code, text)));
     }
 }
 
@@ -216,16 +273,22 @@ fn say(text: &str) {
     }
     if DIAG_STDERR.load(Ordering::Relaxed) {
         if !text.is_empty() {
-            eprintln!("{text}");
+            eprintln!("{}", priced(text));
         }
     } else {
-        println!("{text}");
+        println!("{}", priced(text));
     }
 }
 
-/// The stream the live progress line may overwrite: stdout while it is still
-/// free, stderr once `--json` has claimed it for JSON alone.
-fn live_stream_is_tty() -> bool {
+/// The stream a human line lands on: stdout while it is still free, stderr
+/// once `--json` has claimed it for JSON alone.
+///
+/// Two questions get asked of it, and they have the same answer. A progress
+/// line may only overwrite a line when something can watch it being
+/// overwritten. Chrome may only be exchanged for ASCII when somebody is looking
+/// at the console that cannot afford it — because that is the only place the
+/// exchange is an improvement rather than a loss.
+fn human_stream_is_tty() -> bool {
     if DIAG_STDERR.load(Ordering::Relaxed) {
         std::io::stderr().is_tty()
     } else {
@@ -236,7 +299,7 @@ fn live_stream_is_tty() -> bool {
 /// Rewrite the live progress line, or clear it when `text` is `None`.
 fn live(text: Option<&str>) {
     let line = match text {
-        Some(text) => format!("\r\x1b[K{text}"),
+        Some(text) => format!("\r\x1b[K{}", priced(text)),
         None => "\r\x1b[K".to_string(),
     };
     if DIAG_STDERR.load(Ordering::Relaxed) {
@@ -257,14 +320,20 @@ fn main() {
         Err(error) => {
             if let Some(inner) = error.downcast_ref::<squid_core::SquidError>() {
                 if matches!(inner, squid_core::SquidError::Cancelled) {
-                    eprintln!("{}", paint("90", "cancelled — nothing was changed"));
+                    eprintln!(
+                        "{}",
+                        priced(&paint("90", "cancelled — nothing was changed"))
+                    );
                     std::process::exit(130);
                 }
             }
-            eprintln!("{} {}", paint("31", "squid:"), error);
+            eprintln!(
+                "{}",
+                priced(&format!("{} {}", paint("31", "squid:"), error))
+            );
             let mut source = error.source();
             while let Some(cause) = source.take() {
-                eprintln!("{}", paint("90", &format!("  caused by: {cause}")));
+                eprintln!("{}", priced(&paint("90", &format!("  caused by: {cause}"))));
                 source = cause.source();
             }
             std::process::exit(1);
@@ -451,7 +520,7 @@ fn ask(question: &str) -> bool {
         );
         return false;
     }
-    print!("{} ", paint("1;33", &format!("{question} [y/N]")));
+    print!("{} ", priced(&paint("1;33", &format!("{question} [y/N]"))));
     let _ = std::io::stdout().flush();
     let mut answer = String::new();
     if std::io::stdin().read_line(&mut answer).is_err() {
@@ -488,7 +557,7 @@ fn with_progress<T>(
                         total,
                         subject,
                     } => {
-                        if live_stream_is_tty() {
+                        if human_stream_is_tty() {
                             let glyph = frames
                                 .next()
                                 .unwrap_or_else(|| label.chars().next().unwrap_or('#'));
@@ -529,7 +598,7 @@ fn with_progress<T>(
                 }
             }
             if stop_now {
-                if live_stream_is_tty() {
+                if human_stream_is_tty() {
                     live(None);
                 }
                 break;
@@ -647,7 +716,10 @@ fn delete_items(
     with_progress("delete", move |engine, progress, cancel| {
         if !COLOR.load(Ordering::Relaxed) {
             // keep the count alive for the summary line
-            eprintln!("{}", paint("90", &format!("  removing {count} items")));
+            eprintln!(
+                "{}",
+                priced(&paint("90", &format!("  removing {count} items")))
+            );
         }
         delete::execute(engine, &job, progress, cancel)
     })
@@ -1084,7 +1156,7 @@ fn cmd_status(args: StatusArgs, json: bool) -> Result<i32> {
         snapshot.host.hostname, snapshot.host.hardware
     ));
     let kv = |label: &str, value: String| {
-        println!("  {:<10} {}", paint("90", label), value);
+        row!("  {:<10} {}", paint("90", label), value);
     };
     kv(
         "system",
@@ -1166,7 +1238,7 @@ fn cmd_status(args: StatusArgs, json: bool) -> Result<i32> {
             paint("36", &"█".repeat(filled)),
             paint("90", &"░".repeat(width - filled))
         );
-        println!(
+        row!(
             "  {} [{}] {} / {}  {}",
             paint("1", &fit(&volume.name, 14)),
             bar,
@@ -1177,7 +1249,7 @@ fn cmd_status(args: StatusArgs, json: bool) -> Result<i32> {
     }
     heading(&format!("Top processes · {}", args.processes));
     for process in snapshot.top_processes.iter().take(args.processes) {
-        println!(
+        row!(
             "  {:>6}  {}  {:>9}  {}",
             paint("36", &format!("{:.1}%", process.cpu)),
             paint("1", &fit(&process.name, 30)),
@@ -1261,7 +1333,7 @@ fn print_tree(node: &analyze::Node, depth: usize, total: &Bytes) {
             paint("35", &"█".repeat(filled)),
             paint("90", &"░".repeat(bar_w.saturating_sub(filled)))
         );
-        println!(
+        row!(
             "  {}{} [{}] {} {:>4.1}%",
             "  ".repeat(depth),
             paint("1", &fit(&child.name(), width)),
@@ -1336,7 +1408,7 @@ fn cmd_history(args: HistoryArgs, json: bool) -> Result<i32> {
         } else {
             String::new()
         };
-        println!(
+        row!(
             "  {}  {}  {}  {}  {}  {}",
             paint(
                 "90",
@@ -1504,7 +1576,7 @@ fn cmd_whitelist(args: WhitelistArgs) -> Result<i32> {
                 shout("90", "  empty — every matching path is offered for review");
             }
             for pattern in &settings.whitelist {
-                println!("  {} {}", paint("32", "●"), pattern);
+                row!("  {} {}", paint("32", "●"), pattern);
             }
             println!();
             shout("90", &format!("  {}", paths::pretty(&Settings::path())));
@@ -1545,7 +1617,7 @@ fn cmd_rules(json: bool) -> Result<i32> {
     for category in rules.categories() {
         let list = rules.by_category(category);
         println!();
-        println!(
+        row!(
             "{}",
             paint(
                 "1;36",
@@ -1570,7 +1642,7 @@ fn cmd_rules(json: bool) -> Result<i32> {
             if !rule.select_by_default {
                 flags.push(paint("90", "opt-in"));
             }
-            println!(
+            row!(
                 "  {}  {:<28} {}",
                 if enabled {
                     paint("32", "●")
@@ -1581,7 +1653,7 @@ fn cmd_rules(json: bool) -> Result<i32> {
                 paint("90", rule.display_title())
             );
             if !flags.is_empty() {
-                println!("                    {}", flags.join("  "));
+                row!("                    {}", flags.join("  "));
             }
         }
     }
@@ -1603,7 +1675,7 @@ fn cmd_doctor() -> Result<i32> {
     let engine = Engine::new();
     let platform = engine.platform();
     heading("squid doctor");
-    let kv = |label: &str, value: String| println!("  {:<12} {}", paint("90", label), value);
+    let kv = |label: &str, value: String| row!("  {:<12} {}", paint("90", label), value);
     kv("version", squid_core::VERSION.to_string());
     kv("platform", platform.display_name());
     kv("os", platform.os_version());
@@ -1700,7 +1772,7 @@ fn cmd_doctor() -> Result<i32> {
     let volumes = platform.volumes().unwrap_or_default();
     kv("volumes", format!("{}", volumes.len()));
     for volume in &volumes {
-        println!(
+        row!(
             "    {} {}",
             paint("1", &fit(&volume.name, 16)),
             paint(
@@ -1743,4 +1815,181 @@ fn cmd_doctor() -> Result<i32> {
         &format!("  safety: {}", mode_note(engine.settings().delete_mode)),
     );
     Ok(0)
+}
+
+#[cfg(test)]
+mod chrome {
+    use squid_platform::console::Prices;
+    use squid_platform::currency::{self, Exchange};
+    use unicode_width::UnicodeWidthStr;
+
+    /// The source with its strings, character literals and comments blanked, so
+    /// that a scan of the program is not a scan of its prose — which matters
+    /// more here than in most programs, because half of this file is sentences
+    /// about what it prints, and they quote the characters they describe.
+    fn only_code(source: &str) -> String {
+        let chars: Vec<char> = source.chars().collect();
+        let mut code = String::with_capacity(source.len());
+        let mut index = 0;
+        while index < chars.len() {
+            match chars[index] {
+                '/' if chars.get(index + 1) == Some(&'/') => {
+                    while index < chars.len() && chars[index] != '\n' {
+                        code.push(' ');
+                        index += 1;
+                    }
+                }
+                // A double quote always opens a string. A single quote only
+                // opens a character literal, and closes again almost immediately
+                // when it does; otherwise it is a lifetime, and blanking from a
+                // lifetime to the next quote is how a print site vanishes from
+                // an audit whose entire job is to find print sites.
+                quote @ ('"' | '\'') if quote == '"' || closes_char_literal(&chars, index) => {
+                    code.push(' ');
+                    index += 1;
+                    while index < chars.len() {
+                        if chars[index] == '\\' {
+                            code.push(' ');
+                            index += 2;
+                            continue;
+                        }
+                        code.push(' ');
+                        index += 1;
+                        if chars[index - 1] == quote {
+                            break;
+                        }
+                    }
+                }
+                ch => {
+                    code.push(ch);
+                    index += 1;
+                }
+            }
+        }
+        code
+    }
+
+    /// Whether the single quote at `open` opens a character literal.
+    ///
+    /// `'q'`, `'\n'` and `'\u{1F600}'` all close inside a few characters, which
+    /// is what this asks; `'static`, `'a mut` and the apostrophe of a prose word
+    /// that escaped the comment blanker do not, so they stay where they are.
+    fn closes_char_literal(chars: &[char], open: usize) -> bool {
+        let mut index = open + 1;
+        while index < chars.len() && index - open <= 12 {
+            if chars[index] == '\\' {
+                index += 2;
+                continue;
+            }
+            if chars[index] == '\'' {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
+    /// The index just past the parenthesis that closes the one at `open`.
+    fn closed(code: &str, open: usize) -> Option<usize> {
+        let mut depth = 0;
+        for (offset, ch) in code[open..].char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(open + offset);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Every line a person is shown pays for its chrome, and the only lines that
+    /// do not are JSON and blank ones.
+    ///
+    /// The rule is about the printing rather than the characters: a `█` is
+    /// nothing to be ashamed of, and this program is full of them. It is
+    /// `println!` that owes the console an answer, because that is the moment a
+    /// measured row becomes a row of cells. So every print of this file either
+    /// goes through [`priced`] — directly, or as a [`row!`], which is the same
+    /// thing with the format arguments left where they were written — or prints
+    /// JSON, which is data: rewriting a person's report to flatter their
+    /// terminal is a different bug with the same fingerprint.
+    ///
+    /// The scan reads the source because the mistake it looks for cannot be seen
+    /// from the machine it was made on. `println!("  {}", plan)` standing among
+    /// twelve `row!` calls is invisible on every terminal that charges one cell
+    /// for everything, including the one it was typed on, and arrives as a
+    /// report folded over on itself in front of somebody else.
+    #[test]
+    fn no_line_of_chrome_escapes_the_counter() {
+        let code = only_code(include_str!("main.rs"));
+        let mut offenders = Vec::new();
+        for call in ["println!(", "eprintln!(", "print!("] {
+            let mut from = 0;
+            while let Some(found) = code[from..].find(call) {
+                let at = from + found;
+                from = at + call.len();
+                let Some(end) = closed(&code, at + call.len() - 1) else {
+                    continue;
+                };
+                let group = code[at + call.len()..end].trim();
+                if group.is_empty() || group.contains("serde_json") || group.contains("priced") {
+                    continue;
+                }
+                offenders.push(group.to_string());
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "{} print site(s) print a line nobody priced: {offenders:?}",
+            offenders.len()
+        );
+    }
+
+    /// What a console that reprices things charges for a line, which is not what
+    /// `format!` billed for it: the layout counts a `█` as the one column it
+    /// measured, and the glass charges two.
+    fn charged(text: &str) -> usize {
+        text.chars()
+            .map(|ch| 1 + currency::disputed(ch) as usize)
+            .sum()
+    }
+
+    #[test]
+    fn a_report_row_is_as_long_as_the_row_was_billed_for() {
+        // The disk row from `squid status`, built the way the command builds it.
+        // The row is the whole complaint: nobody called the gauge too ugly, they
+        // called the table unreadable, and the table is unreadable because this
+        // row is a screen and a half long on the glass it is printed on.
+        let row = format!(
+            "  {:<14} [{}{}] 212.4 GB / 460 GB  247.6 GB free",
+            "Macintosh HD",
+            "█".repeat(20),
+            "░".repeat(8)
+        );
+        // Every character is one column to the layout, so the row is as many
+        // columns as it is characters — and twenty-eight of those characters are
+        // the gauge, which is what the console doubles.
+        assert_eq!(row.width(), row.chars().count());
+        assert_eq!(
+            charged(&row),
+            row.width() + 28,
+            "the row has to be overcharged before the exchange is worth testing"
+        );
+
+        let paid = Exchange::new(Prices::implied(936)).afford(&row);
+        assert_eq!(
+            charged(&paid),
+            paid.width(),
+            "a console may not charge for a cell the row did not pay for"
+        );
+        assert!(
+            paid.contains("Macintosh HD") && paid.contains("212.4 GB"),
+            "the row still says what it said: {paid}"
+        );
+    }
 }
