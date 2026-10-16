@@ -169,7 +169,10 @@ def geometry(lines, cols):
 
 
 def analyze(raw, echo=True):
-    """重放整条流,量每一个画稳的画面,返回问题列表(空 = 没花屏)。"""
+    """重放整条流,量每一个画稳的画面,返回问题列表(空 = 没花屏)。
+
+    "画稳"在这份文件里是有定义的:同一幅画面顶住 SETTLE 字节的写入不变。
+    """
     reported = re.search(r'MARK_STARTED\s+(\d{1,4})\s*x\s*(\d{1,4})', raw)
     if reported:
         cols, rows = int(reported.group(1)), int(reported.group(2))
@@ -195,19 +198,35 @@ def analyze(raw, echo=True):
             lines.pop()
         return lines
 
-    # 只对"画稳了"的画面下判据。crossterm 一格一格补 diff,采样切在中间就是半张画:
-    # 半张画当然缺右边界,拿它判花屏是自己冤枉自己。半张画和整张画的区别不用猜 ——
-    # 同一个画面被采到第二次,说明这次绘制已经结束、终端停在那儿了。
-    step = 64
+    # 只对"画稳了"的画面下判据 —— 半张画当然缺右边界,拿它判花屏是自己冤枉自己。
+    #
+    # 这里原来写的是"同一个画面被采到第二次就算画稳",听着顺理成章,其实是错的:
+    # 一次绘制在流里是一整段连续的写入(实测切面板那一次是 34688→37376,2.7 KB 一个
+    # burst),而采样每 64 字节一刀;一行中文要占掉 190 字节上下,也就是三刀。半张画
+    # 被连着采到两三次是必然发生的事,根本不是"画完了"的证据。真机那条流里,"进程卡片
+    # 压在历史面板上"的半帧有 33 个,每一个只顶住 64~192 字节的写入;而真正画完的画面
+    # 在两次绘制之间稳稳站住 1024~3840 字节(界面每一拍都在重画同一幅画,只有样式在动,
+    # 屏上的字却没变)。所以判据看的是寿命:一幅画要顶住 SETTLE 字节的写入不变,才算
+    # 画完过、终端真的停在那儿过 —— 用户在屏上能看见的,只有这种画面。
+    #
+    # 不用时间戳:流里压根没有时刻,能信的只有字节数。这条判据还顺带挡掉一件事:
+    # 流尾长度不是 step 的整数倍时,最后几刀采到的是同一份字节,旧判据会把它们
+    # 当成"画稳了",等于给一条被切短的流发合格证。
+    step, SETTLE = 64, 512
     frames = [tuple(render(raw[:cut])) for cut in range(step, len(raw) + step, step)]
-    seen, stable = {}, []
+
+    def painted(frame):
+        return sum(1 for l in frame if l.strip()) >= PAINTED
+
+    # 把采样按"同一幅画连着被采到"切成段:段长 = 这个画面顶住了多少字节的写入。
+    runs = []
     for frame in frames:
-        if sum(1 for l in frame if l.strip()) < PAINTED:
-            continue
-        count = seen.get(frame, 0)
-        seen[frame] = count + 1
-        if count == 1:
-            stable.append(frame)
+        if runs and runs[-1][0] == frame:
+            runs[-1][1] += step
+        else:
+            runs.append([frame, step])
+    lived = [run for run in runs if painted(run[0])]
+    stable = [frame for frame, span in lived if span >= SETTLE]
 
     # 退出时 TUI 会擦掉整屏(crossterm 的 Clear + LeaveAlternateScreen),所以"最后
     # 一帧"必然是空的。给人看的那一帧取画稳的画面里内容最多的那个。
@@ -261,15 +280,23 @@ def analyze(raw, echo=True):
         last = geometry(list(stable[-1]), cols)[1] if stable else []
         for note in last:
             print(note)
-    print(f"[frame ] 采样 {len(frames)} 次 · 画稳的界面 {checked} 个全部量过 · "
-          f"其中 {len(failures)} 个不合格")
+    print(f"[frame ] 采样 {len(frames)} 次 · 画过的画面 {len(lived)} 幅 · "
+          f"顶住 {SETTLE} 字节不变的 {len(stable)} 幅 · 量过 {checked} 幅 · "
+          f"不合格 {len(failures)} 幅")
     for index, probs in failures[:3]:
         for problem in probs:
             print(f"[frame ]   第 {index} 个画面: {problem}")
     problems.extend(p for _, probs in failures for p in probs)
     if not checked:
-        problems.append("屏上从来没有一个画稳、又画出了边框的界面可以判 "
-                        f"(至少 {PAINTED} 行、边框行不短于 {MIN_ROW} 格)")
+        # 没有一幅画站得住,有三种可能,都得说清楚,否则下一位又会跑到真机上
+        # 去找一个根本不存在的花屏:抓的那块屏一直在动(扫描进度就是这样)、
+        # 抓得太短(程序刚画完第一帧就退了)、或者屏上真的没画框。
+        longest = max([span for _, span in lived], default=0)
+        problems.append(f"屏上没有一幅画顶住 {SETTLE} 字节的写入不变"
+                        f"(最长的一幅只活了 {longest} 字节),所以没有可判的画面 —— "
+                        "要么抓的那块屏一直在动(避开扫描进度这类带进度的面板),"
+                        "要么抓得太短(把 TUI_DELAY / TUI_HOLD 调大),"
+                        f"要么屏上根本没画出边框(至少 {PAINTED} 行、边框行不短于 {MIN_ROW} 格)")
     return problems
 
 
@@ -290,8 +317,21 @@ def selftest():
         return ([top] + [mid] * right_rows + [bottom]
                 + [only] * (left_rows - right_rows))
 
+    def mid_paint(good, half, invisible=20, repeats=2):
+        """一幅整齐的画站定之后又画了第二幅,而第二幅只画到一半就没有下文。
+
+        invisible 段是纯粹的 SGR + 光标移动:屏上一个字都没改,却足够让"同一幅画
+        连着被采到"成立 —— 旧判据要的就是这个,可它采到的仍然是半张画。
+        """
+        return ('MARK_STARTED 140x35\r\n'
+                + ('\x1b[H' + '\r\n'.join(good)) * repeats
+                + '\x1b[2J\x1b[H' + '\r\n'.join(half)
+                + '\x1b[0m\x1b[?25l' * invisible
+                + '\x1b[2J\r\nMARK_QUIT\r\n')
+
     def stream(*screens, size='100x30'):
-        """把若干画面写成一条流;每个画面写两遍,好让采样认出"画稳了"。"""
+        """把若干画面写成一条流。每个画面写两遍:第二遍一个字都没改,于是这幅画
+        在流里站住了整整一遍画面的字节数 —— 这正是 SETTLE 要看见的那件事。"""
         out = [f'MARK_STARTED {size}\r\n']
         for screen in screens:
             body = '\x1b[H' + '\r\n'.join(screen)
@@ -321,6 +361,23 @@ def selftest():
         ("左栏比面板长", stream(side_by_side(31, 109, 14, 18), size='140x35'), False),
         # 而"窄框接在宽框下面"在 140 列窗口里同样得报:第 69 列是凭空冒出来的。
         ("140 列上窄框叠宽框", stream(card(100, 8) + card(70, 6), size='140x35'), True),
+        # 同一幅"窄框叠在宽框上"的画,站得住就判、站不住就不判。
+        # 这是本轮真机上那次误报的现场还原:切面板那一次绘制是 2.7 KB 一个 burst,
+        # 采样每 64 字节一刀,于是两幅画叠在一起的中间态被连着采到了三次。旧判据把
+        # "连着采到"读成"画稳了",当场判下"进程卡片压在历史面板上";而那一帧只活了
+        # 192 字节,用户在那台 Windows 上从来没看见过它 —— 我们却照着它查了一整轮
+        # 根本不存在的绘制 bug。现在同一幅画只许在"顶得住 512 字节不变"时定罪:
+        # 上面那条窄框叠宽框(站得住)照旧要报,这一条(半路上被切走)必须安静。
+        ("半张画不许下判词",
+         mid_paint(card(140, 12, fill='  存储空间'), card(100, 6) + card(70, 4)), False),
+        # 反过来也必须成立:一幅画都没站住的流,判据要说"我判不了",不许趁乱发合格证。
+        # 这条是 SETTLE 自己的保险 —— 否则"只看寿命"会被误读成"寿命不够就挑一幅像样的
+        # 判",那条路通向的正是本轮那种没人见过的花屏。同一条流在旧判据下是安静通过的:
+        # 最后一幅画被那段看不见的写入连着采到三次,旧判据认它画稳了,而它干净,于是
+        # 整条流被判成"没问题"—— 一次什么都没证明的测量,被记成了一次通过。
+        ("整条流没有一幅画站得住",
+         mid_paint(card(140, 12, fill='  存储空间'),
+                   card(140, 12, fill='  系统状态'), repeats=1), True),
         # 抓帧脚本自己炸了:远端 PowerShell 吐出一段它自己的报错,界面上一个字都没画。
         # 这种流必须把"壳子坏了"单独说出来。否则"花屏"的罪名会扣在一个根本没启动的
         # 界面上 —— 我们真的被这个假故障骗着去改过一版绘制代码。
