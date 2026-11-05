@@ -230,11 +230,11 @@ export default function App() {
 
   const changeLanguage = useCallback(
     async (nextLanguage: Language) => {
-      setLang(nextLanguage);
-      document.documentElement.lang = nextLanguage === "zh" ? "zh-CN" : "en";
       try {
         const next = await api.settingsSave({ language: nextLanguage });
         setSettings(next);
+        setLang(next.effectiveLanguage);
+        document.documentElement.lang = next.effectiveLanguage === "zh" ? "zh-CN" : "en";
       } catch (reason) {
         push(messageFrom(reason), "danger");
       }

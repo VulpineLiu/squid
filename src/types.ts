@@ -83,6 +83,7 @@ export interface SettingsView {
   purgeMinAgeDays: number;
   showAllocated: boolean;
   language: string | null;
+  effectiveLanguage: Language;
   historyKeep: number;
   setupReviewed: boolean;
   errors: string[];

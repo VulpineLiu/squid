@@ -96,7 +96,7 @@ export function SystemPage({
       <div className="system-gauges">
         <section className="system-gauge-card">
           <div className="system-gauge-head">
-            <span className="metric-icon tone-blue">
+            <span className="metric-icon tone-primary">
               <Cpu size={18} />
             </span>
             <div>
@@ -108,7 +108,7 @@ export function SystemPage({
             value={snapshot?.cpu.total ?? 0}
             size={168}
             stroke={13}
-            tone="blue"
+            tone="primary"
             label={t("Processor usage", "处理器占用")}
           >
             <strong className="gauge-number is-small">
@@ -142,7 +142,7 @@ export function SystemPage({
 
         <section className="system-gauge-card">
           <div className="system-gauge-head">
-            <span className="metric-icon tone-violet">
+            <span className="metric-icon tone-neutral">
               <Activity size={18} />
             </span>
             <div>
@@ -160,7 +160,7 @@ export function SystemPage({
             value={memoryPercent}
             size={168}
             stroke={13}
-            tone="violet"
+            tone="primary"
             label={t("Memory usage", "内存占用")}
           >
             <strong className="gauge-number is-small">{Math.round(memoryPercent)}%</strong>
@@ -185,7 +185,7 @@ export function SystemPage({
 
         <section className="system-gauge-card system-activity-card">
           <div className="system-gauge-head">
-            <span className="metric-icon tone-green">
+            <span className="metric-icon tone-primary">
               <Network size={18} />
             </span>
             <div>
@@ -319,7 +319,7 @@ export function SystemPage({
               const use = percent(volume.total - volume.free, volume.total);
               return (
                 <div className="volume-row" key={volume.mount_point}>
-                  <span className="metric-icon tone-blue">
+                  <span className="metric-icon tone-primary">
                     <HardDrive size={17} />
                   </span>
                   <div>
@@ -331,7 +331,7 @@ export function SystemPage({
                     <UsageBar
                       used={volume.total - volume.free}
                       total={volume.total}
-                      tone={use > 88 ? "red" : "blue"}
+                      tone={use > 88 ? "danger" : "primary"}
                     />
                   </div>
                   <b>{Math.round(use)}%</b>
@@ -363,7 +363,7 @@ export function SystemPage({
             snapshot?.network.interfaces ?? 0,
           )} 个网络接口`,
         )}
-        <MetricBar value={snapshot?.disk.activity ?? 0} tone="green" />
+        <MetricBar value={snapshot?.disk.activity ?? 0} tone="success" />
       </div>
 
       <ConfirmDialog

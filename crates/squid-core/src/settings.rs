@@ -338,11 +338,32 @@ fn system_locale() -> Option<Locale> {
     None
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn system_locale() -> Option<Locale> {
-    // Linux and Windows describe the language through the environment only,
-    // and step 3 of `detect` has already read every bit of it.
+    use windows::Win32::Globalization::GetUserDefaultUILanguage;
+
+    // The environment is not a reliable proxy for the Windows display
+    // language: Explorer and the Store may run under a different UI locale.
+    let langid = unsafe { GetUserDefaultUILanguage() };
+    Some(locale_from_langid(langid))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn system_locale() -> Option<Locale> {
+    // Linux describes the language through the environment, already read by
+    // step 3 of `detect`.
     None
+}
+
+/// Windows LANGIDs pack a primary language in the low ten bits.
+#[cfg(any(target_os = "windows", test))]
+fn locale_from_langid(langid: u16) -> Locale {
+    const PRIMARY_CHINESE: u16 = 0x04;
+    if langid & 0x03ff == PRIMARY_CHINESE {
+        Locale::Zh
+    } else {
+        Locale::En
+    }
 }
 
 /// Convenience for reports that want the "freed" number in display units.
@@ -452,6 +473,16 @@ mod tests {
             ])),
             Some(Locale::Zh)
         );
+    }
+
+    #[test]
+    fn windows_langid_uses_the_primary_language() {
+        assert_eq!(locale_from_langid(0x0004), Locale::Zh);
+        assert_eq!(locale_from_langid(0x0804), Locale::Zh, "zh-CN");
+        assert_eq!(locale_from_langid(0x0404), Locale::Zh, "zh-TW");
+        assert_eq!(locale_from_langid(0x0409), Locale::En, "en-US");
+        assert_eq!(locale_from_langid(0x0809), Locale::En, "en-GB");
+        assert_eq!(locale_from_langid(0x0411), Locale::En, "ja-JP fallback");
     }
 
     #[test]

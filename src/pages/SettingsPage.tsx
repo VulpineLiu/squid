@@ -8,6 +8,7 @@ import {
   Languages,
   LockKeyhole,
   Plus,
+  Power,
   RefreshCw,
   ShieldCheck,
   Trash2,
@@ -31,6 +32,7 @@ import {
   Button,
   InlineError,
   PageHeader,
+  Toggle,
   useToast,
 } from "../components/ui";
 
@@ -58,6 +60,8 @@ export function SettingsPage({
   const [error, setError] = useState<string | null>(null);
   const [permission, setPermission] = useState<PermissionStatus | null>(null);
   const [checkingPermission, setCheckingPermission] = useState(false);
+  const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [savingAutostart, setSavingAutostart] = useState(false);
 
   const checkPermissions = useCallback(async () => {
     setCheckingPermission(true);
@@ -77,6 +81,21 @@ export function SettingsPage({
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [bootstrap.platform, checkPermissions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .autostartStatus()
+      .then((enabled) => {
+        if (!cancelled) setAutostart(enabled);
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(messageFrom(reason));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const save = async (patch: Parameters<typeof api.settingsSave>[0]) => {
     setSaving(true);
@@ -132,6 +151,24 @@ export function SettingsPage({
     await save({ deleteMode: mode });
   };
 
+  const setLaunchAtLogin = async (enabled: boolean) => {
+    setSavingAutostart(true);
+    setError(null);
+    try {
+      setAutostart(await api.setAutostart(enabled));
+      push(
+        enabled
+          ? t("Squid will launch when you sign in", "Squid 将在登录时自动启动")
+          : t("Launch at login disabled", "已关闭开机自启"),
+        "success",
+      );
+    } catch (reason) {
+      setError(messageFrom(reason));
+    } finally {
+      setSavingAutostart(false);
+    }
+  };
+
   return (
     <div className="page settings-page">
       <PageHeader
@@ -152,7 +189,12 @@ export function SettingsPage({
               <Languages size={18} />
               {t("Language & appearance", "语言与外观")}
             </h2>
-            <p>{t("The interface follows this setting on both platforms.", "两个平台的界面都会使用此设置。")}</p>
+            <p>
+              {t(
+                "The current system language is selected by default.",
+                "默认选择当前系统语言。",
+              )}
+            </p>
           </div>
         </div>
         <div className="language-picker">
@@ -250,6 +292,40 @@ export function SettingsPage({
           </div>
         </section>
       ) : null}
+
+      <section className="settings-section">
+        <div className="settings-section-head">
+          <div>
+            <h2>
+              <Power size={18} />
+              {t("Startup", "启动")}
+            </h2>
+            <p>
+              {t(
+                "Choose whether Squid starts automatically after you sign in.",
+                "选择登录电脑后是否自动启动 Squid。",
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="settings-row is-first">
+          <div>
+            <strong>{t("Launch at login", "开机自启")}</strong>
+            <span>
+              {t(
+                "The app starts automatically and keeps the tray available.",
+                "登录后自动启动，并保留托盘入口。",
+              )}
+            </span>
+          </div>
+          <Toggle
+            checked={autostart ?? false}
+            onChange={(enabled) => void setLaunchAtLogin(enabled)}
+            disabled={autostart === null || savingAutostart}
+            label={t("Launch Squid at login", "登录时启动 Squid")}
+          />
+        </div>
+      </section>
 
       <section className="settings-section">
         <div className="settings-section-head">
@@ -434,7 +510,7 @@ export function SettingsPage({
         </div>
         <div className="path-settings-list">
           <div className="path-setting-row">
-            <span className="metric-icon tone-blue">
+            <span className="metric-icon tone-primary">
               <FileCog size={17} />
             </span>
             <div>
@@ -454,7 +530,7 @@ export function SettingsPage({
             </Button>
           </div>
           <div className="path-setting-row">
-            <span className="metric-icon tone-violet">
+            <span className="metric-icon tone-neutral">
               <FolderClock size={17} />
             </span>
             <div>
@@ -474,7 +550,7 @@ export function SettingsPage({
             </Button>
           </div>
           <div className="path-setting-row">
-            <span className="metric-icon tone-green">
+            <span className="metric-icon tone-neutral">
               <HardDrive size={17} />
             </span>
             <div>

@@ -52,7 +52,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 | Storage | Measures a chosen folder, exposes the largest children, drills down, and finds the largest files |
 | Real-time monitor | Live CPU, memory, network, disk, battery, volume and process data; process termination asks for confirmation |
 | History | Lists cleanup sessions, shows the ledger, restores files that are still in Trash/Recycle Bin, and opens the bin |
-| Settings | Language, deletion mode, history retention, protected paths, local file locations, and software updates |
+| Settings | Chinese/English language selection that defaults to the system language, launch at login, deletion mode, history retention, protected paths, local file locations, and software updates |
 
 `⌘1`–`⌘8` on macOS and `Ctrl+1`–`Ctrl+8` on Windows switch screens.
 
@@ -60,7 +60,13 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
 Squid keeps running after its main window is closed. The tray menu can reopen
 the window and jump directly to Daily cleanup, Uninstall apps or Deep Clean.
-Use **Quit Squid** in the same menu to stop the background process.
+The tray follows the active interface language. Use **Quit Squid** in the same
+menu to stop the background process.
+
+**Settings → Startup** registers the app for the current user only. macOS
+uses a user LaunchAgent, Windows uses the current-user Run key, and Linux uses
+an XDG autostart desktop entry. Enabling or disabling launch at login does not
+require administrator access.
 
 ## Safety boundary
 
@@ -115,6 +121,8 @@ The update implementation mirrors `nex_shift`:
   bytes.
 - The application checks at most once a day when automatic checks are enabled;
   the last-check day lives in `updates.json`.
+- A verified download can be installed and restarted, or discarded with the
+  neutral outlined action shared with `nex_shift`.
 - macOS mounts the DMG after exit and swaps `Squid.app` with rollback on failure.
 - Windows waits for `squid-desktop.exe` to exit, runs the same NSIS installer
   silently, then relaunches it from `%LOCALAPPDATA%\Programs\Squid`.

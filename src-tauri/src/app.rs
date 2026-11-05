@@ -9,8 +9,8 @@ use squid_core::ledger::{self, Session};
 use squid_core::paths;
 use squid_core::progress::{CancelToken, Event, Progress};
 use squid_core::{
-    AppInfo, Bytes, Category, CleanupItem, DeleteMode, ItemKind, LockReason, ScanReport, Settings,
-    UninstallPlan,
+    AppInfo, Bytes, Category, CleanupItem, DeleteMode, ItemKind, Locale, LockReason, ScanReport,
+    Settings, UninstallPlan,
 };
 use squid_engine::analyze::{self, FileEntry, Node};
 use squid_engine::delete::{self, DeleteJob, DeleteOutcome};
@@ -316,6 +316,7 @@ pub struct SettingsView {
     purge_min_age_days: u64,
     show_allocated: bool,
     language: Option<String>,
+    effective_language: String,
     history_keep: usize,
     setup_reviewed: bool,
     errors: Vec<String>,
@@ -330,6 +331,7 @@ impl SettingsView {
             purge_min_age_days: settings.purge_min_age_days,
             show_allocated: settings.show_allocated,
             language: settings.language.clone(),
+            effective_language: Locale::detect(settings).code().into(),
             history_keep: settings.history_keep,
             setup_reviewed: settings.desktop_setup_reviewed,
             errors,
@@ -835,7 +837,7 @@ pub struct SettingsPatch {
 }
 
 #[tauri::command]
-pub async fn settings_save(patch: SettingsPatch) -> Result<SettingsView, String> {
+pub async fn settings_save(app: AppHandle, patch: SettingsPatch) -> Result<SettingsView, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let (mut settings, mut errors) = Settings::load();
         if let Some(mode) = patch.delete_mode {
@@ -860,6 +862,7 @@ pub async fn settings_save(patch: SettingsPatch) -> Result<SettingsView, String>
         settings
             .save()
             .map_err(|error| format!("Could not save settings: {error}"))?;
+        crate::sync_tray(&app, Locale::detect(&settings));
         errors.retain(|error| !error.contains("config.toml"));
         Ok(SettingsView::from_settings(&settings, errors))
     })

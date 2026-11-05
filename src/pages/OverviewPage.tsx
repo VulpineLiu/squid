@@ -145,7 +145,7 @@ export function OverviewPage({
 
         <div className="overview-gauge-wrap">
           <div className="gauge-halo" />
-          <Gauge value={usedPercent} size={226} stroke={16} tone={usedPercent > 85 ? "red" : "blue"}>
+          <Gauge value={usedPercent} size={226} stroke={16} tone={usedPercent > 85 ? "danger" : "primary"}>
             <span className="gauge-caption">{t("Disk in use", "磁盘已用")}</span>
             <strong className="gauge-number">{Math.round(usedPercent)}%</strong>
             <span className="gauge-sub">
@@ -202,7 +202,7 @@ export function OverviewPage({
           subtitle={t("The right tool for the next five minutes.", "用几分钟完成最常用的事。")}
         />
         <div className="quick-grid">
-          <button className="quick-card tone-cyan" onClick={() => onNavigate("applications")}>
+          <button className="quick-card tone-primary" onClick={() => onNavigate("applications")}>
             <span className="quick-icon">
               <AppWindow size={22} />
             </span>
@@ -212,7 +212,7 @@ export function OverviewPage({
             </span>
             <ChevronRight size={17} />
           </button>
-          <button className="quick-card tone-indigo" onClick={() => onNavigate("storage")}>
+          <button className="quick-card tone-neutral" onClick={() => onNavigate("storage")}>
             <span className="quick-icon">
               <Boxes size={22} />
             </span>
@@ -222,7 +222,7 @@ export function OverviewPage({
             </span>
             <ChevronRight size={17} />
           </button>
-          <button className="quick-card tone-violet" onClick={() => onNavigate("purge")}>
+          <button className="quick-card tone-primary" onClick={() => onNavigate("purge")}>
             <span className="quick-icon">
               <Sparkles size={22} />
             </span>
@@ -238,7 +238,7 @@ export function OverviewPage({
       <section className="overview-metrics">
         <div className="metric-panel">
           <div className="metric-panel-head">
-            <span className="metric-icon tone-blue">
+            <span className="metric-icon tone-primary">
               <CircleGauge size={18} />
             </span>
             <div>
@@ -251,14 +251,14 @@ export function OverviewPage({
             </div>
             <b>{Math.round(snapshot?.cpu.total ?? 0)}%</b>
           </div>
-          <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="blue" />
+          <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="primary" />
           <small>
             {snapshot?.cpu.brand || t("Processor details unavailable", "暂无处理器信息")}
           </small>
         </div>
         <div className="metric-panel">
           <div className="metric-panel-head">
-            <span className="metric-icon tone-violet">
+            <span className="metric-icon tone-neutral">
               <Boxes size={18} />
             </span>
             <div>
@@ -273,7 +273,7 @@ export function OverviewPage({
             </div>
             <b>{Math.round(memoryPercent)}%</b>
           </div>
-          <UsageBar used={memoryPercent} total={100} tone="violet" />
+          <UsageBar used={memoryPercent} total={100} tone="primary" />
           <small>
             {snapshot
               ? t(
@@ -285,7 +285,11 @@ export function OverviewPage({
         </div>
         <div className="metric-panel">
           <div className="metric-panel-head">
-            <span className="metric-icon tone-green">
+            <span
+              className={`metric-icon ${
+                usedPercent > 85 ? "tone-warning" : "tone-success"
+              }`}
+            >
               <HardDrive size={18} />
             </span>
             <div>
@@ -301,7 +305,7 @@ export function OverviewPage({
           <UsageBar
             used={usedPercent}
             total={100}
-            tone={usedPercent > 85 ? "red" : "green"}
+            tone={usedPercent > 85 ? "danger" : "success"}
           />
           <small>{volume?.mount_point || bootstrap.configPath}</small>
         </div>

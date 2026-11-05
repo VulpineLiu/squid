@@ -35,8 +35,10 @@ export interface CategoryMeta {
   blurbEn: string;
   blurbZh: string;
   icon: typeof Boxes;
-  tone: string;
+  tone: Tone;
 }
+
+export type Tone = "primary" | "success" | "warning" | "danger" | "neutral";
 
 export const CATEGORY_META: Record<Category, CategoryMeta> = {
   "system-junk": {
@@ -45,7 +47,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Temporary files and system scratch data",
     blurbZh: "临时文件与系统缓存",
     icon: Trash2,
-    tone: "blue",
+    tone: "primary",
   },
   "app-caches": {
     en: "App caches",
@@ -53,7 +55,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Caches apps can rebuild",
     blurbZh: "应用可自动重建的缓存",
     icon: AppWindow,
-    tone: "cyan",
+    tone: "primary",
   },
   "browser-caches": {
     en: "Browser caches",
@@ -61,7 +63,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Web content and offline data",
     blurbZh: "网页内容与离线数据",
     icon: Globe2,
-    tone: "violet",
+    tone: "primary",
   },
   logs: {
     en: "Logs & reports",
@@ -69,7 +71,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Rotated logs and crash reports",
     blurbZh: "旧日志与崩溃报告",
     icon: FileWarning,
-    tone: "orange",
+    tone: "neutral",
   },
   developer: {
     en: "Developer files",
@@ -77,7 +79,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Simulators, archives and tool caches",
     blurbZh: "模拟器、归档与工具缓存",
     icon: Code2,
-    tone: "indigo",
+    tone: "neutral",
   },
   "project-artifacts": {
     en: "Build artefacts",
@@ -85,7 +87,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Regenerable project build folders",
     blurbZh: "可重新生成的构建目录",
     icon: PackageOpen,
-    tone: "teal",
+    tone: "primary",
   },
   trash: {
     en: "Trash",
@@ -93,7 +95,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Files waiting to be emptied",
     blurbZh: "等待清空的文件",
     icon: Trash2,
-    tone: "slate",
+    tone: "neutral",
   },
   "language-packs": {
     en: "Language packs",
@@ -101,7 +103,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Unused voice and localisation data",
     blurbZh: "未使用的语音与本地化数据",
     icon: Languages,
-    tone: "pink",
+    tone: "neutral",
   },
   leftovers: {
     en: "Leftovers",
@@ -109,7 +111,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Data left by removed applications",
     blurbZh: "已删除应用留下的数据",
     icon: Puzzle,
-    tone: "amber",
+    tone: "warning",
   },
 };
 
@@ -490,14 +492,14 @@ export function Gauge({
   value,
   size = 160,
   stroke = 12,
-  tone = "blue",
+  tone = "primary",
   children,
   label,
 }: {
   value: number;
   size?: number;
   stroke?: number;
-  tone?: "blue" | "green" | "orange" | "violet" | "red";
+  tone?: Tone;
   children?: ReactNode;
   label?: string;
 }) {
@@ -540,10 +542,10 @@ export function Gauge({
 
 export function MetricBar({
   value,
-  tone = "blue",
+  tone = "primary",
 }: {
   value: number;
-  tone?: "blue" | "green" | "orange" | "violet" | "red";
+  tone?: Tone;
 }) {
   return (
     <div className={`metric-bar tone-${tone}`}>
@@ -810,11 +812,11 @@ export function PathRow({
 export function UsageBar({
   used,
   total,
-  tone = "blue",
+  tone = "primary",
 }: {
   used: number;
   total: number;
-  tone?: "blue" | "green" | "orange" | "violet" | "red";
+  tone?: Tone;
 }) {
   return (
     <div className={`usage-bar tone-${tone}`}>

@@ -1,8 +1,10 @@
 mod app;
+mod autostart;
 mod permissions;
 mod process;
 mod update;
 
+use squid_core::{Locale, Settings};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
@@ -25,15 +27,53 @@ fn navigate_to(app: &AppHandle, page: &'static str) {
     let _ = app.emit("squid://navigate", page);
 }
 
-fn create_tray(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "打开 Squid", true, None::<&str>)?;
-    let cleanup = MenuItem::with_id(app, "cleanup", "日常清理", true, None::<&str>)?;
-    let apps = MenuItem::with_id(app, "applications", "应用卸载", true, None::<&str>)?;
-    let purge = MenuItem::with_id(app, "purge", "深度清理", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出 Squid", true, None::<&str>)?;
+fn tray_text(locale: Locale, en: &'static str, zh: &'static str) -> &'static str {
+    if locale == Locale::Zh {
+        zh
+    } else {
+        en
+    }
+}
+
+fn tray_menu(app: &AppHandle, locale: Locale) -> tauri::Result<Menu<tauri::Wry>> {
+    let open = MenuItem::with_id(
+        app,
+        "open",
+        tray_text(locale, "Open Squid", "打开 Squid"),
+        true,
+        None::<&str>,
+    )?;
+    let cleanup = MenuItem::with_id(
+        app,
+        "cleanup",
+        tray_text(locale, "Daily cleanup", "日常清理"),
+        true,
+        None::<&str>,
+    )?;
+    let apps = MenuItem::with_id(
+        app,
+        "applications",
+        tray_text(locale, "Uninstall apps", "应用卸载"),
+        true,
+        None::<&str>,
+    )?;
+    let purge = MenuItem::with_id(
+        app,
+        "purge",
+        tray_text(locale, "Deep Clean", "深度清理"),
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(
+        app,
+        "quit",
+        tray_text(locale, "Quit Squid", "退出 Squid"),
+        true,
+        None::<&str>,
+    )?;
     let first_separator = PredefinedMenuItem::separator(app)?;
     let last_separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(
+    Menu::with_items(
         app,
         &[
             &open,
@@ -44,7 +84,11 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             &last_separator,
             &quit,
         ],
-    )?;
+    )
+}
+
+fn create_tray(app: &AppHandle, locale: Locale) -> tauri::Result<()> {
+    let menu = tray_menu(app, locale)?;
     let icon = app
         .default_window_icon()
         .cloned()
@@ -65,6 +109,15 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
     Ok(())
+}
+
+pub(crate) fn sync_tray(app: &AppHandle, locale: Locale) {
+    let Some(tray) = app.tray_by_id("squid-tray") else {
+        return;
+    };
+    if let Ok(menu) = tray_menu(app, locale) {
+        let _ = tray.set_menu(Some(menu));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -102,6 +155,8 @@ pub fn run() {
             app::settings_save,
             app::whitelist_add,
             app::whitelist_remove,
+            autostart::autostart_status,
+            autostart::set_autostart,
             app::reveal_path,
             app::open_trash,
             permissions::permission_status,
@@ -114,7 +169,8 @@ pub fn run() {
             update::set_update_check_enabled,
         ])
         .setup(|app| {
-            create_tray(app.handle())?;
+            let (settings, _) = Settings::load();
+            create_tray(app.handle(), Locale::detect(&settings))?;
             update::spawn_startup_check(app.handle());
             Ok(())
         })

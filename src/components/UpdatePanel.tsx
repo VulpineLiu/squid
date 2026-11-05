@@ -184,7 +184,8 @@ export function UpdatePanel({
         ) : null}
         {verified && !flow.installing ? (
           <Button
-            variant="ghost"
+            variant="secondary"
+            className="update-cancel"
             icon={<X size={14} />}
             onClick={() => void flow.clear()}
           >

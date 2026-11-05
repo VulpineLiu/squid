@@ -967,7 +967,7 @@ checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
 
 [[package]]
 name = "squid-cli"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "squid-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1005,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "squid-engine"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1025,7 +1025,7 @@ dependencies = [
 
 [[package]]
 name = "squid-platform"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "dirs",
  "libc",
@@ -1042,7 +1042,7 @@ dependencies = [
 
 [[package]]
 name = "squid-rules"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "globset",
  "serde",
@@ -1054,7 +1054,7 @@ dependencies = [
 
 [[package]]
 name = "squid-stats"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "libc",
@@ -1066,7 +1066,7 @@ dependencies = [
 
 [[package]]
 name = "squid-tui"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "chrono",

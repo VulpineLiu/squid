@@ -3489,7 +3489,7 @@ dependencies = [
 
 [[package]]
 name = "squid-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3508,10 +3508,11 @@ dependencies = [
 
 [[package]]
 name = "squid-desktop"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "dirs 6.0.0",
  "ed25519-dalek",
  "globset",
  "hex",
@@ -3532,7 +3533,7 @@ dependencies = [
 
 [[package]]
 name = "squid-engine"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3552,7 +3553,7 @@ dependencies = [
 
 [[package]]
 name = "squid-platform"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "dirs 6.0.0",
  "libc",
@@ -3569,7 +3570,7 @@ dependencies = [
 
 [[package]]
 name = "squid-rules"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "globset",
  "serde",
@@ -3581,7 +3582,7 @@ dependencies = [
 
 [[package]]
 name = "squid-stats"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "libc",

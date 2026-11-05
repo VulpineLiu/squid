@@ -31,7 +31,7 @@ import {
   SectionTitle,
 } from "../components/ui";
 
-const BAR_TONES = ["blue", "violet", "cyan", "teal", "orange", "pink", "indigo", "slate"];
+const BAR_TONES = ["primary", "neutral"] as const;
 
 function nodeSize(node: { allocated: number; logical: number }): number {
   return node.allocated || node.logical;
