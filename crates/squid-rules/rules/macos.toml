@@ -456,16 +456,6 @@ risky = true
 note = "Eject instead of deleting; squid never removes a mounted volume."
 
 [[rule]]
-id = "old-downloads"
-category = "system"
-title = "Downloads older than 30 days"
-patterns = ["~/Downloads/*.dmg", "~/Downloads/*.pkg", "~/Downloads/*.zip"]
-mode = "files"
-os = ["macos"]
-min_age_days = 30
-select_by_default = false
-
-[[rule]]
 id = "user-trash"
 category = "trash"
 title = "Trash"

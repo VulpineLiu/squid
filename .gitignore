@@ -7,13 +7,19 @@
 # ── 构建产物 ─────────────────────────────────────────────────────────
 # cargo 的输出(debug / release / 各 target triple 都在它下面)。
 /target/
+/src-tauri/target/
+/artifacts/
 # scripts/release.sh 的产物:通用二进制 + tar.gz + sha256。
 # 发布走 GitHub Release 附件和 Homebrew formula,不进仓库。
 /dist/
+node_modules/
+.vite/
+src-tauri/gen/
 *.tar.gz
 *.sha256
 *.dmg
 *.zip
+*.exe
 
 # ── 只读参考代码 ─────────────────────────────────────────────────────
 # 本地 clone 的第三方参考项目(自带 .git,数百 MB),不打包、不提交、不发版。
@@ -52,3 +58,7 @@ __pycache__/
 .env.*
 !.env.example
 *.local
+
+# ── 显式纳管的发布产物 ───────────────────────────────────────────────
+!release/0.1.3/Squid-0.1.3-macOS-universal.dmg
+!release/0.1.3/Squid-Setup-0.1.3-win-x64.exe

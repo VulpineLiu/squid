@@ -51,3 +51,41 @@ windows-build-test:
       allow_failure: true
   script:
     - pwsh -File scripts/ci-windows.ps1
+
+desktop-frontend:
+  stage: check
+  image: node:22-bookworm
+  cache:
+    key:
+      files: [pnpm-lock.yaml]
+    paths: [.pnpm-store]
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@8.6.6 --activate
+    - pnpm config set store-dir .pnpm-store
+  script:
+    - pnpm install --frozen-lockfile
+    - pnpm check
+    - pnpm build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 day
+
+desktop-rust-check:
+  stage: check
+  image: rust:1.85
+  needs:
+    - job: desktop-frontend
+      artifacts: true
+  cache:
+    key:
+      files: [src-tauri/Cargo.lock]
+    paths: [.cargo/registry, .cargo/index, src-tauri/target/]
+  before_script:
+    - apt-get update
+    - apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+  script:
+    - cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+    - cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+    - cargo test --manifest-path src-tauri/Cargo.toml --lib

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Squid analyzes the folder you choose and removes only the items you approve.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Squid analyzes your Downloads folder only when you choose it.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Squid analyzes your Desktop folder only when you choose it.</string>
+	<key>NSPicturesFolderUsageDescription</key>
+	<string>Squid measures picture folder sizes only when you choose that folder.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Squid can analyze removable volumes you select.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Squid can analyze network volumes you select.</string>
+</dict>
+</plist>

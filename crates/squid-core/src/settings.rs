@@ -33,6 +33,9 @@ pub struct Settings {
     pub language: Option<String>,
     /// Number of history sessions to keep.
     pub history_keep: usize,
+    /// Whether the desktop app's first-run permission card has been dismissed.
+    /// Older configs have no such field and therefore see the card once.
+    pub desktop_setup_reviewed: bool,
 }
 
 impl Default for Settings {
@@ -63,6 +66,7 @@ impl Default for Settings {
             show_allocated: true,
             language: None,
             history_keep: 60,
+            desktop_setup_reviewed: false,
         }
     }
 }
@@ -476,5 +480,12 @@ mod tests {
             Locale::detect(&settings),
             Locale::detect(&Settings::default())
         );
+    }
+
+    #[test]
+    fn an_existing_config_has_not_reviewed_the_desktop_setup() {
+        let older = "history_keep = 60\n";
+        let restored: Settings = toml::from_str(older).unwrap();
+        assert!(!restored.desktop_setup_reviewed);
     }
 }

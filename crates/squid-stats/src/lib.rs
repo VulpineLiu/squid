@@ -12,7 +12,8 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::{
-    DiskUsage, Disks, Networks, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System,
+    DiskRefreshKind, DiskUsage, Disks, Networks, ProcessRefreshKind, ProcessesToUpdate,
+    RefreshKind, System,
 };
 
 mod battery;
@@ -198,7 +199,13 @@ impl Sampler {
         );
         Sampler {
             networks: Networks::new_with_refreshed_list(),
-            disks: Disks::new_with_refreshed_list(),
+            // Capacity comes from squid-platform's statvfs path. Asking
+            // sysinfo for storage here uses CoreFoundation's
+            // `AvailableCapacityForImportantUsage`, which enumerates every
+            // CacheDelete provider on macOS and can prompt for media access.
+            disks: Disks::new_with_refreshed_list_specifics(
+                DiskRefreshKind::nothing().with_io_usage(),
+            ),
             system,
             last: Instant::now(),
             host: HostInfo::gather(),
@@ -247,7 +254,8 @@ impl Sampler {
             ProcessRefreshKind::nothing().with_cpu().with_memory(),
         );
         self.networks.refresh(true);
-        self.disks.refresh(true);
+        self.disks
+            .refresh_specifics(true, DiskRefreshKind::nothing().with_io_usage());
 
         let seconds = elapsed.as_secs_f64();
         let cpu = cpu_stats(&self.system);

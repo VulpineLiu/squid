@@ -4,16 +4,40 @@ macOS / Windows 磁盘清理与系统监控工具：清理缓存与系统垃圾�
 分析磁盘占用、实时监控资源。命令行与内置 TUI 共用同一套引擎，产物是一个静态二进制，
 不装后台进程、不写 shell 配置、不需要 root。
 
+## 桌面应用
+
+仓库现在同时提供 macOS / Windows 原生桌面程序 **Squid**。桌面端沿用 `nex_shift` 的技术栈
+（Tauri 2 + React 19 + TypeScript + Vite）和更新通道，直接复用本仓库现有 Rust 清理引擎：
+
+- 界面：CleanMyMac 风格的概览、清理、应用卸载、深度清理、存储空间、系统状态、历史记录和设置；
+- 安全：GUI 只能选择后端扫描缓存中的索引，删除前仍由 Rust 引擎重新校验路径、锚点、白名单和锁定状态；
+- 更新：`releases` 分支中的 `squid-update.json` + 安装包，文件大小与 SHA256 始终校验，可选 Ed25519 清单签名；
+- 本地化：中英双语，跟随现有 `Settings` 语言偏好。
+
+开发与构建：
+
+```bash
+pnpm install
+pnpm desktop:dev                 # 开发窗口
+pnpm desktop:build               # 当前平台安装包
+bash scripts/build-macos-release.sh
+bash scripts/build-windows-release.sh
+```
+
+完整的桌面架构、权限和发布说明见 [`docs/DESKTOP.md`](docs/DESKTOP.md) 与
+[`docs/RELEASE.md`](docs/RELEASE.md)。Nex 系列应用的统一主色与设计常量见
+[`docs/DESIGN.md`](docs/DESIGN.md)。下面的 CLI / TUI 文档仍然有效，三个入口共用同一套扫描与删除核心。
+
 ## 特性
 
-| 能力 | 说明 | 入口 |
+| 能力 | 说明 | 桌面 / CLI |
 | --- | --- | --- |
-| 清理 | 内置规则 macOS 39 条 / Windows 30 条：应用与浏览器缓存、日志与崩溃报告、Xcode DerivedData、Windows Update 残留、废纸篓 / 回收站等 | `squid clean` |
-| 卸载 | 按名称定位 App（macOS 扫 `/Applications` 与 bundle id，Windows 读注册表卸载表），本体与散落的偏好、缓存、容器 / AppData 残留一起进入删除计划 | `squid uninstall` |
-| 深度清理 | `node_modules` 等项目构建产物、磁盘镜像、陈旧安装包与下载 | `squid purge` |
-| 存储分析 | 体积树与最大文件，可逐层下钻 | `squid analyze`、`state` 存储面板 |
-| 系统监控 | CPU / 内存 / 网络 / 磁盘 / 电池 / 温度 / 进程，并可结束选中的进程 | `squid status`、`state` 系统面板 |
-| 历史与撤销 | 每次真实删除写一条 JSON 账本，可将仍在废纸篓 / 回收站里的文件原样放回 | `squid history`、`squid undo` |
+| 清理 | 内置规则 macOS 39 条 / Windows 30 条：应用与浏览器缓存、日志与崩溃报告、Xcode DerivedData、Windows Update 残留、废纸篓 / 回收站等 | 桌面“清理” / `squid clean` |
+| 卸载 | 按名称定位 App（macOS 扫 `/Applications` 与 bundle id，Windows 读注册表卸载表），本体与散落的偏好、缓存、容器 / AppData 残留一起进入删除计划 | 桌面“应用程序” / `squid uninstall` |
+| 深度清理 | `node_modules` 等项目构建产物、磁盘镜像、陈旧安装包与下载 | 桌面“深度清理” / `squid purge` |
+| 存储分析 | 体积树与最大文件，可逐层下钻 | 桌面“存储空间” / `squid analyze` |
+| 系统监控 | CPU / 内存 / 网络 / 磁盘 / 电池 / 温度 / 进程，并可结束选中的进程 | 桌面“系统状态” / `squid status` |
+| 历史与撤销 | 每次真实删除写一条 JSON 账本，可将仍在废纸篓 / 回收站里的文件原样放回 | 桌面“历史记录” / `squid history`、`squid undo` |
 
 - 语言：Rust 1.80+，workspace 由 7 个 crate 组成
 - 界面：中英双语文案，跟随系统语言；真彩色 / 256 色 / 无色三档自动适配
