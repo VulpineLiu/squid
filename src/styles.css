@@ -368,8 +368,22 @@ select:focus-visible,
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 13px;
   padding: 12px 1px;
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.nav-group-label {
+  padding: 0 11px 5px;
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-medium);
+  letter-spacing: 0.02em;
 }
 
 .nav-item {

@@ -1,6 +1,8 @@
 import {
   AppWindow,
+  Boxes,
   ChevronDown,
+  CircleGauge,
   Eraser,
   History,
   LayoutDashboard,
@@ -8,6 +10,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  WandSparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAppsWorkspace } from "./hooks/useAppsWorkspace";
@@ -36,29 +39,63 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { StoragePage } from "./pages/StoragePage";
 import { SystemPage } from "./pages/SystemPage";
 
-const NAV_ITEMS: {
-  id: PageId;
+const NAV_GROUPS: {
   labelEn: string;
   labelZh: string;
-  icon: typeof LayoutDashboard;
+  items: {
+    id: PageId;
+    labelEn: string;
+    labelZh: string;
+    icon: typeof LayoutDashboard;
+  }[];
 }[] = [
   {
-    id: "overview",
-    labelEn: "Computer overview",
-    labelZh: "电脑概览",
-    icon: LayoutDashboard,
+    labelEn: "Maintenance",
+    labelZh: "维护",
+    items: [
+      {
+        id: "overview",
+        labelEn: "Computer overview",
+        labelZh: "电脑概览",
+        icon: LayoutDashboard,
+      },
+      {
+        id: "cleanup",
+        labelEn: "Daily cleanup",
+        labelZh: "日常清理",
+        icon: Eraser,
+      },
+      {
+        id: "applications",
+        labelEn: "Uninstall apps",
+        labelZh: "应用卸载",
+        icon: AppWindow,
+      },
+      {
+        id: "purge",
+        labelEn: "Deep Clean",
+        labelZh: "深度清理",
+        icon: WandSparkles,
+      },
+    ],
   },
   {
-    id: "cleanup",
-    labelEn: "Daily cleanup",
-    labelZh: "日常清理",
-    icon: Eraser,
-  },
-  {
-    id: "applications",
-    labelEn: "Uninstall apps",
-    labelZh: "应用卸载",
-    icon: AppWindow,
+    labelEn: "Insights",
+    labelZh: "洞察",
+    items: [
+      {
+        id: "storage",
+        labelEn: "Storage",
+        labelZh: "存储空间",
+        icon: Boxes,
+      },
+      {
+        id: "system",
+        labelEn: "Real-time monitor",
+        labelZh: "实时监控",
+        icon: CircleGauge,
+      },
+    ],
   },
 ];
 
@@ -68,7 +105,7 @@ const PAGE_TITLES: Record<PageId, [string, string]> = {
   applications: ["Uninstall apps", "应用卸载"],
   purge: ["Deep Clean", "深度清理"],
   storage: ["Storage", "存储空间"],
-  system: ["System", "系统状态"],
+  system: ["Real-time monitor", "实时监控"],
   history: ["History", "历史记录"],
   settings: ["Settings", "设置"],
 };
@@ -331,23 +368,30 @@ function AppChrome({
         </div>
 
         <nav className="sidebar-nav" aria-label={t("Main navigation", "主导航")}>
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                className={`nav-item ${page === item.id ? "is-active" : ""}`}
-                onClick={() => setPage(item.id)}
-                aria-current={page === item.id ? "page" : undefined}
-              >
-                <Icon size={18} />
-                <span>{lang === "zh" ? item.labelZh : item.labelEn}</span>
-                {item.id === "cleanup" && page !== "cleanup" ? (
-                  <i className="nav-dot" />
-                ) : null}
-              </button>
-            );
-          })}
+          {NAV_GROUPS.map((group) => (
+            <div className="nav-group" key={group.labelEn}>
+              <span className="nav-group-label">
+                {lang === "zh" ? group.labelZh : group.labelEn}
+              </span>
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    className={`nav-item ${page === item.id ? "is-active" : ""}`}
+                    onClick={() => setPage(item.id)}
+                    aria-current={page === item.id ? "page" : undefined}
+                  >
+                    <Icon size={18} />
+                    <span>{lang === "zh" ? item.labelZh : item.labelEn}</span>
+                    {item.id === "cleanup" && page !== "cleanup" ? (
+                      <i className="nav-dot" />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="sidebar-bottom">

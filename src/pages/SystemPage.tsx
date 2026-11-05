@@ -73,7 +73,7 @@ export function SystemPage({
   return (
     <div className="page system-page">
       <PageHeader
-        eyebrow={t("System", "系统状态")}
+        eyebrow={t("Real-time monitor", "实时监控")}
         title={t("The pulse of your machine.", "掌握设备的每一次呼吸。")}
         description={t(
           "Live processor, memory, disk and network activity, sampled locally every couple of seconds.",

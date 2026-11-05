@@ -50,7 +50,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 | Uninstall apps | Reads installed apps, builds an app-specific removal plan, shows leftover paths and warnings, then uninstalls selected items |
 | Deep Clean | Searches chosen project roots for regenerable build artefacts with Git and file-age protections |
 | Storage | Measures a chosen folder, exposes the largest children, drills down, and finds the largest files |
-| System | Live CPU, memory, network, disk, battery, volume and process data; process termination asks for confirmation |
+| Real-time monitor | Live CPU, memory, network, disk, battery, volume and process data; process termination asks for confirmation |
 | History | Lists cleanup sessions, shows the ledger, restores files that are still in Trash/Recycle Bin, and opens the bin |
 | Settings | Language, deletion mode, history retention, protected paths, local file locations, and software updates |
 

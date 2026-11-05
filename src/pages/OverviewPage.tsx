@@ -133,7 +133,7 @@ export function OverviewPage({
               icon={<CircleGauge size={16} />}
               onClick={() => onNavigate("system")}
             >
-              {t("Live system", "系统状态")}
+              {t("Live system", "实时监控")}
             </Button>
           </div>
           <div className="hero-assurances">
