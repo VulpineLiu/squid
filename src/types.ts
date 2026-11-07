@@ -6,6 +6,8 @@ export type PageId =
   | "purge"
   | "storage"
   | "system"
+  | "security"
+  | "startup"
   | "history"
   | "settings";
 
@@ -290,4 +292,227 @@ export interface UpdateCheckResult {
 export interface UndoResult {
   restored: number;
   skipped: number;
+}
+
+/* ------------------------------------------------------------------ security */
+
+export type Confidence = "confirmed" | "suspicious" | "advisory";
+export type ScanMode = "quick" | "full" | "custom";
+export type ScanSchedule = "manual" | "on-launch" | "daily" | "weekly";
+
+export interface Evidence {
+  key: string;
+  summary: string;
+}
+
+export interface Finding {
+  id: string;
+  confidence: Confidence;
+  path: string | null;
+  displayPath: string | null;
+  name: string;
+  title: string;
+  description: string;
+  evidence: Evidence[];
+  size: number;
+  sha256: string | null;
+  signed: boolean;
+  publisher: string | null;
+  foundAtMs: number;
+  quarantined: boolean;
+  ignored: boolean;
+}
+
+export interface ScanGap {
+  path: string;
+  reason: string;
+}
+
+export interface SecurityScan {
+  scanId: string;
+  mode: ScanMode;
+  finishedMs: number;
+  elapsedMs: number;
+  cancelled: boolean;
+  examined: number;
+  cached: number;
+  skipped: number;
+  coverageComplete: boolean;
+  gaps: ScanGap[];
+  findings: Finding[];
+  systemAdvisories: Finding[];
+  confirmed: number;
+  suspicious: number;
+  advisory: number;
+  clean: boolean;
+}
+
+export interface ProtectionStatus {
+  provider: string;
+  known: boolean;
+  definitions: string;
+  definitionsDate: string;
+  realtime: boolean | null;
+  backgroundScans: boolean | null;
+  launchScans: boolean | null;
+  gatekeeper: boolean | null;
+  lastScanDate: string;
+  notes: string[];
+  productName: string;
+}
+
+export interface IntelStatus {
+  builtinRules: number;
+  installedRules: number;
+  revision: number;
+  published: string;
+  signed: boolean;
+  source: string;
+  path: string;
+  fallbackAvailable: boolean;
+}
+
+export interface QuarantineEntry {
+  id: string;
+  originalPath: string;
+  displayPath: string;
+  stored: string;
+  size: number;
+  sha256: string;
+  mode: number;
+  modifiedMs: number;
+  quarantinedMs: number;
+  title: string;
+  confidence: Confidence;
+  evidence: Evidence[];
+}
+
+export interface ActivityEntry {
+  atMs: number;
+  kind: string;
+  detail: string;
+  path: string | null;
+}
+
+export interface SecuritySettings {
+  scanSchedule: ScanSchedule;
+  notifyOnFindings: boolean;
+  autoQuarantine: boolean;
+  updateRules: boolean;
+  scanExclusions: string[];
+  ignoredFindings: string[];
+  quickRoots: string[];
+  fullRoots: string[];
+  quarantined: string[];
+}
+
+export interface SecurityStatus {
+  protection: ProtectionStatus;
+  intel: IntelStatus;
+  scan: SecurityScan | null;
+  quarantine: QuarantineEntry[];
+  quarantineSize: number;
+  activity: ActivityEntry[];
+  settings: SecuritySettings;
+  permissions: PermissionStatus;
+  paths: { quarantine: string; intel: string; startupBackups: string };
+  confirmed: number;
+  suspicious: number;
+}
+
+export interface SecurityAction {
+  message: string;
+  status: SecurityStatus;
+}
+
+/* ------------------------------------------------------------------- startup */
+
+export type StartupScope = "user" | "system";
+export type StartupSource =
+  | "launch-agent"
+  | "launch-daemon"
+  | "login-item"
+  | "registry-run"
+  | "startup-folder"
+  | "scheduled-task"
+  | "service";
+export type StartupRisk =
+  | "missing-target"
+  | "in-temp-dir"
+  | "unsigned"
+  | "script-interpreter"
+  | "recently-created"
+  | "hidden-entry"
+  | "hidden-home-directory";
+
+export interface StartupItem {
+  id: string;
+  name: string;
+  source: StartupSource;
+  scope: StartupScope;
+  command: string;
+  program: string | null;
+  workingDirectory: string | null;
+  publisher: string | null;
+  signed: boolean;
+  systemVendor: boolean;
+  disabled: boolean;
+  modifiable: boolean;
+  readonlyReason: string | null;
+  hidden: boolean;
+  modifiedMs: number | null;
+  risks: StartupRisk[];
+}
+
+export interface StartupView {
+  items: StartupItem[];
+  notes: string[];
+  userCount: number;
+  systemCount: number;
+  disabledCount: number;
+  actionableCount: number;
+  riskyCount: number;
+  sources: string[];
+}
+
+export interface StartupChange {
+  item: StartupItem;
+  message: string;
+  view: StartupView;
+}
+
+/* ------------------------------------------------------------------ processes */
+
+export interface ProcessRow {
+  pid: number;
+  parent: number | null;
+  name: string;
+  command: string;
+  program: string | null;
+  workingDirectory: string | null;
+  user: string;
+  cpu: number;
+  memory: number;
+  startedMs: number | null;
+  startupItem: string | null;
+  signed: boolean;
+  publisher: string | null;
+  owned: boolean;
+}
+
+export interface Trust {
+  signed: boolean;
+  adHoc: boolean;
+  untrusted: boolean;
+  signer: string | null;
+  note: string | null;
+}
+
+export interface ProcessDetail {
+  row: ProcessRow;
+  sha256: string | null;
+  trust: Trust;
+  startup: StartupItem | null;
+  parent: ProcessRow | null;
+  stopNote: string | null;
 }

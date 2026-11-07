@@ -27,6 +27,8 @@ import type {
   SettingsView,
 } from "../types";
 import type { UpdateFlow } from "../hooks/useUpdateFlow";
+import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
+import { SecuritySettingsCard } from "../components/SecuritySettingsCard";
 import { UpdatePanel } from "../components/UpdatePanel";
 import {
   Button,
@@ -41,6 +43,7 @@ export function SettingsPage({
   settings,
   flow,
   autoCheck,
+  security,
   onSettingsChange,
   onLanguageChange,
   onAutoCheckChange,
@@ -49,6 +52,7 @@ export function SettingsPage({
   settings: SettingsView;
   flow: UpdateFlow;
   autoCheck: boolean;
+  security: SecurityWorkspace;
   onSettingsChange: (settings: SettingsView) => void;
   onLanguageChange: (language: Language) => Promise<void>;
   onAutoCheckChange: (enabled: boolean) => void;
@@ -310,11 +314,11 @@ export function SettingsPage({
         </div>
         <div className="settings-row is-first">
           <div>
-            <strong>{t("Launch at login", "开机自启")}</strong>
+            <strong>{t("Launch Squid at login", "登录时启动 Squid")}</strong>
             <span>
               {t(
-                "The app starts automatically and keeps the tray available.",
-                "登录后自动启动，并保留托盘入口。",
+                "Only Squid itself. To manage what else starts at login, use the Startup items page.",
+                "只针对 Squid 本身。要管理其他登录时启动的程序，请前往启动项页面。",
               )}
             </span>
           </div>
@@ -326,6 +330,10 @@ export function SettingsPage({
           />
         </div>
       </section>
+
+      {security.status ? (
+        <SecuritySettingsCard security={security} status={security.status} />
+      ) : null}
 
       <section className="settings-section">
         <div className="settings-section-head">
@@ -433,8 +441,8 @@ export function SettingsPage({
             </h2>
             <p>
               {t(
-                "Squid never deletes anything inside these folders, even if a cleanup rule matches.",
-                "即使清理规则匹配，Squid 也绝不会删除这些文件夹中的内容。",
+                "Squid never deletes anything inside these folders, even if a cleanup rule matches. This list does not stop the malware scan from reporting a finding inside them.",
+                "即使清理规则匹配，Squid 也绝不会删除这些文件夹中的内容。该列表不会阻止恶意软件扫描在其中报告发现。",
               )}
             </p>
           </div>

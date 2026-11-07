@@ -943,6 +943,28 @@ select:focus-visible,
   background: var(--nex-primary-tint);
 }
 
+/* The two security pages need the same chip to carry the three finding levels,
+   so the tones join it here rather than becoming a second chip. */
+.status-chip.is-success {
+  color: var(--nex-success-strong);
+  background: var(--nex-success-soft);
+}
+
+.status-chip.is-warning {
+  color: var(--nex-warning-strong);
+  background: var(--nex-warning-soft);
+}
+
+.status-chip.is-danger {
+  color: var(--nex-danger-strong);
+  background: var(--nex-danger-soft);
+}
+
+.status-chip.is-info {
+  color: var(--nex-primary-strong);
+  background: var(--nex-primary-soft);
+}
+
 /* Header gauge and cards */
 
 .overview-hero {
@@ -2040,11 +2062,21 @@ select:focus-visible,
 .apps-list-panel,
 .app-plan-panel,
 .process-panel,
-.health-side {
+.health-side,
+.panel {
   border: 1px solid var(--nex-line);
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.73);
   box-shadow: var(--shadow-card);
+}
+
+/* `panel` is the shell every card on the security and startup pages uses. Only
+   the spacing lives here; border, radius, ground and shadow come from the group
+   above, so a panel and the applications list cannot drift apart. */
+.panel {
+  display: grid;
+  gap: 11px;
+  padding: 15px 18px;
 }
 
 .apps-list-head {
@@ -4188,6 +4220,32 @@ select:focus-visible,
   font-size: var(--nex-text-3xs);
 }
 
+/* A readiness row may carry its own action. The button belongs to the row, not
+   to the copy, so it stays out of the text column. */
+.setup-check-action {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+/* Four of the five checks are things a person may reasonably leave alone, and
+   saying so is what stops the card reading as a to-do list. */
+.setup-check-optional {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(125, 98, 86, 0.1);
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-medium);
+}
+
+.setup-error {
+  margin: 14px 1px 0;
+  color: var(--nex-danger-strong);
+  font-size: var(--nex-text-3xs);
+  line-height: var(--nex-leading-body);
+}
+
 .setup-note {
   margin: 14px 1px 0;
   color: var(--nex-muted-soft);
@@ -4748,5 +4806,1006 @@ select:focus-visible,
   .setup-actions-secondary,
   .setup-actions-primary {
     justify-content: flex-end;
+  }
+}
+
+/* ------------------------------------------------------------------ security */
+
+/* Two pages share everything below. Where the app already had a primitive — the
+   card shell `.panel`, `.status-chip`, `.search-field`, `.icon-button`,
+   `.text-button`, `.metric-icon`, `.settings-row`, `.host-card` — it is used
+   rather than reinterpreted, so a finding row and an application row are the
+   same object wearing different contents. */
+
+/* A page whose cards stack without each one restating the rhythm. Sections in
+   the older pages carry their own margin; these pages are grids instead. */
+.page.is-stacked {
+  display: grid;
+  gap: 20px;
+}
+
+/* A grid gap does not collapse with a margin the way two blocks do, so the
+   header's own clearance would be added to the gap rather than merged with it. */
+.page.is-stacked > .page-header {
+  margin-bottom: 0;
+}
+
+/* One filter vocabulary: the same chip serves the monitor's tabs, the finding
+   filters and the process toggles. */
+.chip-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Used as a tab bar rather than as filters inside a panel, where the row it
+   controls starts immediately below. */
+.chip-row.page-tabs {
+  margin-bottom: 16px;
+}
+
+.filter-chip {
+  padding: 5px 11px;
+  border: 1px solid var(--nex-line);
+  border-radius: 999px;
+  background: var(--nex-paper);
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-medium);
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease,
+    color 0.14s ease;
+}
+
+.filter-chip:hover {
+  border-color: var(--nex-line-strong);
+  color: var(--nex-ink);
+}
+
+.filter-chip.is-active {
+  border-color: rgba(var(--nex-primary-rgb), 0.32);
+  background: var(--nex-primary-tint);
+  color: var(--nex-primary-strong);
+}
+
+/* The count that belongs to a filter, not a separate summary line above it. */
+.filter-chip b {
+  margin-left: 5px;
+  color: var(--nex-muted-soft);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--nex-weight-semibold);
+}
+
+.filter-chip.is-active b {
+  color: var(--nex-primary);
+}
+/* Overview: the one place a tone has to be legible at a glance, so it colours the
+   whole card. `tone-*` and `.metric-icon`/`.quick-copy` come from the overview's
+   own vocabulary, which is why there is no icon styling here. */
+.security-strip {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid var(--nex-line);
+  border-radius: 15px;
+  background: radial-gradient(circle at 0 0, var(--tone-soft), transparent 52%),
+    rgba(255, 255, 255, 0.79);
+  box-shadow: var(--shadow-card);
+}
+
+.security-strip .quick-copy small {
+  white-space: normal;
+}
+
+.security-strip > .button {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+/* System protection: read-only facts, so they read as a spec sheet. Nothing here
+   is clickable except the re-read. */
+.panel.is-protection {
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 16px;
+}
+
+.panel.is-protection.is-unknown {
+  border-color: rgba(var(--nex-warning-rgb), 0.25);
+  background: var(--nex-warning-soft);
+}
+
+.protection-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.protection-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.protection-head strong {
+  font-size: var(--nex-text-md);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.protection-copy p {
+  margin: 0;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-2xs);
+  line-height: var(--nex-leading-body);
+}
+
+.protection-notes {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--nex-warning-strong);
+  font-size: var(--nex-text-2xs);
+}
+
+.protection-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 8px 18px;
+  align-content: start;
+}
+
+.protection-facts > .text-button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.fact {
+  display: grid;
+  gap: 1px;
+}
+
+.fact span {
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+}
+
+.fact strong {
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-medium);
+}
+
+.fact strong.is-success {
+  color: var(--nex-success-strong);
+}
+
+.fact strong.is-danger {
+  color: var(--nex-danger-strong);
+}
+
+.fact strong.is-neutral {
+  color: var(--nex-muted);
+}
+
+/* Coverage: the honesty card. Its whole job is to refuse the word "clean" when
+   the scan could not actually look. */
+.panel.is-coverage.is-warning {
+  border-color: rgba(var(--nex-warning-rgb), 0.28);
+}
+
+.panel.is-coverage.is-success {
+  border-color: rgba(var(--nex-success-rgb), 0.22);
+}
+
+.coverage-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.coverage-head strong {
+  font-size: var(--nex-text-sm);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.coverage-head p {
+  margin: 3px 0 0;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-2xs);
+}
+
+/* Anything the operating system told us that is not a finding: a refused
+   permission, an unreadable folder, entries that vanished with their app. One
+   tinted box, whether it holds one line or several. */
+.notice {
+  display: grid;
+  gap: 6px;
+  padding: 10px 13px;
+  border-radius: var(--radius-sm);
+  background: var(--nex-warning-soft);
+  color: var(--nex-warning-strong);
+  font-size: var(--nex-text-2xs);
+  line-height: var(--nex-leading-body);
+}
+
+.notice > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notice > .button {
+  justify-self: start;
+}
+
+.coverage-gaps {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coverage-gaps li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-2xs);
+}
+
+.coverage-gaps li span {
+  font-family: var(--nex-font-mono);
+  font-size: var(--nex-text-3xs);
+}
+
+.coverage-gaps li small,
+.coverage-gaps li.is-more {
+  color: var(--nex-muted-soft);
+}
+
+.coverage-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 9px;
+  border-top: 1px solid var(--nex-line);
+}
+
+.coverage-rules {
+  display: grid;
+  gap: 2px;
+}
+
+.coverage-rules span {
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-medium);
+}
+
+.coverage-rules small {
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+}
+
+.coverage-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.coverage-actions .text-button:disabled {
+  color: var(--nex-muted-soft);
+  cursor: default;
+}
+
+.coverage-scope {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--nex-cream);
+}
+
+.coverage-scope h4 {
+  margin: 0 0 5px;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.coverage-scope ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coverage-scope li {
+  font-family: var(--nex-font-mono);
+  font-size: var(--nex-text-3xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* One row for everything that can be opened: a finding, a startup item, a
+   quarantined file. The tone class is the only difference between them. */
+.item-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--nex-line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.item-row.is-danger {
+  border-left: 3px solid var(--nex-danger);
+}
+
+.item-row.is-warning,
+.item-row.is-risky {
+  border-left: 3px solid var(--nex-warning);
+}
+
+.item-row.is-handled,
+.item-row.is-off {
+  opacity: 0.62;
+}
+
+/* The whole row is one button, which is why the reset is here rather than in a
+   shared control: nothing else in the app makes a row clickable. */
+.item-main {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item-copy {
+  display: grid;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.item-copy strong {
+  font-size: var(--nex-text-xs);
+  font-weight: var(--nex-weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-copy strong.is-muted,
+.item-row.is-off .item-copy strong {
+  color: var(--nex-muted);
+}
+
+.item-copy small {
+  color: var(--nex-muted);
+  font-family: var(--nex-font-mono);
+  font-size: var(--nex-text-3xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-copy em {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-2xs);
+  font-style: normal;
+}
+
+.item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.level-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--nex-muted-soft);
+}
+
+.level-dot.is-danger {
+  background: var(--nex-danger);
+}
+
+.level-dot.is-warning {
+  background: var(--nex-warning);
+}
+
+/* Detail drawer body, shared by findings, startup items and processes. */
+.item-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.item-detail-lead {
+  margin: 0;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-xs);
+  line-height: var(--nex-leading-body);
+}
+
+.detail-grid {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.detail-grid > div {
+  display: grid;
+  grid-template-columns: 132px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--nex-line);
+}
+
+.detail-grid dt {
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-2xs);
+}
+
+.detail-grid dd {
+  margin: 0;
+  font-family: var(--nex-font-mono);
+  font-size: var(--nex-text-2xs);
+  overflow-wrap: anywhere;
+}
+
+.evidence-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.evidence-list li {
+  display: grid;
+  grid-template-columns: 108px 1fr;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--nex-cream);
+  font-size: var(--nex-text-2xs);
+  line-height: var(--nex-leading-body);
+}
+
+.evidence-key {
+  color: var(--nex-primary-strong);
+  font-family: var(--nex-font-mono);
+  font-size: var(--nex-text-3xs);
+  text-transform: uppercase;
+}
+
+.detail-command {
+  display: grid;
+  gap: 5px;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  background: var(--nex-cream);
+}
+
+.detail-command > span,
+.detail-command code {
+  font-family: var(--nex-font-mono);
+  font-size: var(--nex-text-2xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.detail-command > span {
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+  text-transform: uppercase;
+}
+
+/* One tinted aside, used for a caution inside the drawer, a list of risk labels,
+   and the note that a process was started by a startup item. */
+.detail-note,
+.detail-risks,
+.detail-startup {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--nex-text-2xs);
+  line-height: var(--nex-leading-body);
+}
+
+/* Layout differs per use rather than per name: two carry a leading icon inline,
+   one is a list, one has a button at the end. */
+.detail-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  background: var(--nex-cream);
+  color: var(--nex-muted);
+}
+
+.detail-risks {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 13px;
+  background: var(--nex-warning-soft);
+  color: var(--nex-warning-strong);
+  list-style: none;
+}
+
+.detail-risks li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-startup {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 11px;
+  background: var(--nex-primary-tint);
+}
+
+.detail-startup > div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.detail-startup strong {
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.detail-startup small {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.confirm-path {
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--nex-cream);
+  font-size: var(--nex-text-2xs);
+  overflow-wrap: anywhere;
+}
+
+.confirm-warn {
+  margin-top: 8px;
+  color: var(--nex-warning-strong);
+  font-size: var(--nex-text-2xs);
+}
+
+.activity-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-list li {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--nex-line);
+  font-size: var(--nex-text-2xs);
+}
+
+.activity-list li:last-child {
+  border-bottom: 0;
+}
+
+.activity-kind {
+  color: var(--nex-primary-strong);
+  font-family: var(--nex-font-mono);
+  font-size: var(--nex-text-3xs);
+  text-transform: uppercase;
+}
+
+.activity-detail {
+  overflow-wrap: anywhere;
+}
+
+.activity-list time {
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- startup page */
+
+/* The badge is the one number in the sidebar that means "act now", so it takes
+   the danger colour the finding rows use. */
+.nav-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--nex-danger);
+  color: #fff;
+  font-size: var(--nex-text-3xs);
+  font-style: normal;
+  font-weight: var(--nex-weight-bold);
+  line-height: 18px;
+  text-align: center;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 12px;
+}
+
+.stat {
+  display: grid;
+  gap: 2px;
+  padding: 13px 15px;
+  border: 1px solid var(--nex-line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.73);
+  box-shadow: var(--shadow-card);
+}
+
+.stat strong {
+  font-size: var(--nex-text-xl);
+  font-weight: var(--nex-weight-bold);
+}
+
+.stat span {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+}
+
+.stat.is-warning {
+  border-color: rgba(var(--nex-warning-rgb), 0.26);
+  background: var(--nex-warning-soft);
+}
+
+.startup-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-width: 46%;
+}
+
+/* Where the entry is declared: LaunchAgent, Run, a login item. quieter than the
+   name it qualifies, because most rows are the kind the user never touches. */
+.startup-source {
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-medium);
+  white-space: nowrap;
+}
+
+.risk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(var(--nex-warning-rgb), 0.14);
+  color: var(--nex-warning-strong);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-medium);
+  white-space: nowrap;
+}
+
+.muted-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  white-space: nowrap;
+}
+
+.startup-batch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 14px;
+  border: 1px solid rgba(var(--nex-primary-rgb), 0.24);
+  border-radius: var(--radius-md);
+  background: var(--nex-primary-tint);
+}
+
+.startup-batch-all {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-2xs);
+}
+
+.startup-batch-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* -------------------------------------------------------------- process table */
+
+.process-controls {
+  display: grid;
+  gap: 10px;
+}
+
+/* One column template, shared verbatim by the header row and every process row.
+   Written twice rather than inherited from a shared parent, because a scroll
+   container would otherwise shift every row by the width of a scrollbar. */
+.ptable.pt-head,
+.ptable.pt-rows li {
+  display: grid;
+  grid-template-columns:
+    minmax(200px, 2.2fr) 62px 92px 62px 92px 96px minmax(110px, 1fr) 96px;
+  align-items: center;
+  gap: 12px;
+}
+
+.ptable.pt-head {
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--nex-line);
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-medium);
+}
+
+.ptable.pt-head button {
+  padding: 0;
+  color: inherit;
+  background: none;
+  font: inherit;
+  text-align: left;
+}
+
+.ptable.pt-head button:hover {
+  color: var(--nex-ink);
+}
+
+.ptable.pt-rows {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 62vh;
+  overflow: auto;
+}
+
+.ptable.pt-rows li {
+  min-height: 38px;
+  padding: 5px 11px;
+  border-radius: var(--radius-sm);
+}
+
+.ptable.pt-rows li:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.ptable.pt-rows li.is-flagged {
+  background: var(--nex-danger-soft);
+}
+
+.pt-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pt-name strong {
+  overflow: hidden;
+  color: var(--nex-ink);
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pt-name:hover strong {
+  color: var(--nex-primary-strong);
+}
+
+.pt-name small {
+  overflow: hidden;
+  color: var(--nex-muted-soft);
+  font-family: var(--nex-font-mono);
+  font-size: var(--nex-text-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pt-pid,
+.pt-cpu,
+.pt-memory,
+.pg-cpu,
+.pg-memory {
+  color: var(--nex-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pt-user,
+.pt-start {
+  overflow: hidden;
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pt-sign {
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+}
+
+.pt-sign.is-signed {
+  color: var(--nex-success-strong);
+}
+
+.pt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.pt-flag {
+  color: var(--nex-danger-strong);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-medium);
+  white-space: nowrap;
+}
+
+/* Grouped by application: the group header is a row of the same shape, so the
+   columns line up with the rows it opens. */
+.process-grouped {
+  display: grid;
+  gap: 3px;
+}
+
+.process-group-head {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto 70px 90px;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.55);
+  text-align: left;
+}
+
+.process-group-head:hover {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.process-group-head strong {
+  overflow: hidden;
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-group-head small {
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+}
+
+/* The load-more affordance sits under a table, where centring is the only
+   layout that does not imply a column. */
+.text-button.is-center {
+  justify-self: center;
+}
+
+/* Settings subsections: a heading and its rows, inside a card that already has
+   `.settings-row` separators. */
+.settings-subsection {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--nex-line);
+}
+
+.settings-subsection-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.settings-subsection-head strong {
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.settings-subsection-head span {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  text-align: right;
+}
+
+.settings-row.is-actions > .settings-row-buttons {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+@media (max-width: 1180px) {
+  /* The three descriptive columns go first; PID, CPU and memory never do. */
+  .ptable.pt-head,
+  .ptable.pt-rows li {
+    grid-template-columns: minmax(150px, 1.8fr) 56px 60px 86px 104px;
+  }
+
+  .ptable.pt-head span:nth-child(3),
+  .ptable.pt-head button:nth-child(6),
+  .ptable.pt-head span:nth-child(7),
+  .pt-user,
+  .pt-start,
+  .pt-sign {
+    display: none;
+  }
+}
+
+@media (max-width: 1100px) {
+  .panel.is-protection {
+    grid-template-columns: auto 1fr;
+  }
+
+  .protection-facts {
+    grid-column: 1 / -1;
+  }
+
+  .item-row {
+    flex-wrap: wrap;
+  }
+
+  .startup-meta {
+    max-width: 100%;
   }
 }

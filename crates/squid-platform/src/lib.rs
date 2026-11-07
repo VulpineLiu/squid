@@ -15,6 +15,10 @@ pub mod console;
 pub mod currency;
 pub mod leftovers;
 pub mod process;
+pub mod process_table;
+pub mod protection;
+pub mod startup;
+pub mod trust;
 #[cfg(unix)]
 pub mod volumes;
 

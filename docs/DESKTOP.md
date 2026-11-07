@@ -45,21 +45,71 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
 | Screen | What it does |
 | --- | --- |
-| Computer overview | Smart scan entry, disk health, cleanup result categories and live CPU/memory/storage summaries |
+| Computer overview | Security status strip, cleanup scan entry, disk health, cleanup result categories and live CPU/memory/storage summaries |
 | Daily cleanup | Runs the normal cleanup rule set, groups results by category, supports per-item and per-category selection, Trash or permanent deletion, then offers undo through History |
 | Uninstall apps | Reads installed apps, builds an app-specific removal plan, shows leftover paths and warnings, then uninstalls selected items |
 | Deep Clean | Searches chosen project roots for regenerable build artefacts with Git and file-age protections |
+| Security | XProtect / Defender status, scan coverage, findings by confidence, quarantine and restore, recent security activity |
+| Startup items | LaunchAgents, LaunchDaemons, login items, registry Run keys, startup folders, scheduled tasks and services; disable and re-enable the ones the current user owns |
 | Storage | Measures a chosen folder, exposes the largest children, drills down, and finds the largest files |
-| Real-time monitor | Live CPU, memory, network, disk, battery, volume and process data; process termination asks for confirmation |
+| Real-time monitor | Two tabs. **Performance**: live CPU, memory, network, disk, battery, volume and process data. **Processes**: the whole process table with signature and startup-item columns, and process termination after confirmation |
 | History | Lists cleanup sessions, shows the ledger, restores files that are still in Trash/Recycle Bin, and opens the bin |
-| Settings | Chinese/English language selection that defaults to the system language, launch at login, deletion mode, history retention, protected paths, local file locations, and software updates |
+| Settings | Chinese/English language selection that defaults to the system language, launch at login, the security section (scan schedule, notifications, auto-quarantine, rule-pack updates, scan exclusions), deletion mode, history retention, protected paths, local file locations, and software updates |
 
-`⌘1`–`⌘8` on macOS and `Ctrl+1`–`Ctrl+8` on Windows switch screens.
+`⌘1`–`⌘0` on macOS and `Ctrl+1`–`Ctrl+0` on Windows switch screens, in sidebar
+order: `1` overview, `2` daily cleanup, `3` uninstall apps, `4` deep clean,
+`5` storage, `6` real-time monitor, `7` security, `8` startup items,
+`9` history, `0` settings.
+
+In 0.1.6 `⌘7`/`⌘8` moved from History/Settings to Security/Startup items;
+History and Settings are now `⌘9` and `⌘0`.
+
+The sidebar groups these into **Maintenance** (overview, daily cleanup,
+uninstall apps, deep clean), **Protection** (security, startup items) and
+**Insights** (storage, real-time monitor), with History and Settings pinned at
+the bottom.
+
+The two new screens reuse the interface vocabulary the older screens already
+had rather than introducing a second one: `.panel` for a card, `.status-chip` for
+a status, `.search-field`, `.icon-button`, `.text-button`, `.metric-icon` with a
+`tone-*` class, `.settings-row` for a switch, `.empty-inline` for an empty list.
+Findings, startup entries and quarantined files share one row shape
+(`.item-row` / `.item-main` / `.item-copy` / `.item-actions`), so a change to how
+a row looks is one edit that reaches all three. Copy stays to one sentence per
+screen and per control: a count sits on the filter that produces it, not also in
+a summary line above it.
+
+## Security page
+
+Squid scans when asked. There is no daemon, no kernel extension and no
+privileged helper, so XProtect and Defender remain the real-time protection and
+this page only reads what they report.
+
+- **Scan modes.** Quick covers application bundles, login-item targets, browser
+  extensions and the folders a browser writes to. Full adds the user's Library
+  and document folders and must be started deliberately. Custom scans the paths
+  chosen. All three are cancellable.
+- **Confidence.** `confirmed` means a published hash or signature rule matched
+  and is the only level that may ever be moved automatically. `suspicious` needs
+  two corroborating signals and is report-only. `advisory` is a single weak
+  signal, such as an unsigned file that does not start at login.
+- **Coverage.** A scan that could not read a folder says so. The page never
+  renders "clean" for a range it did not look at, and unreadable folders are
+  listed rather than omitted.
+- **Nothing is uploaded.** No file name, hash, finding or quarantined file
+  leaves the machine. Rule packs are downloaded; nothing is sent back.
+- **Quarantine is reversible.** Findings are moved by backend-issued id, never
+  by a path the interface supplies. The file is re-verified against the hash the
+  scan recorded, stored without the execute bit, and restoring returns the
+  original bytes, mode and timestamps.
 
 ## Tray
 
 Squid keeps running after its main window is closed. The tray menu can reopen
-the window and jump directly to Daily cleanup, Uninstall apps or Deep Clean.
+the window, start a malware scan, and jump directly to Security, Startup items,
+Daily cleanup, Uninstall apps or Deep Clean. One disabled row states the current
+protection status — the count of unhandled confirmed findings, "not scanned yet"
+before the first scan, and "scanning…" while one is running.
 The tray follows the active interface language. Use **Quit Squid** in the same
 menu to stop the background process.
 

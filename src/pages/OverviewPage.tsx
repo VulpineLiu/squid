@@ -1,11 +1,15 @@
 import {
+  AlertTriangle,
   AppWindow,
   ArrowRight,
   Boxes,
+  CheckCircle2,
   ChevronRight,
   CircleGauge,
   HardDrive,
   ScanSearch,
+  ShieldCheck,
+  ShieldQuestion,
   Sparkles,
   WandSparkles,
 } from "lucide-react";
@@ -13,6 +17,7 @@ import { useI18n } from "../i18n";
 import { formatBytes, formatCount, percent } from "../lib/format";
 import type { Bootstrap, SystemSnapshot } from "../types";
 import type { ScanWorkspace } from "../hooks/useScanWorkspace";
+import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
 import type { PageId } from "../types";
 import { CategorySummary } from "../components/CleanupView";
 import {
@@ -23,6 +28,89 @@ import {
   SectionTitle,
   UsageBar,
 } from "../components/ui";
+
+/**
+ * The security strip: what protects the machine, and whether anything is waiting.
+ *
+ * It says "not scanned yet" rather than showing a green tick. The whole point of
+ * the roadmap's rule — never render an unknown as healthy — is that a strip which
+ * defaults to calm teaches people to trust a colour that has not earned it.
+ */
+function SecurityStrip({
+  security,
+  onNavigate,
+}: {
+  security: SecurityWorkspace;
+  onNavigate: (page: PageId) => void;
+}) {
+  const { t } = useI18n();
+  const status = security.status;
+  if (!status) {
+    return (
+      <section className="security-strip tone-neutral">
+        <span className="metric-icon">
+          <ShieldQuestion size={18} />
+        </span>
+        <span className="quick-copy">
+          <strong>{t("Reading this machine's protection…", "正在读取本机防护状态…")}</strong>
+        </span>
+      </section>
+    );
+  }
+  const scan = status.scan;
+  const alarmed = status.confirmed > 0;
+  const tone = alarmed ? "danger" : scan ? (scan.coverageComplete ? "success" : "warning") : "neutral";
+  const headline = alarmed
+    ? t(
+        `${status.confirmed} confirmed finding${status.confirmed === 1 ? "" : "s"} need a decision`,
+        `有 ${status.confirmed} 项已确认发现需要处理`,
+      )
+    : !scan
+      ? t("No scan of this machine yet", "尚未进行过扫描")
+      : !scan.coverageComplete
+        ? t("Nothing found — but coverage was limited", "未发现威胁，但覆盖范围受限")
+        : t("Nothing outstanding from the last scan", "上次扫描没有待处理项");
+  // One line, in the order someone asks about it: what guards the machine now,
+  // what squid last looked at, and whether it could look at everything.
+  const provider = !status.protection.known
+    ? t("protection unknown", "防护状态未知")
+    : status.protection.provider === "xprotect"
+      ? "XProtect"
+      : status.protection.productName || "Antivirus";
+  const detail = scan
+    ? t(
+        `${provider} · ${formatCount(scan.examined)} files checked · ${
+          scan.coverageComplete ? "full coverage" : "coverage limited"
+        }`,
+        `${provider} · 已检查 ${formatCount(scan.examined)} 个文件 · ${
+          scan.coverageComplete ? "覆盖完整" : "覆盖受限"
+        }`,
+      )
+    : t(
+        `${provider} · quick scan covers login items, apps and downloads`,
+        `${provider} · 快速扫描覆盖登录项、应用与下载目录`,
+      );
+
+  return (
+    <section className={`security-strip tone-${tone}`}>
+      <span className="metric-icon">
+        {alarmed ? <AlertTriangle size={18} /> : scan ? <CheckCircle2 size={18} /> : <ShieldQuestion size={18} />}
+      </span>
+      <div className="quick-copy">
+        <strong>{headline}</strong>
+        <small>{detail}</small>
+      </div>
+      <Button
+        variant={alarmed ? "danger" : "ghost"}
+        size="sm"
+        icon={<ArrowRight size={14} />}
+        onClick={() => onNavigate("security")}
+      >
+        {alarmed ? t("Review findings", "查看发现") : t("Open security", "打开安全")}
+      </Button>
+    </section>
+  );
+}
 
 function greeting(lang: "zh" | "en"): string {
   const hour = new Date().getHours();
@@ -41,11 +129,13 @@ export function OverviewPage({
   bootstrap,
   snapshot,
   cleanup,
+  security,
   onNavigate,
 }: {
   bootstrap: Bootstrap;
   snapshot: SystemSnapshot | null;
   cleanup: ScanWorkspace;
+  security: SecurityWorkspace;
   onNavigate: (page: PageId) => void;
 }) {
   const { t, lang } = useI18n();
@@ -68,8 +158,8 @@ export function OverviewPage({
         eyebrow={`${greeting(lang)} · ${bootstrap.osName}`}
         title={t("Your computer, at its best.", "让电脑始终保持在最佳状态。")}
         description={t(
-          "One safe scan for clutter, storage and everyday performance.",
-          "一次安全扫描，整理垃圾、空间与日常性能。",
+          "Cleaning and security are two different scans here — one frees space, the other checks for threats.",
+          "清理与安全是两种不同的扫描：一个释放空间，另一个检查威胁。",
         )}
         actions={
           <Button
@@ -83,11 +173,22 @@ export function OverviewPage({
             disabled={cleanup.scanning}
           >
             {cleanup.result
-              ? t("Review scan", "查看扫描结果")
-              : t("Smart scan", "智能扫描")}
+              ? t("Review cleanup scan", "查看清理结果")
+              : t("Cleanup scan", "清理扫描")}
           </Button>
         }
       />
+
+      {security.scanning ? (
+        <ProgressCard
+          progress={security.progress}
+          title={t("Scanning for malware", "正在扫描恶意软件")}
+          compact
+          onCancel={() => void security.cancel()}
+        />
+      ) : null}
+
+      <SecurityStrip security={security} onNavigate={onNavigate} />
 
       <section className="overview-hero">
         <div className="overview-hero-copy">
@@ -126,7 +227,20 @@ export function OverviewPage({
             >
               {cleanup.result
                 ? t("Choose what to clean", "选择清理项目")
-                : t("Start a smart scan", "开始智能扫描")}
+                : t("Start a cleanup scan", "开始清理扫描")}
+            </Button>
+            {/* Two scans, two names, one screen. Merging them would let a user
+                believe the clutter sweep also looked for threats, and it does
+                not; this is the line the roadmap drew on purpose. */}
+            <Button
+              variant="secondary"
+              icon={<ShieldCheck size={16} />}
+              onClick={() => void security.start("quick")}
+              disabled={security.scanning}
+            >
+              {security.scanning
+                ? t("Security scan…", "安全扫描中…")
+                : t("Quick security scan", "安全快速扫描")}
             </Button>
             <Button
               variant="ghost"
@@ -202,6 +316,16 @@ export function OverviewPage({
           subtitle={t("The right tool for the next five minutes.", "用几分钟完成最常用的事。")}
         />
         <div className="quick-grid">
+          <button className="quick-card tone-primary" onClick={() => onNavigate("security")}>
+            <span className="quick-icon">
+              <ShieldCheck size={22} />
+            </span>
+            <span className="quick-copy">
+              <strong>{t("Security", "安全")}</strong>
+              <small>{t("Scan, review findings, quarantine", "扫描、查看发现、隔离")}</small>
+            </span>
+            <ChevronRight size={17} />
+          </button>
           <button className="quick-card tone-primary" onClick={() => onNavigate("applications")}>
             <span className="quick-icon">
               <AppWindow size={22} />

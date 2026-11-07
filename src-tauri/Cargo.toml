@@ -1,10 +1,10 @@
 [package]
 name = "squid-desktop"
-version = "0.1.5"
+version = "0.1.6"
 description = "Squid — a CleanMyMac-inspired cleaner, uninstaller and system monitor."
 authors = ["squid contributors"]
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.95"
 license = "GPL-3.0-only"
 default-run = "squid-desktop"
 
@@ -23,10 +23,12 @@ tauri-build = { version = "2", features = [] }
 squid-core = { path = "../crates/squid-core" }
 squid-engine = { path = "../crates/squid-engine" }
 squid-platform = { path = "../crates/squid-platform" }
+squid-guard = { path = "../crates/squid-guard" }
 squid-stats = { path = "../crates/squid-stats" }
 tauri = { version = "2.11", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 dirs = "6"
 serde = { version = "1", features = ["derive"] }
@@ -44,3 +46,16 @@ debug = 1
 
 [profile.dev.package."*"]
 debug = false
+
+# The workspace root declares these for `crates/*`, but `src-tauri` is excluded
+# from that workspace, so this package had no release profile of its own and every
+# desktop build shipped its whole symbol table. `strip = true` would only have
+# dropped debug info, which this binary does not carry; the 23 MB that came out of
+# it was the symbol table, so it is the symbol table that has to go.
+# `panic` is deliberately left to unwind: a panic on a command thread currently
+# costs one request, and aborting the whole app instead would be a behaviour change
+# this release has no business making.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

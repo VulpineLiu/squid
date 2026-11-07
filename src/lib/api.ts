@@ -8,13 +8,22 @@ import type {
   HistorySession,
   JobProgress,
   LargestFile,
+  IntelStatus,
   PageId,
   PermissionStatus,
   PlanResult,
   ScanResult,
   SettingsView,
+  SecurityAction,
+  SecurityScan,
+  SecuritySettings,
+  SecurityStatus,
+  StartupChange,
+  StartupView,
   StorageNode,
   SystemSnapshot,
+  ProcessDetail,
+  ProcessRow,
   UndoResult,
   UpdateCheckResult,
   UpdateProgress,
@@ -28,6 +37,13 @@ export interface SettingsPatch {
   purgeMinAgeDays?: number;
   historyKeep?: number;
   setupReviewed?: boolean;
+}
+
+export interface SecurityPatch {
+  scanSchedule?: string;
+  notifyOnFindings?: boolean;
+  autoQuarantine?: boolean;
+  updateRules?: boolean;
 }
 
 export const api = {
@@ -80,6 +96,33 @@ export const api = {
   updateClear: () => invoke<void>("update_clear"),
   setUpdateCheckEnabled: (enabled: boolean) =>
     invoke<boolean>("set_update_check_enabled", { enabled }),
+  securityStatus: () => invoke<SecurityStatus>("security_status"),
+  securityScan: (jobId: string, mode: string, paths: string[] = []) =>
+    invoke<SecurityScan>("security_scan", { jobId, request: { mode, paths } }),
+  securityCancel: (jobId: string) => invoke<boolean>("security_cancel", { jobId }),
+  securityOpen: () => invoke<void>("security_open"),
+  securityQuarantine: (findingId: string) =>
+    invoke<SecurityAction>("security_quarantine", { findingId }),
+  securityRestore: (id: string) => invoke<SecurityAction>("security_restore", { id }),
+  securityDeleteQuarantine: (id: string) =>
+    invoke<SecurityAction>("security_delete_quarantine", { id }),
+  securityIgnore: (findingId: string, ignored: boolean) =>
+    invoke<SecurityAction>("security_ignore", { findingId, ignored }),
+  securityExclusions: (action: "add" | "remove", path: string) =>
+    invoke<SecuritySettings>("security_exclusions", { action, path }),
+  securitySettingsSave: (patch: SecurityPatch) =>
+    invoke<SecuritySettings>("security_settings_save", { patch }),
+  securityUpdateRules: () => invoke<IntelStatus>("security_update_rules"),
+  securityRollbackRules: () => invoke<IntelStatus>("security_rollback_rules"),
+  openQuarantineFolder: () => invoke<void>("open_quarantine_folder"),
+  startupItems: () => invoke<StartupView>("startup_items"),
+  startupSetEnabled: (id: string, enabled: boolean) =>
+    invoke<StartupChange>("startup_set_enabled", { id, enabled }),
+  processInventory: (withTrust = true) =>
+    invoke<ProcessRow[]>("process_inventory", { withTrust }),
+  processDetail: (pid: number) => invoke<ProcessDetail>("process_detail", { pid }),
+  processStop: (pid: number, name: string) =>
+    invoke<{ message: string }>("process_stop", { pid, name }),
   onProgress: (handler: (progress: JobProgress) => void) =>
     listen<JobProgress>("squid://progress", (event) => handler(event.payload)),
   onUpdateProgress: (handler: (progress: UpdateProgress) => void) =>
@@ -88,8 +131,12 @@ export const api = {
     listen<UpdateStatus | null>("update://status", (event) => handler(event.payload)),
   onNavigate: (handler: (page: PageId) => void) =>
     listen<PageId>("squid://navigate", (event) => handler(event.payload)),
+  onSecurityScan: (handler: (scan: SecurityScan) => void) =>
+    listen<SecurityScan>("squid://security", (event) => handler(event.payload)),
 };
 
+/// Progress events for one job, whatever kind of job it is. Security scans share
+/// the channel with cleanup so a page subscribes the same way.
 export async function subscribeJobProgress(
   jobId: string,
   handler: (progress: JobProgress) => void,

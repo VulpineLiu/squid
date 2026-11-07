@@ -15,11 +15,20 @@ walkdir.workspace = true
 plist.workspace = true
 rayon.workspace = true
 unicode-width.workspace = true
+sysinfo.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
-sysinfo.workspace = true
-windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Threading"] }
+windows-sys = { version = "0.59", features = [
+    "Win32_System_Console",
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_Security_WinTrust",
+    "Win32_System_Threading",
+] }

@@ -14,6 +14,8 @@ Squid 是面向 macOS 与 Windows 的本地系统维护工具。桌面端、CLI 
 - **Uninstall apps / 应用卸载** — One plan for the app and its preferences, caches, containers, or AppData leftovers.
 - **Deep Clean / 深度清理** — Rebuildable build output, disk images, installers, and stale downloads with project-age protection.
 - **Storage & monitor / 存储与监控** — Folder-level disk analysis, live CPU, memory, network, disk, battery, and process views.
+- **Security / 安全** — XProtect and Defender status, malware scanning with confirmed / suspicious / advisory findings, and reversible quarantine. No daemon, no kernel extension, no upload.
+- **Startup items / 启动项** — LaunchAgents, LaunchDaemons, login items, registry Run keys, startup folders, scheduled tasks and services; disable the ones you own.
 - **History & updates / 历史与更新** — Restorable Trash sessions and a size- and SHA256-verified update channel.
 
 The interface follows the system language by default and can be switched to Simplified Chinese or English in Settings.

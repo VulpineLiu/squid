@@ -6,6 +6,8 @@
 //! and the ledger. This file only parses arguments, shows progress and asks for
 //! confirmation.
 
+mod guard;
+
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use crossterm::tty::IsTty;
@@ -80,6 +82,8 @@ enum Command {
     Rules,
     /// Report permissions, settings and ledger health
     Doctor,
+    /// Malware scan, login-item inventory and quarantine
+    Guard(guard::GuardArgs),
 }
 
 #[derive(Args, Debug)]
@@ -231,7 +235,7 @@ fn change() -> &'static Exchange {
 /// a console: whatever glass reads it tomorrow may well be able to afford the
 /// `█`, and an archive of `#` is a worse record for the sake of a screen that
 /// was never looking. Only a screen is offered the exchange.
-fn priced(text: &str) -> String {
+pub(crate) fn priced(text: &str) -> String {
     if !human_stream_is_tty() {
         return text.to_string();
     }
@@ -288,7 +292,7 @@ fn say(text: &str) {
 /// overwritten. Chrome may only be exchanged for ASCII when somebody is looking
 /// at the console that cannot afford it — because that is the only place the
 /// exchange is an improvement rather than a loss.
-fn human_stream_is_tty() -> bool {
+pub(crate) fn human_stream_is_tty() -> bool {
     if DIAG_STDERR.load(Ordering::Relaxed) {
         std::io::stderr().is_tty()
     } else {
@@ -297,7 +301,7 @@ fn human_stream_is_tty() -> bool {
 }
 
 /// Rewrite the live progress line, or clear it when `text` is `None`.
-fn live(text: Option<&str>) {
+pub(crate) fn live(text: Option<&str>) {
     let line = match text {
         Some(text) => format!("\r\x1b[K{}", priced(text)),
         None => "\r\x1b[K".to_string(),
@@ -381,12 +385,13 @@ fn run() -> Result<i32> {
         Some(Command::Whitelist(args)) => cmd_whitelist(args),
         Some(Command::Rules) => cmd_rules(cli.json),
         Some(Command::Doctor) => cmd_doctor(),
+        Some(Command::Guard(args)) => guard::run(args, cli.json),
     }
 }
 
 // ---------------------------------------------------------------------- output
 
-fn paint(code: &str, text: &str) -> String {
+pub(crate) fn paint(code: &str, text: &str) -> String {
     if COLOR.load(Ordering::Relaxed) {
         format!("\x1b[{code}m{text}\x1b[0m")
     } else {
@@ -394,13 +399,13 @@ fn paint(code: &str, text: &str) -> String {
     }
 }
 
-fn shout(code: &str, text: &str) {
+pub(crate) fn shout(code: &str, text: &str) {
     if !QUIET.load(Ordering::Relaxed) || code == "31" {
         diag(code, text);
     }
 }
 
-fn heading(text: &str) {
+pub(crate) fn heading(text: &str) {
     if QUIET.load(Ordering::Relaxed) {
         return;
     }
@@ -409,7 +414,7 @@ fn heading(text: &str) {
     diag("90", &"─".repeat(text.chars().count().min(64)));
 }
 
-fn shrink(text: &str, width: usize) -> String {
+pub(crate) fn shrink(text: &str, width: usize) -> String {
     use unicode_width::UnicodeWidthChar;
     if text.chars().map(|c| c.width().unwrap_or(0)).sum::<usize>() <= width {
         return text.to_string();
@@ -430,7 +435,7 @@ fn shrink(text: &str, width: usize) -> String {
     format!("...{out}")
 }
 
-fn clip(text: &str, width: usize) -> String {
+pub(crate) fn clip(text: &str, width: usize) -> String {
     use unicode_width::UnicodeWidthChar;
     if text.chars().map(|c| c.width().unwrap_or(0)).sum::<usize>() <= width {
         return text.to_string();
@@ -612,7 +617,7 @@ fn with_progress<T>(
     result
 }
 
-fn bullet() -> String {
+pub(crate) fn bullet() -> String {
     if COLOR.load(Ordering::Relaxed) {
         "●".to_string()
     } else {

@@ -256,7 +256,7 @@ pub fn largest_files(
             return Err(squid_core::SquidError::Cancelled);
         }
         visited += 1;
-        if visited % 64 == 0 {
+        if visited.is_multiple_of(64) {
             progress.tick(visited as u64, None, Some(dir.clone()));
         }
         if visited > 500_000 {

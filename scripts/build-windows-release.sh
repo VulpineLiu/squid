@@ -95,7 +95,10 @@ asset_text = "".join(
     for p in assets.iterdir()
     if p.suffix in {".js", ".css", ".html"}
 )
-for marker in ("智能扫描", "扫描完成", "自动检查更新"):
+# Markers are the Chinese copy that has to survive into the bundle: the two scan
+# words are what the overview offers, and 0.1.6 split them apart, so a bundle built
+# from an older or newer `dist` than the one on disk fails here rather than shipping.
+for marker in ("清理扫描", "安全快速扫描", "扫描完成", "自动检查更新"):
     if marker not in asset_text:
         missing.append(marker)
 if missing:

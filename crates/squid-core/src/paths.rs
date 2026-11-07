@@ -178,6 +178,31 @@ pub fn normalized(path: &Path) -> PathBuf {
     out
 }
 
+/// A path reduced to one comparable string.
+///
+/// This is [`same_path`] made cheap enough to index a table with. `same_path` is
+/// correct but builds a `Vec` of lowercased components per call, which is fine for
+/// a dozen comparisons and quadratic when a scan asks one per cached file: a
+/// 15,000-file security scan spent most of ten minutes doing nothing but
+/// re-comparing paths.
+///
+/// The two must agree, because a key that matched where `same_path` would not let
+/// a cached verdict be reused for the wrong file. Both fold case unconditionally —
+/// the rule [`keys_match`] already applies on every platform — and a test asserts
+/// the agreement rather than trusting this wording.
+pub fn canonical_key(path: &Path) -> String {
+    let parts: Vec<String> = parts(path).into_iter().map(|(key, _)| key).collect();
+    // `parts` keeps the root as its own component so that an absolute path cannot
+    // collide with a relative one, which would let a cached verdict be reused for
+    // the wrong file. Joining them verbatim reads as `//a/b`, so the root is put
+    // back as a prefix instead: same uniqueness, and the cache file on disk stays
+    // legible to whoever opens it.
+    match parts.first().map(String::as_str) {
+        Some("/") => format!("/{}", parts[1..].join("/")),
+        _ => parts.join("/"),
+    }
+}
+
 /// Name that survives being shown in a one-line row: deepest meaningful label.
 pub fn label_for(path: &Path) -> String {
     path.file_name()
@@ -188,6 +213,59 @@ pub fn label_for(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_canonical_key_agrees_with_same_path() {
+        let cases: [(&str, &str, bool); 7] = [
+            ("/a/b/c", "/a/b/c", true),
+            ("/a/b/../b/c", "/a/b/c", true),
+            ("/a/./b/c", "/a/b/c", true),
+            ("/a/b/c", "/a/b/d", false),
+            ("/a/b/c", "/a/b", false),
+            ("/a/b/c", "/a/b/c/d", false),
+            ("/A/b", "/a/b", true),
+        ];
+        for (left, right, same) in cases {
+            let (a, b) = (Path::new(left), Path::new(right));
+            assert_eq!(
+                same_path(a, b),
+                canonical_key(a) == canonical_key(b),
+                "same_path and canonical_key disagree about {left} and {right}"
+            );
+            assert_eq!(
+                same,
+                same_path(a, b),
+                "unexpected same_path for {left} and {right}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_spelling_of_one_file_gives_one_key() {
+        // A cache keyed by this must not answer "never seen it" to a file it has
+        // already judged, or every scan re-reads the disk and the cache is a lie.
+        for spelling in ["/a/b/c", "/a/b/c/", "/a/./b/c", "/a/b/../b/c"] {
+            assert_eq!(
+                canonical_key(Path::new(spelling)),
+                canonical_key(Path::new("/a/b/c")),
+                "{spelling} is the same file as /a/b/c"
+            );
+        }
+    }
+
+    #[test]
+    fn a_canonical_key_is_usable_as_a_hash_key() {
+        // Two spellings of one file must land on one slot, or a cache lookup
+        // would answer "never seen it" and re-hash the whole disk every scan.
+        assert_eq!(
+            canonical_key(Path::new("/Users/Tester/Library/Caches")),
+            canonical_key(Path::new("/Users/Tester/./Library/Caches"))
+        );
+        assert_ne!(
+            canonical_key(Path::new("/a/b")),
+            canonical_key(Path::new("/a/b/c"))
+        );
+    }
 
     #[test]
     fn expands_home() {

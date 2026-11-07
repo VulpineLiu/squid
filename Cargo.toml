@@ -4,9 +4,9 @@ members = ["crates/*"]
 exclude = ["src-tauri"]
 
 [workspace.package]
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.95"
 license = "GPL-3.0-only"
 authors = ["squid contributors"]
 repository = "https://github.com/nexdev/squid"
@@ -18,6 +18,7 @@ squid-platform = { path = "crates/squid-platform" }
 squid-rules = { path = "crates/squid-rules" }
 squid-engine = { path = "crates/squid-engine" }
 squid-stats = { path = "crates/squid-stats" }
+squid-guard = { path = "crates/squid-guard" }
 squid-tui = { path = "crates/squid-tui" }
 
 anyhow = "1"
@@ -33,9 +34,9 @@ dirs = "6"
 libc = "0.2"
 plist = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-sysinfo = { version = "0.34", default-features = false, features = ["system", "network", "disk"] }
+sysinfo = { version = "0.34", default-features = false, features = ["system", "network", "disk", "user"] }
 crossterm = "0.28"
-ratatui = "0.29"
+ratatui = "0.30"
 unicode-width = "0.2"
 clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
 

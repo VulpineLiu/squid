@@ -18,7 +18,7 @@ default:
 
 rust-lint-test:
   stage: check
-  image: rust:1.85
+  image: rust:1.95
   cache:
     key:
       files: [Cargo.lock]
@@ -31,7 +31,7 @@ rust-lint-test:
 
 windows-cross-check:
   stage: check
-  image: rust:1.85
+  image: rust:1.95
   cache:
     key:
       files: [Cargo.lock]
@@ -74,7 +74,7 @@ desktop-frontend:
 
 desktop-rust-check:
   stage: check
-  image: rust:1.85
+  image: rust:1.95
   needs:
     - job: desktop-frontend
       artifacts: true

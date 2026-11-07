@@ -21,7 +21,10 @@ import {
   percent,
 } from "../lib/format";
 import type { ProcessSample, SystemSnapshot } from "../types";
+import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
+import { ProcessTable } from "../components/ProcessTable";
 import {
+  Button,
   ConfirmDialog,
   Gauge,
   InlineError,
@@ -37,16 +40,28 @@ export function SystemPage({
   error,
   loading,
   refresh,
+  initialProcessFilter,
+  security,
+  onOpenStartup,
 }: {
   snapshot: SystemSnapshot | null;
   error: string | null;
   loading: boolean;
   refresh: () => Promise<void>;
+  initialProcessFilter: string | null;
+  security: SecurityWorkspace;
+  onOpenStartup: (query: string) => void;
 }) {
   const { t, lang } = useI18n();
   const { push } = useToast();
   const [victim, setVictim] = useState<ProcessSample | null>(null);
   const [stopping, setStopping] = useState(false);
+  // Two tabs rather than a third page: performance and processes are the same
+  // question asked at different resolutions, and the roadmap did not want a
+  // separate "Processes" entry in a sidebar that is already at ten.
+  const [tab, setTab] = useState<"performance" | "processes">(
+    initialProcessFilter ? "processes" : "performance",
+  );
 
   const stop = async () => {
     if (!victim) return;
@@ -93,6 +108,35 @@ export function SystemPage({
 
       {error ? <InlineError message={error} /> : null}
 
+      <div className="chip-row page-tabs" role="tablist">
+        {(
+          [
+            ["performance", t("Performance", "性能")],
+            ["processes", t("Processes", "进程")],
+          ] as ["performance" | "processes", string][]
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={tab === key}
+            className={`filter-chip ${tab === key ? "is-active" : ""}`}
+            onClick={() => setTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "processes" ? (
+        <ProcessTable
+          active
+          initialFilter={initialProcessFilter}
+          security={security}
+          onOpenStartup={onOpenStartup}
+        />
+      ) : null}
+
+      <div className="system-performance" hidden={tab !== "performance"}>
       <div className="system-gauges">
         <section className="system-gauge-card">
           <div className="system-gauge-head">
@@ -279,6 +323,11 @@ export function SystemPage({
           <SectionTitle
             title={t("Top processes", "高占用进程")}
             subtitle={t("Sorted by processor usage.", "按处理器占用排序。")}
+            action={
+              <Button variant="ghost" size="sm" onClick={() => setTab("processes")}>
+                {t("View all processes", "查看全部进程")}
+              </Button>
+            }
           />
           <div className="process-head">
             <span />
@@ -364,6 +413,7 @@ export function SystemPage({
           )} 个网络接口`,
         )}
         <MetricBar value={snapshot?.disk.activity ?? 0} tone="success" />
+      </div>
       </div>
 
       <ConfirmDialog

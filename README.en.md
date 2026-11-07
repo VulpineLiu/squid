@@ -4,7 +4,7 @@
 
 **Give your computer a bath.**
 
-Squid is a local system-care app for macOS and Windows. It cleans rebuildable caches and system junk, uninstalls apps with their leftovers, removes project build artefacts, maps disk usage, and shows live system health.
+Squid is a local system-care app for macOS and Windows. It cleans rebuildable caches and system junk, uninstalls apps with their leftovers, removes project build artefacts, maps disk usage, shows live system health, and scans for malware with reversible quarantine.
 
 The desktop app, CLI, and TUI share one Rust scan-and-delete engine. Cleaning rules, safety boundaries, the deletion ledger, and settings live in one place. Squid requires no cloud service and no root access.
 
@@ -27,7 +27,9 @@ The desktop app supports macOS 12+ and Windows 10/11 x64. The CLI and TUI share 
 | Uninstall apps | Finds an app by name and builds one plan containing the app bundle plus preferences, caches, containers, or AppData leftovers |
 | Deep Clean | Finds rebuildable build output such as `node_modules`, disk images, installers, and stale downloads while protecting recently used projects |
 | Storage | Measures folders level by level, with the largest children and files |
-| Real-time monitor | Samples CPU, memory, network, disk, battery, volumes, and high-usage processes every two seconds; processes can be ended after confirmation |
+| Real-time monitor | Samples CPU, memory, network, disk, battery, volumes, and high-usage processes every two seconds. The Processes tab lists every process with its signature and startup entry, and ends them after confirmation |
+| Security | Reports XProtect or Defender status, scans for malware by hash, YARA rule and heuristic, grades findings confirmed / suspicious / advisory, and quarantines them reversibly |
+| Startup items | LaunchAgents, LaunchDaemons, login items, registry Run keys, startup folders, scheduled tasks and services; the ones the current user owns can be disabled and re-enabled |
 | History and undo | Every real deletion is recorded in a local ledger; items still in Trash or the Recycle Bin can be restored |
 | System updates | Checks, verifies, downloads, and installs new versions from the release channel |
 
@@ -38,16 +40,22 @@ Language settings offer only Simplified Chinese and English, with the current sy
 ### Sidebar
 
 - **Maintenance**: Computer overview, Daily cleanup, Uninstall apps, Deep Clean
+- **Protection**: Security, Startup items
 - **Insights**: Storage, Real-time monitor
 - **Bottom**: History, Settings
 
-Use `⌘1`–`⌘8` on macOS or `Ctrl+1`–`Ctrl+8` on Windows to switch pages.
+Use `⌘1`–`⌘0` on macOS or `Ctrl+1`–`Ctrl+0` on Windows to switch pages, in the
+sidebar order above. Since 0.1.6, `7` and `8` open Security and Startup items;
+History and Settings moved to `9` and `0`.
 
 ### Menu bar / tray
 
 Closing the main window only hides it; Squid keeps running. The tray menu offers:
 
 - Open Squid
+- Protection status (a read-only status line)
+- Scan for malware
+- Manage startup items
 - Daily cleanup
 - Uninstall apps
 - Deep Clean
@@ -65,11 +73,20 @@ The tray follows the active interface language. Reopening the app, double-clicki
 
 ### Permissions and privacy
 
-- On first launch, Squid shows an optional Full Disk Access check once. It does not force the macOS permission prompt and never blocks startup.
+- On first launch, Squid shows a security-readiness card once: system protection, scan
+  access, notifications, launch at login and rule updates. Every item is optional, no
+  permission is requested that you did not ask for, and closing the card changes nothing.
+- Full Disk Access stays optional. Without it, protected folders are skipped and the
+  Security page reports the coverage as limited rather than clean.
 - **Settings → System permissions** provides a status check and a shortcut to **System Settings → Privacy & Security → Full Disk Access**.
 - Without Full Disk Access, TCC-protected locations are skipped and every other feature remains available.
 - Storage analysis and Deep Clean read only user-selected or configured folders; file contents are never uploaded.
-- The app makes no network requests other than update checks and installer downloads.
+- The app makes no network requests other than update checks, installer downloads and
+  rule-pack downloads. **Nothing is ever uploaded**: no file name, hash, finding or
+  quarantined file leaves the machine.
+- Security scanning does not install a daemon, kernel extension or privileged helper.
+  XProtect and Defender stay the real-time protection; Squid reads their state, never
+  turns them off, and never calls `xprotect update` on your behalf.
 
 ### Launch at login
 
@@ -126,6 +143,11 @@ Common commands:
 | `whitelist add\|list\|remove` | Maintain protected paths that are never selected |
 | `rules` | List active rules |
 | `doctor` | Check permissions, configuration, history, and effective paths |
+| `guard status` | Report XProtect or Defender state, rule-pack version, startup counts and quarantine size |
+| `guard scan [PATHS…]` | Scan for malware. No paths uses the quick range; `--full`, `--json`, `-y` to auto-quarantine confirmed |
+| `guard startup` | List login/startup entries; `--all` includes the operating system's own, `--risky` filters |
+| `guard quarantine <ID>` / `restore <ID>` | Act on a finding id a scan printed, or put a quarantined file back |
+| `guard held` | List what the quarantine holds, and why |
 
 Every delete command supports `--dry-run`; non-interactive environments require `-y/--yes`. Run `squid <command> --help` for complete options.
 
@@ -137,6 +159,7 @@ crates/
 ├── squid-platform   macOS / Linux / Windows adapters: apps, leftovers, volumes, Trash, processes
 ├── squid-rules      TOML rule engine: expansion, anchors, protection, age, and risk flags
 ├── squid-stats      sysinfo sampling, trends, battery, network, and disk activity
+├── squid-guard      malware scanning, YARA and hash rules, startup trust, reversible quarantine
 ├── squid-engine     clean / uninstall / purge / analyze and the single deletion path
 ├── squid-tui        ratatui terminal interface
 └── squid-cli        clap command-line entry point
@@ -147,7 +170,7 @@ scripts/             development, verification, and dual-platform release script
 docs/                architecture, design, desktop, and release specifications
 ```
 
-`src-tauri` is separate from the root Cargo workspace, but depends directly on `squid-core`, `squid-platform`, `squid-stats`, and `squid-engine`. The desktop app does not maintain a second cleanup implementation.
+`src-tauri` is separate from the root Cargo workspace, but depends directly on `squid-core`, `squid-platform`, `squid-guard`, `squid-stats`, and `squid-engine`. The desktop app does not maintain a second cleanup implementation.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for architecture details and [`docs/DESIGN.md`](docs/DESIGN.md) for the shared Nex color, typography, component, and language rules.
 

@@ -551,7 +551,7 @@ impl Palette {
         if highlight {
             return Self::selected();
         }
-        let band = if index % 2 == 0 {
+        let band = if index.is_multiple_of(2) {
             Self::card_bg()
         } else {
             Self::card_bg_alt()

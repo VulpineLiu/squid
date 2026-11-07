@@ -6,6 +6,7 @@ import {
   Eraser,
   History,
   LayoutDashboard,
+  Power,
   RefreshCw,
   Settings,
   ShieldCheck,
@@ -15,6 +16,8 @@ import {
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAppsWorkspace } from "./hooks/useAppsWorkspace";
 import { useScanWorkspace } from "./hooks/useScanWorkspace";
+import { useSecurityWorkspace } from "./hooks/useSecurityWorkspace";
+import { useStartupWorkspace } from "./hooks/useStartupWorkspace";
 import { useSystemSnapshot } from "./hooks/useSystemSnapshot";
 import { useUpdateFlow } from "./hooks/useUpdateFlow";
 import { detectLanguage, I18nProvider, useI18n } from "./i18n";
@@ -25,6 +28,7 @@ import type {
   DeleteMode,
   Language,
   PageId,
+  SecurityStatus,
   SettingsView,
 } from "./types";
 import { useToast } from "./components/ui";
@@ -35,7 +39,9 @@ import { CleanupPage } from "./pages/CleanupPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PurgePage } from "./pages/PurgePage";
+import { SecurityPage } from "./pages/SecurityPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { StartupPage } from "./pages/StartupPage";
 import { StoragePage } from "./pages/StoragePage";
 import { SystemPage } from "./pages/SystemPage";
 
@@ -80,6 +86,14 @@ const NAV_GROUPS: {
     ],
   },
   {
+    labelEn: "Protection",
+    labelZh: "保护",
+    items: [
+      { id: "security", labelEn: "Security", labelZh: "安全", icon: ShieldCheck },
+      { id: "startup", labelEn: "Startup items", labelZh: "启动项", icon: Power },
+    ],
+  },
+  {
     labelEn: "Insights",
     labelZh: "洞察",
     items: [
@@ -106,6 +120,8 @@ const PAGE_TITLES: Record<PageId, [string, string]> = {
   purge: ["Deep Clean", "深度清理"],
   storage: ["Storage", "存储空间"],
   system: ["Real-time monitor", "实时监控"],
+  security: ["Security", "安全"],
+  startup: ["Startup items", "启动项"],
   history: ["History", "历史记录"],
   settings: ["Settings", "设置"],
 };
@@ -167,6 +183,17 @@ export default function App() {
   const systemActive = page === "overview" || page === "system";
   const system = useSystemSnapshot(systemActive);
   const update = useUpdateFlow(bootstrap?.updateFeedUrl ?? "", autoCheck);
+  // One security state for the whole window: the overview strip, the sidebar
+  // badge and the security page all read this, so they cannot disagree.
+  const security = useSecurityWorkspace(true);
+  const startup = useStartupWorkspace(page === "startup");
+  // A process row can ask "where did this come from", and a startup entry can ask
+  // "is it running". Both hand the other page a path rather than duplicating data.
+  const [processFilter, setProcessFilter] = useState<string | null>(null);
+  // A path handed from the process table to the startup page, where it becomes a
+  // search rather than a second data load.
+  const [startupQuery, setStartupQuery] = useState<string | null>(null);
+  const [autostart, setAutostart] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,6 +206,12 @@ export default function App() {
         setLang(next.language);
         setAutoCheck(next.updateCheckEnabled);
         setSetupOpen(!next.settings.setupReviewed);
+        // The readiness card reports whether Squid starts at login, and that is a
+        // fact about the system rather than about settings, so it is asked for.
+        void api
+          .autostartStatus()
+          .then(setAutostart)
+          .catch(() => setAutostart(false));
         document.documentElement.lang = next.language === "zh" ? "zh-CN" : "en";
       })
       .catch((reason) => {
@@ -189,12 +222,56 @@ export default function App() {
     };
   }, []);
 
+  /**
+   * A notification click goes to the findings, and brings the window back.
+   *
+   * Findings are the only thing squid notifies about, so the tap needs no
+   * destination in its payload. The backend is asked as well because closing the
+   * window only hides it: the webview is gone, so nothing on this side can undo
+   * the hide, and a click that appeared to do nothing would look like a bug in the
+   * security feature rather than in window management.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    let stop: { unregister: () => void } | null = null;
+    void import("@tauri-apps/plugin-notification")
+      .then(({ onAction }) =>
+        onAction(() => {
+          if (cancelled) return;
+          // The backend's reply arrives as the same navigate event the tray menu
+          // uses, which also shows the hidden window. Asking first and navigating
+          // here as well would race the two against each other.
+          void api.securityOpen().catch(() => undefined);
+          void security.refresh();
+        }),
+      )
+      .then((listener) => {
+        if (cancelled) void listener.unregister();
+        else stop = listener;
+      })
+      // No plugin, or notifications switched off: the tray line and the in-app
+      // banner still report the same finding, so this is silence, not failure.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      void stop?.unregister();
+    };
+  }, [security]);
+
+  const inspectProcess = useCallback((path: string) => {
+    setProcessFilter(path);
+    setPage("system");
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | null = null;
     void api
       .onNavigate((next) => {
         if (!cancelled) setPage(next);
+        // A tray or notification jump into Security must show current numbers,
+        // not the ones from whenever the window last asked.
+        if (next === "security") void security.refresh();
       })
       .then((stop) => {
         if (cancelled) stop();
@@ -204,7 +281,7 @@ export default function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, []);
+  }, [security]);
 
   useEffect(() => {
     const order: PageId[] = [
@@ -214,6 +291,8 @@ export default function App() {
       "purge",
       "storage",
       "system",
+      "security",
+      "startup",
       "history",
       "settings",
     ];
@@ -281,12 +360,14 @@ export default function App() {
         page={page}
         setPage={setPage}
         updateVersion={activeUpdate?.availableVersion ?? null}
+        security={security.status}
       >
         {page === "overview" ? (
           <OverviewPage
             bootstrap={bootstrap}
             snapshot={system.snapshot}
             cleanup={cleanup}
+            security={security}
             onNavigate={setPage}
           />
         ) : null}
@@ -309,12 +390,30 @@ export default function App() {
           />
         ) : null}
         {page === "storage" ? <StoragePage bootstrap={bootstrap} /> : null}
+        {page === "security" ? (
+          <SecurityPage security={security} onOpenStartup={() => setPage("startup")} />
+        ) : null}
+        {page === "startup" ? (
+          <StartupPage
+            startup={startup}
+            security={security}
+            initialQuery={startupQuery}
+            onInspectProcess={inspectProcess}
+            onShowSecurity={() => setPage("security")}
+          />
+        ) : null}
         {page === "system" ? (
           <SystemPage
             snapshot={system.snapshot}
             error={system.error}
             loading={system.loading}
             refresh={system.refresh}
+            initialProcessFilter={processFilter}
+            security={security}
+            onOpenStartup={(query) => {
+              setStartupQuery(query);
+              setPage("startup");
+            }}
           />
         ) : null}
         {page === "history" ? <HistoryPage /> : null}
@@ -324,15 +423,34 @@ export default function App() {
             settings={settings}
             flow={update}
             autoCheck={autoCheck}
+            security={security}
             onSettingsChange={setSettings}
             onLanguageChange={changeLanguage}
             onAutoCheckChange={changeAutoCheck}
           />
         ) : null}
       </AppChrome>
-      {setupOpen ? <SetupPanel onDone={() => void finishSetup()} /> : null}
+      {setupOpen ? (
+        <SetupPanel
+          security={security}
+          autostart={autostart}
+          onDone={() => void finishSetup()}
+        />
+      ) : null}
     </I18nProvider>
   );
+}
+
+/// A number means "confirmed and unhandled", which is the only state that
+/// justifies interrupting. A dot alone means there is something suspicious, worth
+/// a look but not worth a badge that looks like an alarm.
+function securityBadge(security: SecurityStatus, page: PageId) {
+  if (page === "security") return null;
+  if (security.confirmed > 0) {
+    return <i className="nav-badge">{security.confirmed > 9 ? "9+" : security.confirmed}</i>;
+  }
+  if (security.suspicious > 0) return <i className="nav-dot" />;
+  return null;
 }
 
 function AppChrome({
@@ -340,12 +458,14 @@ function AppChrome({
   page,
   setPage,
   updateVersion,
+  security,
   children,
 }: {
   bootstrap: Bootstrap;
   page: PageId;
   setPage: (page: PageId) => void;
   updateVersion: string | null;
+  security: SecurityStatus | null;
   children: ReactNode;
 }) {
   const { t, lang } = useI18n();
@@ -384,6 +504,7 @@ function AppChrome({
                   >
                     <Icon size={18} />
                     <span>{lang === "zh" ? item.labelZh : item.labelEn}</span>
+                    {item.id === "security" && security ? securityBadge(security, page) : null}
                     {item.id === "cleanup" && page !== "cleanup" ? (
                       <i className="nav-dot" />
                     ) : null}

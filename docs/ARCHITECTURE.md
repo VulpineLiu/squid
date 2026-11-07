@@ -23,25 +23,22 @@
 
 ## crate 依赖图
 
-```
-                 ┌──────────────┐
-                 │  squid-core  │  模型 / 字节 / 路径 / 安全策略 / 设置 / 账本 / 进度
-                 └──────┬───────┘
-              ┌─────────┼──────────┐
-       ┌──────▼─────┐ ┌─▼────────┐ │
-       │ squid-     │ │ squid-   │ │  ← 只依赖 core
-       │ platform   │ │ rules    │ │
-       └──────┬─────┘ └─┬────────┘ │
-              │         │          │
-         ┌────▼─────────▼───────┐  │   ┌────────────┐
-         │     squid-engine     │◄─┼───┤ squid-stats│ ← 依赖 core 与 platform
-         └────┬────────────┬────┘  │   └─────┬──────┘
-      ┌───────▼──┐    ┌────▼───────▼──┐      │
-      │ squid-tui│    │   squid-cli   │◄─────┘
-      └──────────┘    └───────────────┘
-```
+| 层 | crate | 依赖 |
+| --- | --- | --- |
+| 0 | `squid-core` | —（不知道任何其它 crate 的存在）|
+| 1 | `squid-platform` | core |
+| 1 | `squid-rules` | core, platform |
+| 1 | `squid-stats` | core, platform |
+| 1 | **`squid-guard`** | core, platform |
+| 2 | `squid-engine` | core, platform, rules, stats |
+| 3 | `squid-tui` | core, platform, rules, stats, engine |
+| 4 | `squid-cli` | 以上全部（含 guard）|
+| — | `src-tauri` | core, platform, guard, engine, stats |
 
-依赖方向严格单向，`squid-core` 不知道其它任何 crate 的存在。
+`squid-guard` 与 `squid-engine` 在第 1 / 第 2 层并列，而不是叠在一起：清理引擎的一切
+前提都是「这东西可再生，删了没事」，而隔离的全部难度恰恰在于「这是用户自己的文件，
+必须能原样放回去」。所以 guard 只依赖 `core` 与 `platform`，复用 `Progress`、
+`CancelToken` 与 `paths`，但不碰删除路径。
 
 ### squid-core
 
@@ -141,6 +138,66 @@ ratatui + crossterm。六个面板 `Cleanup / Uninstall / Purge / Storage / Stat
   `Span::raw(" ")`，反白时会在行里留下一道道暗缝，所以只在「整行非空白 span 样式一致」时把空白也染上；
   路径列只截断不补齐，因此 `item_row` 末尾还会按显示宽度补一段同色空格，让高亮条一直顶到卡片右边框。
 - **一个 widget 只有一套下标**：`ListState::selected` 是 ratatui 用来定位滚动窗口的行号，高亮却由每一行自己画，两者必须数同一批行。卸载列表把「大小/名称/版本」表头（筛选时还多一行 filter chip）和条目一起塞进同一个 `List`，`selected` 就此比样式多算了一两行：第一屏看不出来，列表一超过一页，窗口按「光标上面那一行」定位，高亮行被挤出可视区，用户看到的是「下翻之后没有高亮了」——Mac 与 Windows 同因，因为它跟终端无关。清理面板从不出现这个现象，`ScanPanel::lines` 里只有条目，标题挂在 card 的 block 上。现在的写法把表头和 filter chip 当作 chrome 单独走一段 `Layout`：`Paragraph` 拿上面，`List` 只拿条目。`the_app_under_the_cursor_is_the_row_that_is_on_screen` 遍历每一个光标位置（含筛选态）断言「光标那一行就是屏幕上那一行、且带着强调色与加粗」，因为它无法靠猜某个卡片高度通过。
+
+### squid-guard
+
+恶意软件扫描、检测规则与可逆隔离。它是唯一一个会**移动用户文件**的新 crate，所以它的
+设计重心不是「能找到什么」，而是「在没有 Developer ID 与 Authenticode 的发布方式下，
+怎样做到不伤人」。
+
+| 模块 | 职责 |
+| --- | --- |
+| `scan` | 扫描编排：`ScanTarget::{Quick,Full,Paths}` → 采集 → 判定 → `ScanReport`。`Guard` 装配规则、哈希表、缓存与排除项 |
+| `rules` | YARA-X `Detector`、`HashIndex`，以及决定「这个文件值不值得打开」的门（`plausible_by_name_in` / `worth_scanning_in` / `layout_of`）|
+| `heuristics` | 无签名 / 世界可写 / 登录项 / 伪装名称，产 `Evidence`；`CEILING = Suspicious`，永远到不了 Confirmed |
+| `findings` | `Confidence::{Advisory,Suspicious,Confirmed}`、`Evidence`（带 `key()` 与 `summary()`）、`Finding` |
+| `coverage` | 每个 root 的结果：walked / denied / absent。**读不到不等于干净**，二者在报告里是不同的值 |
+| `quarantine` | 账本 + 惰性对象 + 字节一致恢复 |
+| `intel` | 规则包格式、验签、安装与回退 |
+| `store` | 判定缓存（按文件身份）+ 上一次扫描 + 最近活动，落 `<state>/security/` |
+
+`squid-guard` 刻意不依赖 `squid-engine`：清理引擎的一切前提都是「这东西可再生，删了
+没事」，而隔离的全部难度恰恰在于「这是用户自己的文件，必须能原样放回去」。它复用
+`Progress`、`CancelToken` 与 `paths`，但不复用删除路径。
+
+三条不变量，都有测试钉住：
+
+1. **扫描不删除任何东西。** 唯一会移动文件的是隔离，而隔离只接受后端发出的 finding id。
+   界面永远不能提交一个路径来要求隔离：`security_quarantine(finding_id)` 查的是后端自己
+   存下的那份扫描，再核对哈希、大小与文件身份；扫描之后被换过的文件会被拒绝，而不是按
+   一行过期记录搬走。
+2. **只有 `confirmed` 可能被自动隔离**，且默认关闭（`security.auto_quarantine = false`）。
+   `suspicious` 只报告。级别由两处分别决定后取最大值：已发布探测器（哈希 / YARA）按自己的
+   等级说话，启发式则要求**两个信号互相印证**——单个「无签名」是提示，「无签名 + 开机启动」
+   才是可疑。这一条是实测逼出来的：一台干净的 Mac 按旧规则会报出 975 条可疑，其中 951 条
+   只是「带执行位的文本文件」，而这么长的列表最终的下场是被人整个忽略掉。
+3. **不上传。** 这个 crate 里没有任何函数接收本地路径再发出网络请求。规则包只下载。
+
+`xprotect update` 永不被调用：这台机器要不要向 Apple 的服务器取定义，不是第三方 App 能
+替用户决定的事。`squid-platform::protection` 只读 `status` / `version` / `spctl`，读不到
+就报 `known = false`，界面据此显示「无法确认」而不是绿色。
+
+**门（gate）比规则更决定可用性。** 一次快速扫描会路过约 105 万个文件，其中 34 万个是没有
+扩展名的数据文件。判定顺序按代价排列：名字（免费，遍历时已经在手）→ `stat`（大小、执行位）
+→ 目录形状（bundle 内部只看主可执行文件与 `Info.plist`，否则光是 `/Applications` 就吃掉
+十 GB）→ 只有浏览器下载目录才去读头八个字节。用户自己指名的目录是例外：那里按内容判定，
+因为 `eicar.com` 的后缀和它的身份本来就互相矛盾。最终约 1,900 个文件 / 6.2 GB，冷启动
+26 秒、命中缓存 9 秒。
+
+一处性能教训值得留在这里：判定缓存与候选去重原本都是 `Vec` 加 `paths::same_path` 线性
+查找，而 `same_path` 每次比较都要重建一条路径的组件向量。15,000 个文件下这就是几十亿次
+字符串分配——快速扫描跑十分钟、CPU 满核，看着像磁盘慢，其实是纯 CPU。现在两处都按
+`paths::canonical_key` 建索引，并且有测试断言 `canonical_key` 与 `same_path` 判定一致：
+键和判定不一致，就等于把一份缓存结论用到了另一个文件身上。
+
+隔离区不是废纸篓。对象被放进 Squid 自己的状态目录、清掉执行位、权限收紧到仅属主，账本与
+对象放在一起，所以「隔离了一个登录项」意味着它下次开机真的不会起来。恢复按原始路径、模式
+与时间戳放回，且恢复前要确认。
+
+规则包与安装包用**不同的密钥**签名：轮换发布密钥不应该顺手改变谁能推规则，泄漏了安装包
+密钥也不应该变成一条规则注入路径。包格式把 manifest 与 source 存在同一个文件里，读到什么
+就一起验什么，避免「新包配旧 manifest」这种两半漂移。任何一次更新失败都保留上一版可用
+规则，并且会清空判定缓存——旧规则给出的结论不是新规则给的结论。
 
 ### squid-cli
 

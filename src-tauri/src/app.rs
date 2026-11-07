@@ -41,7 +41,7 @@ impl AppState {
             .map_err(|_| "The application state is unavailable; restart Squid.".to_string())
     }
 
-    fn begin(&self, job_id: &str) -> Result<CancelToken, String> {
+    pub(crate) fn begin(&self, job_id: &str) -> Result<CancelToken, String> {
         if job_id.trim().is_empty() {
             return Err("A job identifier is required.".into());
         }
@@ -51,7 +51,7 @@ impl AppState {
         Ok(token)
     }
 
-    fn finish(&self, job_id: &str) {
+    pub(crate) fn finish(&self, job_id: &str) {
         if let Ok(mut jobs) = self.jobs.lock() {
             jobs.remove(job_id);
         }
@@ -72,13 +72,18 @@ struct ProgressView {
     freed: Option<u64>,
 }
 
-struct ProgressReporter {
+pub(crate) struct ProgressReporter {
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
 
 impl ProgressReporter {
-    fn start(app: AppHandle, job_id: String, kind: &'static str, progress: Progress) -> Self {
+    pub(crate) fn start(
+        app: AppHandle,
+        job_id: String,
+        kind: &'static str,
+        progress: Progress,
+    ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
         let handle = thread::spawn(move || {
@@ -97,7 +102,7 @@ impl ProgressReporter {
         }
     }
 
-    fn finish(mut self) {
+    pub(crate) fn finish(mut self) {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();

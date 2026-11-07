@@ -27,7 +27,7 @@ const BAKED_MANIFEST_URL: &str = match option_env!("SQUID_UPDATE_URL") {
     Some(url) => url,
     None => "",
 };
-const SIGNATURE_FILE: &str = "squid-update.sig";
+pub(crate) const SIGNATURE_FILE: &str = "squid-update.sig";
 const ENV_MANIFEST_URL: &str = "SQUID_UPDATE_URL";
 const BAKED_PUBLIC_KEY: &str = match option_env!("SQUID_UPDATE_PUBKEY") {
     Some(key) => key,
@@ -254,7 +254,7 @@ fn public_key() -> Result<Option<VerifyingKey>, String> {
     key_from_hex(BAKED_PUBLIC_KEY)
 }
 
-fn key_from_hex(value: &str) -> Result<Option<VerifyingKey>, String> {
+pub(crate) fn key_from_hex(value: &str) -> Result<Option<VerifyingKey>, String> {
     let key = value.trim();
     if key.is_empty() {
         return Ok(None);
@@ -267,7 +267,7 @@ fn key_from_hex(value: &str) -> Result<Option<VerifyingKey>, String> {
         .map(Some)
 }
 
-fn signature_url() -> Option<String> {
+pub(crate) fn signature_url() -> Option<String> {
     let url = manifest_url();
     (!url.is_empty()).then(|| {
         let base = match url.rsplit_once('/') {
@@ -278,11 +278,46 @@ fn signature_url() -> Option<String> {
     })
 }
 
+/// The rule-pack channel lives beside the installer manifest but is a different
+/// document with a different key. Rotating the release key must not silently
+/// rotate who can push rules, and a leaked installer key must not become a
+/// rule-injection path, so the two are never read from the same variable.
+pub(crate) const INTEL_MANIFEST_FILE: &str = "squid-intel.json";
+pub(crate) const INTEL_SIGNATURE_FILE: &str = "squid-intel.sig";
+const BAKED_INTEL_PUBLIC_KEY: &str = match option_env!("SQUID_INTEL_PUBKEY") {
+    Some(key) => key,
+    None => "",
+};
+
+/// `…/squid-intel.json` on the same channel as the installers, or `None` when
+/// this build has no feed at all.
+pub(crate) fn intel_manifest_url() -> Option<String> {
+    raw_asset_url(INTEL_MANIFEST_FILE).ok()
+}
+
+pub(crate) fn intel_manifest_signature() -> Result<Option<String>, String> {
+    let url = match intel_manifest_url() {
+        Some(_) => raw_asset_url(INTEL_SIGNATURE_FILE)?,
+        None => return Ok(None),
+    };
+    // An absent signature file is an answer, not a failure: it means the channel
+    // publishes unsigned rules, which `verify_against` then reports honestly.
+    match fetch_text(&url) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.contains("404") || error.contains("not found") => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn intel_public_key() -> Result<Option<VerifyingKey>, String> {
+    key_from_hex(BAKED_INTEL_PUBLIC_KEY)
+}
+
 fn verify_manifest(text: &str, signature: Option<&str>) -> Result<bool, String> {
     verify_against(public_key()?.as_ref(), text, signature)
 }
 
-fn verify_against(
+pub(crate) fn verify_against(
     key: Option<&VerifyingKey>,
     text: &str,
     signature: Option<&str>,
@@ -344,7 +379,7 @@ fn is_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.chars().all(|character| character.is_ascii_hexdigit())
 }
 
-fn raw_asset_url(file: &str) -> Result<String, String> {
+pub(crate) fn raw_asset_url(file: &str) -> Result<String, String> {
     let base = manifest_url();
     if base.is_empty() {
         return Err("No update feed is configured.".into());
@@ -353,7 +388,7 @@ fn raw_asset_url(file: &str) -> Result<String, String> {
     Ok(format!("{directory}/{}", file.trim_start_matches('/')))
 }
 
-fn download(
+pub(crate) fn download(
     url: &str,
     destination: &Path,
     timeout: Duration,
@@ -452,7 +487,7 @@ fn download(
     }
 }
 
-fn fetch_text(url: &str) -> Result<String, String> {
+pub(crate) fn fetch_text(url: &str) -> Result<String, String> {
     let target = std::env::temp_dir().join(format!(
         "squid-manifest-{}-{}.json",
         std::process::id(),

@@ -17,6 +17,7 @@ squid-engine.workspace = true
 squid-platform.workspace = true
 squid-rules.workspace = true
 squid-stats.workspace = true
+squid-guard.workspace = true
 squid-tui.workspace = true
 anyhow.workspace = true
 clap.workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "squid-guard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Malware scanning, detection rules and reversible quarantine for squid"
+
+[dependencies]
+squid-core.workspace = true
+squid-platform.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+hex = "0.4"
+walkdir.workspace = true
+yara-x = { version = "1.23", default-features = false, features = ["string-module","math-module","hash-module","time-module","macho-module","pe-module","constant-folding","exact-atoms","fast-regexp"] }
+chrono.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+plist.workspace = true

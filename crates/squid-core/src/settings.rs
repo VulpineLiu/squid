@@ -36,6 +36,131 @@ pub struct Settings {
     /// Whether the desktop app's first-run permission card has been dismissed.
     /// Older configs have no such field and therefore see the card once.
     pub desktop_setup_reviewed: bool,
+    /// Malware scanning and quarantine. A whole section so an old config keeps
+    /// working: `#[serde(default)]` above fills this in when the file has none.
+    pub security: SecuritySettings,
+}
+
+/// How often squid runs its own scan while the app is open in the tray.
+///
+/// `OnLaunch` and the intervals only fire while squid is actually running: there
+/// is no daemon, and pretending otherwise would promise a watchdog that is not
+/// there. `Manual` is the default because a scan that starts by itself is a
+/// surprise the user did not ask for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ScanSchedule {
+    Manual,
+    OnLaunch,
+    Daily,
+    Weekly,
+}
+
+impl ScanSchedule {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScanSchedule::Manual => "manual",
+            ScanSchedule::OnLaunch => "on-launch",
+            ScanSchedule::Daily => "daily",
+            ScanSchedule::Weekly => "weekly",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<ScanSchedule> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "manual" | "off" | "none" => Some(ScanSchedule::Manual),
+            "on-launch" | "launch" => Some(ScanSchedule::OnLaunch),
+            "daily" => Some(ScanSchedule::Daily),
+            "weekly" => Some(ScanSchedule::Weekly),
+            _ => None,
+        }
+    }
+
+    /// How long a scan of this kind must wait before running again, or `None`
+    /// when it never runs by itself.
+    pub fn interval_secs(self) -> Option<i64> {
+        match self {
+            ScanSchedule::Manual => None,
+            ScanSchedule::OnLaunch => Some(0),
+            ScanSchedule::Daily => Some(24 * 60 * 60),
+            ScanSchedule::Weekly => Some(7 * 24 * 60 * 60),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SecuritySettings {
+    pub scan_schedule: ScanSchedule,
+    /// Notify through the operating system when a scan finds something. The
+    /// in-app banner and the tray state work without this.
+    pub notify_on_findings: bool,
+    /// Move confirmed findings into the quarantine without asking. Suspicious
+    /// ones are never moved automatically, whatever this is set to.
+    pub auto_quarantine: bool,
+    /// Download signed rule packs. Off means squid uses only what it shipped with.
+    pub update_rules: bool,
+    /// Paths the scan must not read. Separate from `whitelist` on purpose: a
+    /// folder a person protects from *cleaning* must not silently stop a
+    /// malware finding from being reported.
+    pub scan_exclusions: Vec<String>,
+    /// Findings the user dismissed, as `confidence|path` fingerprints.
+    pub ignored_findings: Vec<String>,
+}
+
+impl Default for SecuritySettings {
+    fn default() -> Self {
+        SecuritySettings {
+            scan_schedule: ScanSchedule::Manual,
+            notify_on_findings: true,
+            // Off by default: a security tool that moves files on its own has to
+            // earn that right first.
+            auto_quarantine: false,
+            update_rules: true,
+            scan_exclusions: Vec::new(),
+            ignored_findings: Vec::new(),
+        }
+    }
+}
+
+impl SecuritySettings {
+    pub fn exclude(&mut self, path: impl Into<String>) {
+        let path = path.into();
+        if !self.scan_exclusions.contains(&path) {
+            self.scan_exclusions.push(path);
+        }
+    }
+
+    pub fn remove_exclusion(&mut self, path: &str) -> bool {
+        let before = self.scan_exclusions.len();
+        self.scan_exclusions.retain(|kept| kept != path);
+        self.scan_exclusions.len() != before
+    }
+
+    /// Expanded, existing paths, ready to hand a scan.
+    pub fn exclusion_paths(&self) -> Vec<PathBuf> {
+        self.scan_exclusions
+            .iter()
+            .map(|raw| paths::expand(raw))
+            .collect()
+    }
+
+    pub fn ignore(&mut self, fingerprint: impl Into<String>) {
+        let fingerprint = fingerprint.into();
+        if !self.ignored_findings.contains(&fingerprint) {
+            self.ignored_findings.push(fingerprint);
+        }
+    }
+
+    pub fn is_ignored(&self, fingerprint: &str) -> bool {
+        self.ignored_findings.iter().any(|kept| kept == fingerprint)
+    }
+
+    pub fn unignore(&mut self, fingerprint: &str) -> bool {
+        let before = self.ignored_findings.len();
+        self.ignored_findings.retain(|kept| kept != fingerprint);
+        self.ignored_findings.len() != before
+    }
 }
 
 impl Default for Settings {
@@ -67,6 +192,7 @@ impl Default for Settings {
             language: None,
             history_keep: 60,
             desktop_setup_reviewed: false,
+            security: SecuritySettings::default(),
         }
     }
 }
