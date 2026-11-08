@@ -68,6 +68,7 @@ export const api = {
   purgeDelete: (jobId: string, scanId: string, selected: number[], mode: DeleteMode) =>
     invoke<DeleteResult>("purge_delete", { jobId, scanId, selected, mode }),
   appsScan: (jobId: string) => invoke<AppsResult>("apps_scan", { jobId }),
+  appIcon: (appKey: string) => invoke<string | null>("app_icon", { appKey }),
   appPlan: (jobId: string, appKey: string) => invoke<PlanResult>("app_plan", { jobId, appKey }),
   appUninstall: (jobId: string, planId: string, selected: number[], mode: DeleteMode) =>
     invoke<DeleteResult>("app_uninstall", { jobId, planId, selected, mode }),
@@ -118,6 +119,7 @@ export const api = {
   startupItems: () => invoke<StartupView>("startup_items"),
   startupSetEnabled: (id: string, enabled: boolean) =>
     invoke<StartupChange>("startup_set_enabled", { id, enabled }),
+  openStartupSettings: () => invoke<void>("open_startup_settings"),
   processInventory: (withTrust = true) =>
     invoke<ProcessRow[]>("process_inventory", { withTrust }),
   processDetail: (pid: number) => invoke<ProcessDetail>("process_detail", { pid }),

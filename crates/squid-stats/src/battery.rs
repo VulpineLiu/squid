@@ -65,6 +65,9 @@ fn macos_battery() -> Option<Battery> {
         battery.cycle_count = cycles;
         battery.temperature_c = temp;
     }
+    if let Some(health) = maximum_capacity() {
+        battery.health_percent = Some(health);
+    }
     Some(battery)
 }
 
@@ -129,17 +132,75 @@ fn battery_details() -> Option<(Option<u8>, Option<u32>, Option<f32>)> {
         .ok()
         .filter(|output| output.status.success())?;
     let text = String::from_utf8_lossy(&output.stdout);
-    let design = find_number(&text, "DesignCapacity");
-    let max = find_number(&text, "MaxCapacity");
-    let health = match (design, max) {
-        (Some(design), Some(max)) if design > 0 => {
-            Some(((max as f64 / design as f64) * 100.0).round() as u8)
-        }
-        _ => None,
-    };
+    let health = health_from_ioreg(&text);
     let cycles = find_number(&text, "CycleCount").map(|value| value as u32);
     let temp = find_number(&text, "Temperature").map(|tenths| tenths as f32 / 100.0);
     Some((health, cycles, temp))
+}
+
+/// macOS already publishes the same figure it shows in System Settings. Read it
+/// once every ten minutes rather than deriving it from `MaxCapacity`, which on
+/// Apple Silicon is a percentage rather than a mAh reading.
+#[cfg(target_os = "macos")]
+fn maximum_capacity() -> Option<u8> {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    static CACHE: Mutex<Option<(Instant, Option<u8>)>> = Mutex::new(None);
+    let stale = CACHE
+        .lock()
+        .ok()
+        .and_then(|guard| *guard)
+        .map(|(at, _)| at.elapsed() > Duration::from_secs(600))
+        .unwrap_or(true);
+    if !stale {
+        return CACHE
+            .lock()
+            .ok()
+            .and_then(|guard| guard.and_then(|(_, health)| health));
+    }
+    let output = std::process::Command::new("/usr/sbin/system_profiler")
+        .arg("SPPowerDataType")
+        .output()
+        .ok()
+        .filter(|output| output.status.success());
+    let health = output
+        .as_ref()
+        .and_then(|output| parse_maximum_capacity(&String::from_utf8_lossy(&output.stdout)));
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = Some((Instant::now(), health));
+    }
+    health
+}
+
+#[cfg(target_os = "macos")]
+fn parse_maximum_capacity(text: &str) -> Option<u8> {
+    let line = text
+        .lines()
+        .find(|line| line.trim_start().starts_with("Maximum Capacity:"))?;
+    let value = line.split_once(':')?.1.trim().trim_end_matches('%').trim();
+    value
+        .parse::<u8>()
+        .ok()
+        .filter(|value| (1..=100).contains(value))
+}
+
+#[cfg(target_os = "macos")]
+fn health_from_ioreg(text: &str) -> Option<u8> {
+    let design = find_number(text, "DesignCapacity")?;
+    if design == 0 {
+        return None;
+    }
+    // `MaxCapacity` is a percentage on Apple Silicon. The raw/nominal fields are
+    // the actual mAh readings and are the only values that can form a ratio.
+    let maximum = find_number(text, "AppleRawMaxCapacity")
+        .filter(|value| *value > 0)
+        .or_else(|| find_number(text, "NominalChargeCapacity").filter(|value| *value > 0))?;
+    Some(
+        ((maximum as f64 / design as f64) * 100.0)
+            .round()
+            .min(100.0) as u8,
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -226,6 +287,21 @@ mod tests {
     fn desktops_report_no_battery() {
         let text = "Now drawing from 'AC Power'\n -AC Power  100%; charged; 0:00 remaining present: true\n";
         assert!(parse_pmset(text).is_none());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn maximum_capacity_is_read_from_the_os_health_figure() {
+        let text = "      Health Information:\n          Cycle Count: 516\n          Maximum Capacity: 86%\n";
+        assert_eq!(parse_maximum_capacity(text), Some(86));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn apple_silicon_health_ignores_the_percentage_in_max_capacity() {
+        let text =
+            "\"DesignCapacity\" = 6075\n\"MaxCapacity\" = 100\n\"AppleRawMaxCapacity\" = 4911\n";
+        assert_eq!(health_from_ioreg(text), Some(81));
     }
 
     #[test]

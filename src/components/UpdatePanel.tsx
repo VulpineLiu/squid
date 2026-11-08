@@ -51,12 +51,6 @@ export function UpdatePanel({
             <Sparkles size={18} />
             {t("Software updates", "软件更新")}
           </h2>
-          <p>
-            {t(
-              "Check for a new version, then download and verify it before installing.",
-              "发现新版本后，下载并自动校验，确认无误再安装。",
-            )}
-          </p>
         </div>
         <Button
           variant="secondary"
@@ -197,12 +191,7 @@ export function UpdatePanel({
       <div className="settings-row">
         <div>
           <strong>{t("Check for updates daily", "每天自动检查更新")}</strong>
-          <span>
-            {t(
-              "Checks at most once a day when Squid starts.",
-              "启动 Squid 时每天最多检查一次。",
-            )}
-          </span>
+          <span>{t("At most once a day, when Squid starts.", "每天最多一次，在启动时进行。")}</span>
         </div>
         <Toggle
           checked={autoCheck}

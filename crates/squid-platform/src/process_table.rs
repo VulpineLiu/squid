@@ -17,6 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, Users};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProcessRow {
     pub pid: u32,
     pub parent: Option<u32>,

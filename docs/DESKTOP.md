@@ -45,7 +45,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
 | Screen | What it does |
 | --- | --- |
-| Computer overview | Security status strip, cleanup scan entry, disk health, cleanup result categories and live CPU/memory/storage summaries |
+| Overview | Security status strip, cleanup scan entry, disk health, cleanup result categories and live CPU/memory/storage summaries |
 | Daily cleanup | Runs the normal cleanup rule set, groups results by category, supports per-item and per-category selection, Trash or permanent deletion, then offers undo through History |
 | Uninstall apps | Reads installed apps, builds an app-specific removal plan, shows leftover paths and warnings, then uninstalls selected items |
 | Deep Clean | Searches chosen project roots for regenerable build artefacts with Git and file-age protections |

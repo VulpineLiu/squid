@@ -12,6 +12,21 @@ export function formatBytes(value: number, fractionDigits = 1): string {
   return `${remaining.toFixed(digits)} ${units[unit]}`;
 }
 
+/** RAM is sold in binary units, so 16 GB should not read as 17.2 GB. */
+export function formatMemoryBytes(value: number, fractionDigits = 1): string {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let remaining = value;
+  let unit = 0;
+  while (remaining >= 1024 && unit < units.length - 1) {
+    remaining /= 1024;
+    unit += 1;
+  }
+  if (unit === 0) return `${Math.round(remaining)} B`;
+  const digits = remaining >= 100 ? 0 : fractionDigits;
+  return `${remaining.toFixed(digits)} ${units[unit]}`;
+}
+
 export function formatBytesExact(value: number): string {
   if (value <= 0) return "0 B";
   const formatted = formatBytes(value, 2);

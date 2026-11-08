@@ -13,36 +13,44 @@
 
 use serde::Serialize;
 use squid_platform::process_table::ProcessRow;
-use squid_platform::startup::{StartupInventory, StartupItem};
+use squid_platform::startup::{StartupCategory, StartupInventory, StartupItem, StartupNote};
 use squid_platform::trust;
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartupView {
     items: Vec<StartupItem>,
-    notes: Vec<String>,
-    user_count: usize,
-    system_count: usize,
-    disabled_count: usize,
+    notes: Vec<StartupNote>,
+    /// The two lists the page shows, counted the way they are counted on screen.
+    login_count: usize,
+    background_count: usize,
+    /// Entries belonging to Apple or Microsoft, which are hidden by default.
+    vendor_count: usize,
     /// Entries the user owns that are not vendor-owned: what this page may act on.
     actionable_count: usize,
     risky_count: usize,
-    /// Which of the two platforms' surfaces were readable at all, so a page that
-    /// shows nothing can say whether that means "none" or "could not look".
-    sources: Vec<String>,
 }
 
 impl StartupView {
     fn of(inventory: StartupInventory) -> StartupView {
-        let mut sources: Vec<String> = inventory
-            .items
-            .iter()
-            .map(|item| item.source.as_str().to_string())
-            .collect();
-        sources.sort();
-        sources.dedup();
         StartupView {
+            login_count: inventory
+                .items
+                .iter()
+                .filter(|item| item.category == StartupCategory::OpenAtLogin)
+                .count(),
+            background_count: inventory
+                .items
+                .iter()
+                .filter(|item| item.category == StartupCategory::Background)
+                .count(),
+            vendor_count: inventory
+                .items
+                .iter()
+                .filter(|item| item.system_vendor)
+                .count(),
             actionable_count: inventory
                 .items
                 .iter()
@@ -53,10 +61,6 @@ impl StartupView {
                 .iter()
                 .filter(|item| !item.risks.is_empty())
                 .count(),
-            user_count: inventory.user_count(),
-            system_count: inventory.system_count(),
-            disabled_count: inventory.disabled_count(),
-            sources,
             items: inventory.items,
             notes: inventory.notes,
         }
@@ -117,6 +121,64 @@ pub async fn startup_set_enabled(id: String, enabled: bool) -> Result<StartupCha
     .map_err(|error| error.to_string())?
 }
 
+/// Open the pane where the entries squid only reads can actually be changed.
+///
+/// macOS owns the login-item list, and Windows owns scheduled tasks and services, so
+/// for those the honest action is to hand the person to the operating system rather
+/// than offer a toggle that would not hold. `open` reports success for a settings
+/// pane it does not recognise, so the macOS version picks the URL instead of trying
+/// one and hoping: Ventura renamed the login-item pane from a Users & Groups anchor
+/// to its own extension.
+#[tauri::command]
+pub fn open_startup_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let target = {
+        let version = crate::process::command("/usr/bin/sw_vers")
+            .arg("-productVersion")
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            .unwrap_or_default();
+        let major: u32 = version
+            .split('.')
+            .next()
+            .and_then(|head| head.parse().ok())
+            .unwrap_or(12);
+        if major >= 13 {
+            "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"
+        } else {
+            "x-apple.systempreferences:com.apple.preference.users?LoginItems"
+        }
+    };
+    // The pane Task Manager's Startup tab writes to. `ms-settings:startup` is not a
+    // URI and silently opens whatever was last shown.
+    #[cfg(windows)]
+    let target = "ms-settings:startupapps";
+
+    #[cfg(target_os = "macos")]
+    let opened = run("/usr/bin/open", &[target]);
+    #[cfg(windows)]
+    let opened = run("cmd", &["/C", "start", "", target]);
+    #[cfg(not(any(target_os = "macos", windows)))]
+    return Err("The system settings are not available here.".into());
+    #[cfg(any(target_os = "macos", windows))]
+    opened
+}
+
+/// The one shape the two platforms' settings openers differ in: a program, its
+/// arguments, and whether the operating system accepted the request.
+#[cfg(any(target_os = "macos", windows))]
+fn run(program: &str, arguments: &[&str]) -> Result<(), String> {
+    let status = crate::process::command(program)
+        .args(arguments)
+        .status()
+        .map_err(|error| format!("Could not open the system settings: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Could not open the system settings.".into())
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessDetailView {
@@ -133,10 +195,161 @@ pub struct ProcessDetailView {
 pub async fn process_inventory(with_trust: Option<bool>) -> Result<Vec<ProcessRow>, String> {
     let with_trust = with_trust.unwrap_or(true);
     tauri::async_runtime::spawn_blocking(move || -> Result<Vec<ProcessRow>, String> {
-        Ok(squid_platform::process_table::snapshot(with_trust).rows)
+        let mut rows = squid_platform::process_table::snapshot(with_trust).rows;
+        mark_startup_entries(&mut rows, &squid_platform::startup::inventory());
+        Ok(rows)
     })
     .await
     .map_err(|error| format!("Could not read the process table: {error}"))?
+}
+
+/// Name the startup entry behind each process, which is what the table's "started by
+/// a startup item" marker and its filter read.
+///
+/// `ProcessRow::startup_item` says the desktop layer fills it in, and the marker has
+/// been drawn from it since 0.1.6 — but nothing ever assigned it, so the icon never
+/// appeared and "only started by an entry" returned nothing at all.
+///
+/// Measured on an M1 Pro, ~760 processes and 874 entries: costs 0.45 s on top of the
+/// 5.7 s the table already spends resolving signatures, and marks 452 of the rows.
+/// The same read dominates the cheap path that skips signatures — 26 ms becomes 390 ms.
+/// See ROADMAP 13.9 for why that trade was taken without caching.
+fn mark_startup_entries(rows: &mut [ProcessRow], inventory: &StartupInventory) {
+    // Keyed once for the whole table. `entry_for` re-reads every root on every call,
+    // so using it per row would cost one inventory per process, several hundred of them,
+    // where the table already spends seconds reading signatures.
+    let mut declared: HashMap<&Path, &str> = HashMap::new();
+    for item in &inventory.items {
+        // The inventory arrives user entries first, so keeping the first name seen
+        // prefers the entry this user owns when a vendor installs the same program
+        // twice (`com.google.keystone.agent` exists in both `~/Library` and `/Library`).
+        if let Some(program) = item.program.as_deref() {
+            declared.entry(program).or_insert(item.name.as_str());
+        }
+    }
+    for row in rows {
+        row.startup_item = row
+            .program
+            .as_deref()
+            .and_then(|program| declared.get(program))
+            .map(|name| (*name).to_string());
+    }
+}
+
+#[cfg(test)]
+mod join_tests {
+    use super::mark_startup_entries;
+    use squid_platform::startup::{StartupInventory, StartupItem, StartupScope, StartupSource};
+    use std::path::Path;
+
+    /// The join costs one inventory read per refresh. Measured here rather than
+    /// asserted, because it is a latency decision, not a correctness one: the process
+    /// table has a deliberately cheap path that skips signature reads, and a join that
+    /// dwarfed it would be the wrong trade.
+    #[test]
+    #[ignore]
+    fn what_the_join_costs() {
+        use std::time::Instant;
+        for with_trust in [true, false] {
+            let start = Instant::now();
+            let mut rows = squid_platform::process_table::snapshot(with_trust).rows;
+            let table = start.elapsed();
+            let start = Instant::now();
+            mark_startup_entries(&mut rows, &squid_platform::startup::inventory());
+            let join = start.elapsed();
+            let marked = rows.iter().filter(|row| row.startup_item.is_some()).count();
+            println!(
+                "trust={with_trust}: table {table:.0?} + join {join:.0?} = {:.0?} · {marked}/{} marked",
+                table + join,
+                rows.len()
+            );
+        }
+    }
+
+    fn row(pid: u32, program: Option<&str>) -> super::ProcessRow {
+        super::ProcessRow {
+            pid,
+            parent: None,
+            name: "thing".into(),
+            command: String::new(),
+            program: program.map(Path::new).map(|p| p.to_path_buf()),
+            working_directory: None,
+            user: String::new(),
+            cpu: 0.0,
+            memory: 0,
+            started_ms: None,
+            startup_item: None,
+            signed: false,
+            publisher: None,
+            owned: true,
+        }
+    }
+
+    fn entry(name: &str, program: &str) -> StartupItem {
+        let mut item = StartupItem::new(
+            format!("/Library/LaunchAgents/{name}.plist"),
+            name,
+            StartupSource::LaunchAgent,
+            StartupScope::User,
+        );
+        item.program = Some(Path::new(program).to_path_buf());
+        item
+    }
+
+    /// The table has drawn a marker from this field since 0.1.6, and a filter has
+    /// keyed off it, but nothing ever wrote it: the icon never appeared and
+    /// "only started by an entry" returned nothing at all.
+    #[test]
+    fn a_process_is_matched_to_the_entry_that_declares_it() {
+        let inventory = StartupInventory {
+            items: vec![
+                entry("com.user.keystone", "/opt/keystone/agent"),
+                entry("com.system.keystone", "/opt/keystone/agent"),
+                entry("com.other.thing", "/opt/other/thing"),
+            ],
+            notes: vec![],
+        };
+        let mut rows = vec![
+            row(1, Some("/opt/keystone/agent")),
+            row(2, Some("/opt/unrelated/app")),
+            row(3, None),
+        ];
+        mark_startup_entries(&mut rows, &inventory);
+
+        assert_eq!(
+            rows[0].startup_item.as_deref(),
+            Some("com.user.keystone"),
+            "an entry is named, and the user-owned one wins a duplicate program"
+        );
+        assert_eq!(
+            rows[1].startup_item, None,
+            "a process nothing declared stays plain"
+        );
+        assert_eq!(
+            rows[2].startup_item, None,
+            "a process with no path cannot be matched"
+        );
+    }
+
+    /// Disabling an entry does not necessarily stop the process it started, and that
+    /// is exactly when the link is worth seeing rather than losing. The detail drawer's
+    /// `entry_for` has never filtered on `disabled` either, so the two views agree.
+    #[test]
+    fn a_disabled_entry_still_names_the_process_it_left_running() {
+        let mut off = entry("com.user.updater", "/opt/updater/agent");
+        off.disabled = true;
+        let inventory = StartupInventory {
+            items: vec![off],
+            notes: vec![],
+        };
+        let mut rows = vec![row(9, Some("/opt/updater/agent"))];
+        mark_startup_entries(&mut rows, &inventory);
+        assert_eq!(
+            rows[0].startup_item.as_deref(),
+            Some("com.user.updater"),
+            "the row that explains why this is still running must not disappear"
+        );
+    }
 }
 
 #[tauri::command]
@@ -225,4 +438,89 @@ pub async fn process_stop(pid: u32, name: String) -> Result<ProcessStopResult, S
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::StartupView;
+    use squid_platform::startup::{
+        StartupInventory, StartupItem, StartupOwner, StartupScope, StartupSource,
+    };
+
+    /// Every name the page reads has to be a name on the wire.
+    ///
+    /// `StartupView` renames itself to camelCase and `StartupItem` did not, so the
+    /// page's `item.systemVendor` was `undefined` for every entry: the filter that
+    /// hides 845 Apple items silently hid nothing, and TypeScript could not see it
+    /// because the interface says what was intended, not what is sent.
+    #[test]
+    fn startup_entries_arrive_in_the_names_the_page_reads() {
+        let mut item = StartupItem::new(
+            "/Library/LaunchDaemons/com.docker.vmnetd.plist",
+            "com.docker.vmnetd",
+            StartupSource::LaunchDaemon,
+            StartupScope::System,
+        );
+        item.owner = Some(StartupOwner {
+            name: "Docker".into(),
+            bundle_path: Some("/Applications/Docker.app".into()),
+            vendor: false,
+        });
+        let json = serde_json::to_value(StartupView::of(StartupInventory {
+            items: vec![item],
+            notes: vec![],
+        }))
+        .expect("a view serializes");
+
+        for key in ["systemVendor", "workingDirectory", "modifiedMs"] {
+            assert!(
+                json["items"][0].get(key).is_some(),
+                "the page reads StartupItem.{key}; the wire does not carry it"
+            );
+        }
+        assert!(
+            json["items"][0]["owner"].get("bundlePath").is_some(),
+            "the page reads owner.bundlePath"
+        );
+        assert!(
+            json["items"][0].get("system_vendor").is_none(),
+            "one casing per boundary, not two spellings of the same field"
+        );
+    }
+
+    /// The process table renames its own rows the same way, and reads three fields
+    /// that only exist if it does.
+    #[test]
+    fn process_rows_arrive_in_the_names_the_table_reads() {
+        let row = squid_platform::process_table::ProcessRow {
+            pid: 4_321,
+            parent: None,
+            name: "squid".into(),
+            command: String::new(),
+            program: None,
+            working_directory: None,
+            user: String::new(),
+            cpu: 0.0,
+            memory: 0,
+            started_ms: None,
+            startup_item: None,
+            signed: false,
+            publisher: None,
+            owned: true,
+        };
+        let json = serde_json::to_value(&row).expect("a row serializes");
+        for key in ["startedMs", "startupItem", "workingDirectory"] {
+            assert!(
+                json.get(key).is_some(),
+                "the table reads ProcessRow.{key}; the wire does not carry it"
+            );
+        }
+        let trust = serde_json::to_value(squid_platform::trust::Trust::default())
+            .expect("a trust serializes");
+        assert!(
+            trust.get("adHoc").is_some(),
+            "the table reads Trust.adHoc; the wire says {:?}",
+            trust.as_object().map(|o| o.keys().collect::<Vec<_>>())
+        );
+    }
 }

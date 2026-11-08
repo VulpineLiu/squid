@@ -108,6 +108,10 @@ pub trait Platform: Send + Sync {
     fn display_name(&self) -> String;
     fn os_version(&self) -> String;
     fn hardware_model(&self) -> String;
+    /// Display adapter(s), when the platform exposes a stable name.
+    fn graphics_adapter(&self) -> String {
+        String::new()
+    }
 
     /// Directories to scan for installed applications.
     fn app_sources(&self) -> Vec<AppSource>;

@@ -13,7 +13,7 @@ import { api } from "../lib/api";
 import { messageFrom, shortPath } from "../lib/format";
 import type { ScanSchedule, SecurityStatus } from "../types";
 import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
-import { Button, ConfirmDialog, Toggle, useToast } from "./ui";
+import { Button, ConfirmDialog, Select, Toggle, useToast } from "./ui";
 
 const SCHEDULES: [ScanSchedule, string, string][] = [
   ["manual", "Only when I ask", "仅在我要求时"],
@@ -99,12 +99,6 @@ export function SecuritySettingsCard({
             <ShieldCheck size={18} />
             {t("Security", "安全")}
           </h2>
-          <p>
-            {t(
-              "When scans run, what may move without asking, and what a scan must not read.",
-              "扫描何时运行、什么可以不经确认就移动，以及扫描不能读取哪些位置。",
-            )}
-          </p>
         </div>
       </div>
 
@@ -123,18 +117,13 @@ export function SecuritySettingsCard({
                 )}
           </span>
         </div>
-        <select
-          className="settings-select"
+        <Select
           value={settings.scanSchedule}
           disabled={busy}
-          onChange={(event) => void save({ scanSchedule: event.target.value })}
-        >
-          {SCHEDULES.map(([value, en, zh]) => (
-            <option key={value} value={value}>
-              {t(en, zh)}
-            </option>
-          ))}
-        </select>
+          label={t("Scan schedule", "扫描计划")}
+          options={SCHEDULES.map(([value, en, zh]) => ({ value, label: t(en, zh) }))}
+          onChange={(next) => void save({ scanSchedule: next })}
+        />
       </div>
 
       <div className="settings-row">
@@ -208,8 +197,8 @@ export function SecuritySettingsCard({
           <span>
             {rulesNote ??
               t(
-                "Rules are downloaded to this machine. No file name, hash or result is ever sent out.",
-                "规则只会下载到本机；文件名、哈希与扫描结果都不会上传。",
+                "Rules are downloaded to this machine; nothing is ever sent out.",
+                "规则只下载到本机，不上传任何内容。",
               )}
           </span>
         </div>

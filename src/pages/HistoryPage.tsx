@@ -89,7 +89,6 @@ export function HistoryPage() {
   return (
     <div className="page history-page">
       <PageHeader
-        eyebrow={t("History", "历史记录")}
         title={t("Every change, on the record.", "每一次改动，都有记录。")}
         description={t(
           "Review past cleanups and put files back from the Trash when you change your mind.",
@@ -140,10 +139,6 @@ export function HistoryPage() {
         <EmptyState
           icon={<History size={28} />}
           title={t("No cleanups yet", "还没有清理记录")}
-          description={t(
-            "Each confirmed cleanup will appear here with its size, result and restore option.",
-            "每次确认的清理都会记录在这里，并提供大小、结果与还原选项。",
-          )}
         />
       ) : (
         <div className="history-list">

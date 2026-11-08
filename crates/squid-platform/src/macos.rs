@@ -74,6 +74,25 @@ impl Platform for MacOs {
         parts.join(" · ")
     }
 
+    fn graphics_adapter(&self) -> String {
+        run(
+            "/usr/sbin/system_profiler",
+            &["SPDisplaysDataType", "-detailLevel", "mini"],
+        )
+        .map(|text| {
+            text.lines()
+                .filter_map(|line| {
+                    line.trim()
+                        .strip_prefix("Chipset Model:")
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty())
+                })
+                .collect::<Vec<_>>()
+                .join(" · ")
+        })
+        .unwrap_or_default()
+    }
+
     fn app_sources(&self) -> Vec<AppSource> {
         let mut sources = vec![
             AppSource {

@@ -61,8 +61,8 @@ const NAV_GROUPS: {
     items: [
       {
         id: "overview",
-        labelEn: "Computer overview",
-        labelZh: "电脑概览",
+        labelEn: "Overview",
+        labelZh: "概览",
         icon: LayoutDashboard,
       },
       {
@@ -114,7 +114,7 @@ const NAV_GROUPS: {
 ];
 
 const PAGE_TITLES: Record<PageId, [string, string]> = {
-  overview: ["Computer overview", "电脑概览"],
+  overview: ["Overview", "概览"],
   cleanup: ["Daily cleanup", "日常清理"],
   applications: ["Uninstall apps", "应用卸载"],
   purge: ["Deep Clean", "深度清理"],
@@ -367,7 +367,6 @@ export default function App() {
             bootstrap={bootstrap}
             snapshot={system.snapshot}
             cleanup={cleanup}
-            security={security}
             onNavigate={setPage}
           />
         ) : null}

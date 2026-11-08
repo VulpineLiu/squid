@@ -134,7 +134,6 @@ export function SecurityPage({
     return (
       <div className="page is-stacked">
         <PageHeader
-          eyebrow={t("Security", "安全")}
           title={t("Checking this machine…", "正在检查这台电脑…")}
           description={t(
             "Reading what protects the machine and what ran at the last login.",
@@ -149,7 +148,6 @@ export function SecurityPage({
   return (
     <div className="page is-stacked">
       <PageHeader
-        eyebrow={t("Security", "安全")}
         title={
           scan
             ? t("The last scan, and what to do about it.", "上次扫描的结果，以及下一步。")
@@ -216,11 +214,6 @@ export function SecurityPage({
       <section className="panel">
         <SectionTitle
           title={t("Findings", "发现")}
-          subtitle={
-            scan
-              ? undefined
-              : t("Nothing has been scanned on this machine yet.", "这台电脑还没有扫描记录。")
-          }
           action={
             scan ? (
               <div className="chip-row" role="tablist">
@@ -252,10 +245,6 @@ export function SecurityPage({
           <EmptyState
             icon={<ShieldQuestion size={26} />}
             title={t("No scan yet", "尚未扫描")}
-            description={t(
-              "A quick scan covers login items, applications, browser extensions and downloads.",
-              "快速扫描会检查登录项、应用程序、浏览器扩展与下载目录。",
-            )}
           />
         ) : findings.length === 0 ? (
           <EmptyState
@@ -268,8 +257,8 @@ export function SecurityPage({
             description={
               scan.coverageComplete
                 ? t(
-                    "This is not a promise about files a scan never opened — the coverage card lists those.",
-                    "这不代表未打开的文件也是安全的——未检查范围见上方覆盖说明。",
+                    "Files the scan never opened are listed in the coverage card above.",
+                    "未检查的范围见上方覆盖说明。",
                   )
                 : t(
                     "Part of this scan could not be read. See the coverage card above.",
@@ -725,7 +714,6 @@ function FindingRow({
   return (
     <li className={`item-row is-${meta.tone} ${finding.quarantined ? "is-handled" : ""}`}>
       <button className="item-main" onClick={onOpen}>
-        <span className={`level-dot is-${meta.tone}`} />
         <span className="item-copy">
           <strong>{finding.name}</strong>
           <small title={finding.displayPath ?? undefined}>
@@ -926,7 +914,6 @@ function ActivityCard({
     <section className="panel">
       <SectionTitle
         title={t("Recent security activity", "最近的安全活动")}
-        subtitle={t("Scans, quarantines and startup changes.", "本机的扫描、隔离与启动项修改。")}
       />
       <ul className="activity-list">
         {activity.slice(0, 10).map((entry, index) => (

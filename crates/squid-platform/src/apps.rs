@@ -111,6 +111,7 @@ pub fn app_from_bundle(
         name,
         bundle_id: bundle.bundle_id.clone(),
         path: path.clone(),
+        icon_source: Some(path.clone()),
         version: bundle
             .short_version
             .clone()
@@ -142,6 +143,32 @@ pub fn app_from_bundle(
     Some(app)
 }
 
+/// Render an application's system icon as PNG bytes.
+///
+/// macOS and Windows let the file manager do the work, so the result is the
+/// same icon Finder or Explorer shows, including HiDPI-safe source artwork.
+/// Linux has no equivalent without a GTK dependency; the desktop falls back to
+/// the app's initial.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub fn icon_png(app: &AppInfo, size: u16) -> Option<Vec<u8>> {
+    let source = app.icon_source.as_ref()?;
+    let icon = file_icon_provider::get_file_icon(source, size).ok()?;
+    let mut output = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut output, icon.width, icon.height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().ok()?;
+        writer.write_image_data(&icon.pixels).ok()?;
+    }
+    Some(output)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn icon_png(_app: &AppInfo, _size: u16) -> Option<Vec<u8>> {
+    None
+}
+
 /// Match "is this app running" against the process executable list.
 pub fn is_running(dir_name: &str, executable: Option<&str>, running: &[String]) -> bool {
     let mut candidates: Vec<String> = Vec::with_capacity(3);
@@ -166,4 +193,21 @@ pub fn stem_lower(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().trim_end_matches(".app").to_lowercase())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    fn a_system_icon_is_encoded_as_png() {
+        let app = AppInfo {
+            name: "Squid".into(),
+            icon_source: std::env::current_exe().ok(),
+            ..Default::default()
+        };
+        let png = icon_png(&app, 32).expect("the running executable has a system icon");
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    }
 }

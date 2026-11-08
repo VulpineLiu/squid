@@ -15,6 +15,7 @@ import { api } from "../lib/api";
 import {
   formatBytes,
   formatCount,
+  formatMemoryBytes,
   formatRate,
   formatUptime,
   messageFrom,
@@ -88,7 +89,6 @@ export function SystemPage({
   return (
     <div className="page system-page">
       <PageHeader
-        eyebrow={t("Real-time monitor", "实时监控")}
         title={t("The pulse of your machine.", "掌握设备的每一次呼吸。")}
         description={t(
           "Live processor, memory, disk and network activity, sampled locally every couple of seconds.",
@@ -193,7 +193,7 @@ export function SystemPage({
               <strong>{t("Memory", "内存")}</strong>
               <span>
                 {snapshot
-                  ? `${formatBytes(snapshot.memory.used)} / ${formatBytes(
+                  ? `${formatMemoryBytes(snapshot.memory.used)} / ${formatMemoryBytes(
                       snapshot.memory.total,
                     )}`
                   : t("Reading memory…", "正在读取内存…")}
@@ -209,19 +209,20 @@ export function SystemPage({
           >
             <strong className="gauge-number is-small">{Math.round(memoryPercent)}%</strong>
             <span className="gauge-sub">
-              {snapshot ? formatBytes(snapshot.memory.available) : "—"} {t("free", "可用")}
+              {snapshot ? formatMemoryBytes(snapshot.memory.available) : "—"}{" "}
+              {t("available", "可用")}
             </span>
           </Gauge>
           <div className="memory-split">
             <div>
               <span>{t("Used", "已用")}</span>
-              <strong>{formatBytes(snapshot?.memory.used ?? 0)}</strong>
+              <strong>{formatMemoryBytes(snapshot?.memory.used ?? 0)}</strong>
             </div>
             <div>
               <span>{t("Swap", "交换")}</span>
               <strong>
-                {formatBytes(snapshot?.memory.swap_used ?? 0)}
-                <small> / {formatBytes(snapshot?.memory.swap_total ?? 0)}</small>
+                {formatMemoryBytes(snapshot?.memory.swap_used ?? 0)}
+                <small> / {formatMemoryBytes(snapshot?.memory.swap_total ?? 0)}</small>
               </strong>
             </div>
           </div>
@@ -322,7 +323,6 @@ export function SystemPage({
         <section className="process-panel">
           <SectionTitle
             title={t("Top processes", "高占用进程")}
-            subtitle={t("Sorted by processor usage.", "按处理器占用排序。")}
             action={
               <Button variant="ghost" size="sm" onClick={() => setTab("processes")}>
                 {t("View all processes", "查看全部进程")}
@@ -345,7 +345,7 @@ export function SystemPage({
                   <small>PID {process.pid}</small>
                 </span>
                 <span className="process-cpu">{process.cpu.toFixed(1)}%</span>
-                <span className="process-memory">{formatBytes(process.memory)}</span>
+                <span className="process-memory">{formatMemoryBytes(process.memory)}</span>
                 <button
                   className="process-stop"
                   title={t("Stop process", "结束进程")}

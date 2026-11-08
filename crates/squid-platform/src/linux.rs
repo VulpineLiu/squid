@@ -112,6 +112,29 @@ impl Platform for Linux {
             .to_string()
     }
 
+    fn graphics_adapter(&self) -> String {
+        run("lspci", &[])
+            .map(|text| {
+                text.lines()
+                    .filter(|line| {
+                        line.contains("VGA compatible controller")
+                            || line.contains("3D controller")
+                            || line.contains("Display controller")
+                    })
+                    .filter_map(|line| line.split_once(": ").map(|(_, value)| value.trim()))
+                    .map(|value| {
+                        value
+                            .split_once(": ")
+                            .map(|(_, name)| name.trim())
+                            .unwrap_or(value)
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+            })
+            .unwrap_or_default()
+    }
+
     fn app_sources(&self) -> Vec<AppSource> {
         [
             ("/usr/share/applications", "System", 1, true),
@@ -193,6 +216,7 @@ impl Platform for Linux {
                     name: desktop.name.clone(),
                     bundle_id: Some(id.clone()),
                     path: path.clone(),
+                    icon_source: None,
                     version: None,
                     size: Bytes::ZERO,
                     source: source.label.clone(),
@@ -222,6 +246,7 @@ impl Platform for Linux {
                             .unwrap_or_else(|| id.to_string()),
                         bundle_id: Some(id.to_string()),
                         path: PathBuf::from(format!("flatpak:{id}")),
+                        icon_source: None,
                         version: None,
                         size: cols
                             .get(2)

@@ -12,7 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
-import { formatBytes, formatCount, messageFrom, shortPath } from "../lib/format";
+import { formatCount, formatMemoryBytes, messageFrom, shortPath } from "../lib/format";
 import type { Finding, ProcessDetail, ProcessRow } from "../types";
 import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
 import {
@@ -304,7 +304,7 @@ export function ProcessTable({
                   {t(`${group.instances} instances`, `${group.instances} 个实例`)}
                 </small>
                 <span className="pg-cpu">{group.cpu.toFixed(1)}%</span>
-                <span className="pg-memory">{formatBytes(group.memory)}</span>
+                <span className="pg-memory">{formatMemoryBytes(group.memory)}</span>
               </button>
             </li>
           ))}
@@ -337,7 +337,7 @@ export function ProcessTable({
                     {row.user}
                   </span>
                   <span className="pt-cpu">{row.cpu.toFixed(1)}%</span>
-                  <span className="pt-memory">{formatBytes(row.memory)}</span>
+                  <span className="pt-memory">{formatMemoryBytes(row.memory)}</span>
                   <span className="pt-start">
                     {row.startedMs ? new Date(row.startedMs).toLocaleTimeString() : "—"}
                   </span>
@@ -466,10 +466,7 @@ export function ProcessTable({
         open={Boolean(victim)}
         title={t("Stop this process?", "结束此进程？")}
         message={victim ? `${victim.name} · PID ${victim.pid}` : ""}
-        note={t(
-          "Unsaved work here may be lost. Only your own processes can be stopped.",
-          "进程中未保存的内容可能丢失。只会结束当前用户的进程。",
-        )}
+        note={t("Unsaved work here may be lost.", "进程中未保存的内容可能丢失。")}
         confirmLabel={t("Stop process", "结束进程")}
         cancelLabel={t("Cancel", "取消")}
         busy={stopping}
@@ -550,10 +547,7 @@ function ProcessDetailBody({
         </p>
       ) : null}
       <p className="detail-note">
-        {t(
-          "Stopping a process never touches its file. Quarantine needs a confirmed finding.",
-          "结束进程不会处理其文件；只有已确认发现才会隔离。",
-        )}
+        {t("Stopping a process never touches its files.", "结束进程不会处理其文件。")}
       </p>
     </div>
   );

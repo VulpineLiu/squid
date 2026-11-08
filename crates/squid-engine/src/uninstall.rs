@@ -464,6 +464,7 @@ mod tests {
             name: "Demo".into(),
             bundle_id: Some("com.example.Demo".into()),
             path: PathBuf::from(path),
+            icon_source: None,
             version: Some("1.0".into()),
             size: Bytes(1_000),
             source: source.into(),

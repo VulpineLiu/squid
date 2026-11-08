@@ -182,17 +182,14 @@ export function SetupPanel({
                   `${
                     protection.productName ||
                     (protection.provider === "xprotect" ? "XProtect" : protection.provider)
-                  }${protection.definitions ? ` · ${protection.definitions}` : ""}. Squid reads this and never turns it on, off or updates it.`,
+                  }${protection.definitions ? ` · ${protection.definitions}` : ""}. Read-only.`,
                   `${
                     protection.productName ||
                     (protection.provider === "xprotect" ? "XProtect" : protection.provider)
-                  }${protection.definitions ? ` · ${protection.definitions}` : ""}。Squid 只读取该状态，不会开启、关闭或更新它。`,
+                  }${protection.definitions ? ` · ${protection.definitions}` : ""}。只读取，不改动。`,
                 )
               : protection?.notes[0] ??
-                t(
-                  "When this cannot be read Squid says so, rather than showing it as healthy.",
-                  "读不到时 Squid 会直接说明，不会把它显示为正常。",
-                )
+                t("Squid reports this instead of guessing.", "读不到时会直接说明，不会显示为正常。")
           }
         />
 
@@ -233,7 +230,7 @@ export function SetupPanel({
           }}
           note={t(
             "Confirmed findings only. The banner and tray still report without it.",
-            "仅针对已确认发现。关闭后应用内提示与托盘仍会显示。",
+            "仅针对已确认发现，应用内提示与托盘不受影响。",
           )}
           action={
             <Button
@@ -290,12 +287,12 @@ export function SetupPanel({
                     intel.source === "pack"
                       ? `Rule pack r${intel.revision} · ${intel.installedRules} rules`
                       : `${intel.builtinRules} built-in rules, no pack downloaded`
-                  }. Only rules are downloaded; no file name, hash or result leaves this machine.`,
+                  }. Rules are the only download.`,
                   `${
                     intel.source === "pack"
                       ? `规则包 r${intel.revision} · ${intel.installedRules} 条规则`
                       : `内置 ${intel.builtinRules} 条规则，未下载规则包`
-                  }。只下载规则，文件名、哈希与扫描结果都不会离开本机。`,
+                  }。只会下载规则。`,
                 )
               : t("Reading the installed rules…", "正在读取已安装规则…")
           }
@@ -315,12 +312,6 @@ export function SetupPanel({
 
         {note ? <p className="setup-error">{note}</p> : null}
 
-        <p className="setup-note">
-          {t(
-            "Closing this changes nothing. The same checks stay in Settings, and an update may reset what macOS granted.",
-            "关闭本卡片不会改变任何设置，这些检查在设置中依然保留。更新后 macOS 可能重置已授予的权限。",
-          )}
-        </p>
 
         <footer className="setup-foot">
           <div className="setup-actions-secondary">

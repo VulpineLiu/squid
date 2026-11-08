@@ -90,6 +90,26 @@ fn uninstall_program(uninstall_string: &str) -> Option<PathBuf> {
     candidate.exists().then_some(candidate)
 }
 
+/// `DisplayIcon` is a path with an optional icon index, usually quoted:
+/// `"C:\Program Files\App\app.exe",0`. The file manager accepts the path
+/// without the index and returns the application's default icon.
+fn display_icon_path(value: Option<String>) -> Option<PathBuf> {
+    let raw = value?.trim().to_string();
+    let unquoted = raw
+        .strip_prefix('"')
+        .and_then(|value| value.split('"').next())
+        .unwrap_or(&raw)
+        .trim();
+    let without_index = unquoted
+        .rsplit_once(',')
+        .filter(|(_, index)| index.trim().parse::<i32>().is_ok())
+        .map(|(path, _)| path)
+        .unwrap_or(unquoted)
+        .trim();
+    let path = PathBuf::from(without_index);
+    path.exists().then_some(path)
+}
+
 impl Platform for Windows {
     fn id(&self) -> PlatformId {
         PlatformId::Windows
@@ -137,6 +157,27 @@ impl Platform for Windows {
             }
             None => String::new(),
         }
+    }
+    fn graphics_adapter(&self) -> String {
+        let Ok(class) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey_with_flags(
+            r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}",
+            KEY_READ,
+        ) else {
+            return String::new();
+        };
+        let mut adapters = Vec::new();
+        for name in class.enum_keys().flatten() {
+            let Ok(adapter) = class.open_subkey_with_flags(&name, KEY_READ) else {
+                continue;
+            };
+            let Some(description) = str_value(&adapter, "DriverDesc") else {
+                continue;
+            };
+            if !adapters.contains(&description) {
+                adapters.push(description);
+            }
+        }
+        adapters.join(" · ")
     }
     fn app_sources(&self) -> Vec<AppSource> {
         let env = |key: &str| std::env::var_os(key).map(PathBuf::from);
@@ -207,6 +248,7 @@ impl Platform for Windows {
                     name: display_name,
                     bundle_id: None,
                     path,
+                    icon_source: display_icon_path(str_value(&key, "DisplayIcon")),
                     version: str_value(&key, "DisplayVersion"),
                     size: Bytes::ZERO,
                     source: source.into(),

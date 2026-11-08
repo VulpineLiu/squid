@@ -358,6 +358,10 @@ pub struct AppInfo {
     pub name: String,
     pub bundle_id: Option<String>,
     pub path: PathBuf,
+    /// The file or bundle the desktop icon is read from. `path` may be an
+    /// install directory or an uninstall helper, neither of which carries the
+    /// icon the user recognises.
+    pub icon_source: Option<PathBuf>,
     pub version: Option<String>,
     pub size: Bytes,
     /// Where the app was found: /Applications, ~/Applications, Homebrew Cask…

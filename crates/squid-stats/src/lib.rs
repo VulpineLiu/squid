@@ -107,6 +107,7 @@ pub struct HostInfo {
     pub os_name: String,
     pub os_version: String,
     pub hardware: String,
+    pub gpu: String,
     pub hostname: String,
     pub user: String,
     pub arch: String,
@@ -119,6 +120,7 @@ impl HostInfo {
             os_name: platform.display_name(),
             os_version: platform.os_version(),
             hardware: platform.hardware_model(),
+            gpu: platform.graphics_adapter(),
             hostname: hostname(),
             user: std::env::var("USER")
                 .or_else(|_| std::env::var("USERNAME"))
@@ -428,35 +430,23 @@ pub struct AppUsage {
 }
 
 fn cpu_stats(system: &System) -> CpuStats {
-    // sysinfo puts the aggregate sample in `cpus()[0]`; the tail is one entry
-    // per logical core.
     let all = system.cpus();
-    let (aggregate, cores) = all
-        .split_first()
-        .map(|(head, tail)| (Some(head), tail))
-        .unwrap_or((None, &[]));
-    let per_core: Vec<f32> = cores
+    let per_core: Vec<f32> = all
         .iter()
         .map(|cpu| cpu.cpu_usage().clamp(0.0, 100.0))
         .collect();
     let load = System::load_average();
-    let brand = aggregate
-        .or_else(|| cores.first())
+    let first = all.first();
+    let brand = first
         .map(|cpu| cpu.brand().trim().to_string())
         .unwrap_or_else(|| std::env::consts::ARCH.to_string());
-    let base_frequency_ghz = aggregate
-        .or_else(|| cores.first())
+    let base_frequency_ghz = first
         .map(|cpu| cpu.frequency() as f64 / 1_000.0)
         .unwrap_or(0.0);
-    let total = aggregate
-        .map(|cpu| cpu.cpu_usage())
-        .unwrap_or_else(|| system.global_cpu_usage())
-        .clamp(0.0, 100.0);
-    let logical_cores = if per_core.is_empty() {
-        1
-    } else {
-        per_core.len()
-    };
+    // sysinfo keeps the aggregate independently of the per-core list. Reading
+    // `cpus()[0]` as the total also dropped one core from every count.
+    let total = system.global_cpu_usage().clamp(0.0, 100.0);
+    let logical_cores = per_core.len().max(1);
     let physical = detect_physical_cores().unwrap_or_else(|| logical_cores.div_ceil(2));
     CpuStats {
         total,
@@ -553,30 +543,13 @@ fn vm_stat_details() -> Option<(Bytes, Bytes)> {
     let now = now_ms();
     let previous = LAST.swap(now, Ordering::Relaxed);
     static CACHE: std::sync::Mutex<Option<(Bytes, Bytes)>> = std::sync::Mutex::new(None);
-    if now - previous > 5_000 || previous == 0 {
-        let page_size = 4096u64;
+    if now.saturating_sub(previous) > 5_000 || previous == 0 {
         let output = std::process::Command::new("/usr/bin/vm_stat")
             .output()
             .ok()
             .filter(|out| out.status.success())?;
         let text = String::from_utf8_lossy(&output.stdout);
-        let mut compressor_pages = 0u64;
-        let mut wired_pages = 0u64;
-        for line in text.lines() {
-            let mut parts = line.split(':');
-            let key = parts.next()?.trim();
-            let value = parts.next()?.trim().trim_end_matches('.').replace(' ', "");
-            let pages: u64 = value.parse().unwrap_or(0);
-            match key {
-                "Occupied by compressor" => compressor_pages = pages,
-                "Wired Pages" => wired_pages = pages,
-                _ => {}
-            }
-        }
-        let value = (
-            Bytes(compressor_pages * page_size),
-            Bytes(wired_pages * page_size),
-        );
+        let value = parse_vm_stat(&text)?;
         if let Ok(mut guard) = CACHE.lock() {
             *guard = Some(value);
         }
@@ -584,6 +557,42 @@ fn vm_stat_details() -> Option<(Bytes, Bytes)> {
     } else {
         CACHE.lock().ok().and_then(|guard| *guard)
     }
+}
+
+/// Apple Silicon uses 16 KiB pages, Intel Macs use 4 KiB. The header states the
+/// size, and the two fields squid reports use different labels than older
+/// versions of `vm_stat`; both facts made the previous parser return zero.
+fn parse_vm_stat(text: &str) -> Option<(Bytes, Bytes)> {
+    let header = text.lines().next()?;
+    let (_, after_size) = header.split_once("page size of ")?;
+    let page_size: u64 = after_size
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()?;
+    let mut compressor_pages = 0u64;
+    let mut wired_pages = 0u64;
+    for line in text.lines().skip(1) {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let pages: u64 = value
+            .trim()
+            .trim_end_matches('.')
+            .replace(' ', "")
+            .parse()
+            .unwrap_or(0);
+        match key.trim().trim_matches('"') {
+            "Pages occupied by compressor" => compressor_pages = pages,
+            "Pages wired down" => wired_pages = pages,
+            _ => {}
+        }
+    }
+    Some((
+        Bytes(compressor_pages.saturating_mul(page_size)),
+        Bytes(wired_pages.saturating_mul(page_size)),
+    ))
 }
 
 fn net_rates(networks: &Networks, seconds: f64) -> NetRate {
@@ -856,6 +865,18 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(stats.percent_used(), 100);
+    }
+
+    #[test]
+    fn vm_stat_uses_the_reported_page_size_and_fields() {
+        let text = "\
+Mach Virtual Memory Statistics: (page size of 16384 bytes)\n\
+Pages free:                               96476.\n\
+Pages wired down:                       122963.\n\
+Pages occupied by compressor:           151882.\n";
+        let (compressed, wired) = parse_vm_stat(text).expect("vm_stat");
+        assert_eq!(wired, Bytes(122_963 * 16_384));
+        assert_eq!(compressed, Bytes(151_882 * 16_384));
     }
 
     /// The feature, end to end: a sample that still describes its pid stops it.

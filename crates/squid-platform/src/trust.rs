@@ -18,6 +18,7 @@ use std::path::Path;
 
 /// What the signature says about one file.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Trust {
     /// A signature exists and the operating system considers it intact.
     pub signed: bool,
@@ -62,13 +63,20 @@ pub fn assess(path: &Path) -> Trust {
         // into an answer instead of a cached guess.
         return assess_uncached(path);
     };
+    if let Some(found) = cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&key)
+        .cloned()
+    {
+        return found;
+    }
+    // Asked with no lock held: the question costs a subprocess, so holding the
+    // cache across it would make every bulk caller take these one at a time.
+    let trust = assess_uncached(path);
     let mut cache = cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(found) = cache.get(&key) {
-        return found.clone();
-    }
-    let trust = assess_uncached(path);
     // Bounded, because a utility that grows its own footprint to answer a
     // display question is its own kind of junk. Half is dropped rather than all,
     // so a table that is still on screen keeps the answers it is showing.
@@ -318,41 +326,47 @@ fn pe_has_certificate_at(path: &Path) -> Option<bool> {
 
 /// Cheap gate for a table with hundreds of rows: only Mach-O and PE files can
 /// carry a signature, so everything else is answered without a subprocess.
+///
+/// The header decides, not the name. A macOS privileged helper is called
+/// `us.zoom.ZoomDaemon` and a Windows one `com.microsoft.autoupdate.helper`, where
+/// the last dot is part of the name rather than an extension; judging by extension
+/// never asked about a signed helper whose name happens to contain a dot. Reading
+/// eight bytes is close to free next to the subprocess being avoided, and it is the
+/// same question the signature actually answers.
 pub fn might_be_executable(path: &Path) -> bool {
-    if path.is_dir() {
-        return false;
-    }
-    if path.extension().is_some() {
-        const SIGNED_KINDS: [&str; 9] = [
-            "app",
-            "framework",
-            "bundle",
-            "xpc",
-            "dylib",
-            "so",
-            "exe",
-            "dll",
-            "sys",
-        ];
-        let ext = path
-            .extension()
+    /// Bundles are signed as a unit, so the directory itself is the question.
+    const BUNDLES: [&str; 4] = ["app", "framework", "bundle", "xpc"];
+
+    let extension = || {
+        path.extension()
             .map(|ext| ext.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        return SIGNED_KINDS.contains(&ext.as_str()) || ext.is_empty();
+            .unwrap_or_default()
+    };
+    if path.is_dir() {
+        return BUNDLES.contains(&extension().as_str());
     }
-    // Extension-less binaries are the norm on macOS, so the header decides.
-    header_is_executable(path)
+    match header(path) {
+        Some(head) => header_is_executable(&head),
+        // Nothing to read: an executable the current user may run but not open is
+        // common among root-owned helpers, and `codesign` may still answer for it.
+        None => {
+            BUNDLES.contains(&extension().as_str())
+                || ["dylib", "so", "exe", "dll", "sys"].contains(&extension().as_str())
+                || extension().is_empty()
+        }
+    }
 }
 
-fn header_is_executable(path: &Path) -> bool {
+/// The first eight bytes, or `None` when the file cannot be opened.
+fn header(path: &Path) -> Option<[u8; 8]> {
     use std::io::Read;
-    let Ok(mut file) = std::fs::File::open(path) else {
-        return false;
-    };
+    let mut file = std::fs::File::open(path).ok()?;
     let mut head = [0_u8; 8];
-    let Ok(_) = file.read(&mut head) else {
-        return false;
-    };
+    file.read_exact(&mut head).ok()?;
+    Some(head)
+}
+
+fn header_is_executable(head: &[u8; 8]) -> bool {
     // Mach-O 32/64, fat binary, and their byte-swapped forms.
     const MACHOS: [[u8; 4]; 6] = [
         [0xcf, 0xfa, 0xed, 0xfe],

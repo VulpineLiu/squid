@@ -1,5 +1,4 @@
 import {
-  AppWindow,
   Check,
   FileCog,
   FolderClock,
@@ -34,6 +33,7 @@ import {
   Button,
   InlineError,
   PageHeader,
+  Select,
   Toggle,
   useToast,
 } from "../components/ui";
@@ -176,7 +176,6 @@ export function SettingsPage({
   return (
     <div className="page settings-page">
       <PageHeader
-        eyebrow={t("Settings", "设置")}
         title={t("Make Squid yours.", "按您的方式使用 Squid。")}
         description={t(
           "Language, deletion behaviour, protected locations and updates all live here.",
@@ -193,12 +192,6 @@ export function SettingsPage({
               <Languages size={18} />
               {t("Language & appearance", "语言与外观")}
             </h2>
-            <p>
-              {t(
-                "The current system language is selected by default.",
-                "默认选择当前系统语言。",
-              )}
-            </p>
           </div>
         </div>
         <div className="language-picker">
@@ -229,12 +222,6 @@ export function SettingsPage({
                 <LockKeyhole size={18} />
                 {t("System permissions", "系统权限")}
               </h2>
-              <p>
-                {t(
-                  "Squid works without this access; protected app data is simply skipped.",
-                  "未授权时 Squid 仍可正常工作，只会跳过受保护的 App 数据。",
-                )}
-              </p>
             </div>
           </div>
           <div className="permission-check-row">
@@ -304,12 +291,6 @@ export function SettingsPage({
               <Power size={18} />
               {t("Startup", "启动")}
             </h2>
-            <p>
-              {t(
-                "Choose whether Squid starts automatically after you sign in.",
-                "选择登录电脑后是否自动启动 Squid。",
-              )}
-            </p>
           </div>
         </div>
         <div className="settings-row is-first">
@@ -317,8 +298,8 @@ export function SettingsPage({
             <strong>{t("Launch Squid at login", "登录时启动 Squid")}</strong>
             <span>
               {t(
-                "Only Squid itself. To manage what else starts at login, use the Startup items page.",
-                "只针对 Squid 本身。要管理其他登录时启动的程序，请前往启动项页面。",
+                "Only Squid itself; other apps are managed under Startup items.",
+                "仅 Squid 自身，其他程序请到启动项页面管理。",
               )}
             </span>
           </div>
@@ -342,12 +323,6 @@ export function SettingsPage({
               <Trash2 size={18} />
               {t("Deletion safety", "删除安全")}
             </h2>
-            <p>
-              {t(
-                "This is the default shown in every confirmation. You can still choose per cleanup.",
-                "这是每次确认时的默认选项，单次清理仍可另行选择。",
-              )}
-            </p>
           </div>
         </div>
         <div className="delete-mode-cards">
@@ -411,24 +386,13 @@ export function SettingsPage({
         <div className="settings-row">
           <div>
             <strong>{t("History records to keep", "保留历史记录数量")}</strong>
-            <span>
-              {t(
-                "Older cleanup records are pruned after this many sessions.",
-                "超过此数量后，较早的清理记录会被移除。",
-              )}
-            </span>
           </div>
-          <select
-            className="settings-select"
+          <Select
             value={settings.historyKeep}
-            onChange={(event) => void save({ historyKeep: Number(event.target.value) })}
-          >
-            {[20, 60, 100, 200, 500].map((value) => (
-              <option value={value} key={value}>
-                {value}
-              </option>
-            ))}
-          </select>
+            label={t("History records to keep", "保留历史记录数量")}
+            options={[20, 60, 100, 200, 500].map((value) => ({ value, label: String(value) }))}
+            onChange={(next) => void save({ historyKeep: next })}
+          />
         </div>
       </section>
 
@@ -441,8 +405,8 @@ export function SettingsPage({
             </h2>
             <p>
               {t(
-                "Squid never deletes anything inside these folders, even if a cleanup rule matches. This list does not stop the malware scan from reporting a finding inside them.",
-                "即使清理规则匹配，Squid 也绝不会删除这些文件夹中的内容。该列表不会阻止恶意软件扫描在其中报告发现。",
+                "Never deleted here, even when a cleanup rule matches. The malware scan still reports inside them.",
+                "这里的内容绝不会被删除。恶意软件扫描仍会检查其中的发现。",
               )}
             </p>
           </div>
@@ -572,16 +536,6 @@ export function SettingsPage({
           </div>
         </div>
       </section>
-
-      <footer className="settings-footer">
-        <AppWindow size={15} />
-        <span>
-          {t(
-            "Squid keeps scans, policy checks and cleanup history on this computer.",
-            "Squid 的扫描、安全策略校验与清理历史均在这台电脑上完成。",
-          )}
-        </span>
-      </footer>
     </div>
   );
 }

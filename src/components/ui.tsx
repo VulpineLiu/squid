@@ -38,7 +38,14 @@ export interface CategoryMeta {
   tone: Tone;
 }
 
-export type Tone = "primary" | "success" | "warning" | "danger" | "neutral";
+export type Tone =
+  | "primary"
+  | "success"
+  | "warning"
+  | "danger"
+  | "neutral"
+  | "info"
+  | "violet";
 
 export const CATEGORY_META: Record<Category, CategoryMeta> = {
   "system-junk": {
@@ -148,7 +155,7 @@ export function PageHeader({
 }: {
   eyebrow?: string;
   title: string;
-  description: string;
+  description?: string;
   actions?: ReactNode;
 }) {
   return (
@@ -156,7 +163,7 @@ export function PageHeader({
       <div>
         {eyebrow ? <div className="page-eyebrow">{eyebrow}</div> : null}
         <h1>{title}</h1>
-        <p>{description}</p>
+        {description ? <p>{description}</p> : null}
       </div>
       {actions ? <div className="page-header-actions">{actions}</div> : null}
     </header>
@@ -253,6 +260,125 @@ export function Checkbox({
       {checked ? <Check size={13} strokeWidth={3} /> : null}
       {!checked && indeterminate ? <span /> : null}
     </button>
+  );
+}
+
+/**
+ * A list of choices that opens as one of ours.
+ *
+ * The native `<select>` is not used anywhere: its popup is drawn by the
+ * operating system, so it ignores this app's type scale and colours and looks
+ * like a different program. The trigger keeps the box the native control had —
+ * same height, border and type scale — and only the popup is new, drawn with the
+ * shell a panel uses, so the two agree in every theme.
+ */
+export function Select<T extends string | number>({
+  value,
+  options,
+  onChange,
+  label,
+  disabled = false,
+  align = "end",
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (next: T) => void;
+  label: string;
+  disabled?: boolean;
+  align?: "start" | "end";
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const current = options.findIndex((option) => option.value === value);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointer);
+    return () => document.removeEventListener("pointerdown", onPointer);
+  }, [open]);
+
+  const choose = (index: number) => {
+    const option = options[index];
+    if (option) onChange(option.value);
+    setOpen(false);
+    trigger.current?.focus();
+  };
+
+  return (
+    <div
+      className="select"
+      ref={root}
+      onKeyDown={(event) => {
+        if (!open) {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            setActive(current < 0 ? 0 : current);
+            setOpen(true);
+          }
+          return;
+        }
+        if (event.key === "Escape") {
+          setOpen(false);
+          trigger.current?.focus();
+        } else if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setActive((index) => (index + 1) % options.length);
+        } else if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setActive((index) => (index - 1 + options.length) % options.length);
+        } else if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          choose(active);
+        }
+      }}
+    >
+      <button
+        ref={trigger}
+        type="button"
+        className="select-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => {
+          setActive(current < 0 ? 0 : current);
+          setOpen((open) => !open);
+        }}
+      >
+        <span>{current < 0 ? label : options[current].label}</span>
+        <ChevronDown size={14} className={open ? "is-open" : ""} />
+      </button>
+      {open ? (
+        <ul
+          className={`select-menu is-${align}`}
+          role="listbox"
+          aria-label={label}
+        >
+          {options.map((option, index) => (
+            <li key={String(option.value)}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={option.value === value}
+                className={`${index === active ? "is-active" : ""} ${
+                  option.value === value ? "is-current" : ""
+                }`}
+                onMouseEnter={() => setActive(index)}
+                onClick={() => choose(index)}
+              >
+                {option.label}
+                {option.value === value ? <Check size={13} strokeWidth={2.5} /> : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -562,14 +688,14 @@ export function EmptyState({
 }: {
   icon: ReactNode;
   title: string;
-  description: string;
+  description?: string;
   action?: ReactNode;
 }) {
   return (
     <div className="empty-state">
       <div className="empty-icon">{icon}</div>
       <h2>{title}</h2>
-      <p>{description}</p>
+      {description ? <p>{description}</p> : null}
       {action}
     </div>
   );

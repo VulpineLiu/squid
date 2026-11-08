@@ -98,7 +98,6 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
   return (
     <div className="page storage-page">
       <PageHeader
-        eyebrow={t("Storage", "存储空间")}
         title={t("See space clearly.", "看清每一寸空间。")}
         description={t(
           "Drill into folders, find the heavyweight files, and open anything in Finder.",
@@ -295,8 +294,8 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
             <SectionTitle
               title={t("Largest files", "最大文件")}
               subtitle={t(
-                "Files over 1 MB in the current folder, largest first.",
-                "当前文件夹中大于 1 MB 的文件，按大小排序。",
+                "Over 1 MB in the current folder, largest first.",
+                "当前文件夹中大于 1 MB 的文件，从大到小。",
               )}
               action={
                 <Button

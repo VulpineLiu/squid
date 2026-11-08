@@ -23,6 +23,14 @@
   --nex-warning-strong: #8c6c40;
   --nex-warning-soft: #fff8e9;
   --nex-warning-rgb: 169, 119, 41;
+  --nex-info: #4d94cf;
+  --nex-info-strong: #3377b2;
+  --nex-info-soft: #edf7ff;
+  --nex-info-rgb: 77, 148, 207;
+  --nex-violet: #8068d9;
+  --nex-violet-strong: #6650c0;
+  --nex-violet-soft: #f1eeff;
+  --nex-violet-rgb: 128, 104, 217;
   --nex-danger: #c85a62;
   --nex-danger-strong: #a64048;
   --nex-danger-soft: #ffedef;
@@ -191,6 +199,18 @@ select:focus-visible,
   --tone: var(--nex-muted);
   --tone-deep: var(--nex-ink);
   --tone-soft: rgba(125, 98, 86, 0.1);
+}
+
+.tone-info {
+  --tone: var(--nex-info);
+  --tone-deep: var(--nex-info-strong);
+  --tone-soft: var(--nex-info-soft);
+}
+
+.tone-violet {
+  --tone: var(--nex-violet);
+  --tone-deep: var(--nex-violet-strong);
+  --tone-soft: var(--nex-violet-soft);
 }
 
 .spin {
@@ -902,13 +922,6 @@ select:focus-visible,
   letter-spacing: 0.025em;
 }
 
-.field-help {
-  display: block;
-  margin-top: 6px;
-  color: var(--nex-muted-soft);
-  font-size: var(--nex-text-3xs);
-  line-height: var(--nex-leading-body);
-}
 
 .metric-icon {
   display: inline-grid;
@@ -925,6 +938,11 @@ select:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  /* A chip is one label. Without this a CJK label with no spaces wraps to one
+     glyph per line inside a row, which is what a `flex` row does to an inline item
+     narrow enough to shrink. */
+  flex: 0 0 auto;
+  white-space: nowrap;
   padding: 3px 7px;
   border-radius: 20px;
   color: var(--nex-muted);
@@ -970,7 +988,7 @@ select:focus-visible,
 .overview-hero {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.72fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
   min-height: 302px;
   overflow: hidden;
   padding: 31px 33px;
@@ -1016,6 +1034,7 @@ select:focus-visible,
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
+  padding-right: 20px;
 }
 
 .hero-kicker {
@@ -1079,6 +1098,65 @@ select:focus-visible,
   border-radius: 50%;
   background: var(--nex-primary);
   content: "";
+}
+
+.overview-machine {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  padding: 12px 0 12px 28px;
+  border-left: 1px solid rgba(var(--nex-primary-rgb), 0.1);
+}
+
+.machine-title {
+  margin-bottom: 11px;
+  color: var(--nex-ink);
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.machine-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.machine-row {
+  display: grid;
+  grid-template-columns: 24px 74px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.machine-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--nex-primary-strong);
+  background: rgba(255, 255, 255, 0.54);
+  box-shadow: inset 0 0 0 1px rgba(var(--nex-primary-rgb), 0.08);
+}
+
+.machine-label {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  white-space: nowrap;
+}
+
+.machine-row strong {
+  overflow: hidden;
+  color: var(--nex-ink);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .overview-gauge-wrap {
@@ -1270,6 +1348,12 @@ select:focus-visible,
   margin-top: 20px;
 }
 
+.overview-metrics .metric-panel {
+  display: flex;
+  min-height: 145px;
+  flex-direction: column;
+}
+
 .metric-panel {
   padding: 15px;
   border: 1px solid var(--nex-line);
@@ -1325,6 +1409,61 @@ select:focus-visible,
   font-size: var(--nex-text-3xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.overview-metrics .metric-panel > small {
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+.overview-storage-card .metric-panel-head {
+  margin-bottom: 10px;
+}
+
+.storage-volume-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 9px;
+}
+
+.storage-volume {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.storage-volume-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.storage-volume-head strong {
+  flex: 0 0 auto;
+  color: var(--nex-ink);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.storage-volume-head span {
+  overflow: hidden;
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-volume .usage-bar {
+  height: 4px;
+}
+
+.overview-page .page-eyebrow {
+  color: #6f839a;
 }
 
 /* Category cards */
@@ -1853,12 +1992,6 @@ select:focus-visible,
   gap: 4px;
 }
 
-.page-footnote {
-  margin: 16px 0 0;
-  color: var(--nex-muted);
-  font-size: var(--nex-text-3xs);
-  text-align: center;
-}
 
 /* Empty states */
 
@@ -2169,6 +2302,20 @@ select:focus-visible,
   box-shadow: 0 5px 13px rgba(142, 71, 40, 0.13);
   font-size: var(--nex-text-sm);
   font-weight: var(--nex-weight-heavy);
+  overflow: hidden;
+}
+
+.app-glyph.has-icon {
+  border-color: var(--nex-line);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 4px 12px rgba(89, 51, 34, 0.08);
+}
+
+.app-glyph img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .app-glyph.is-large {
@@ -3691,7 +3838,19 @@ select:focus-visible,
   line-height: var(--nex-leading-body);
 }
 
-.settings-select {
+/* The app's own select. The box keeps the size, border and type scale the native
+   control had, so replacing a `<select>` does not move a layout; only the popup
+   is new, and it is drawn with the same shell as a panel. */
+.select {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   min-width: 86px;
   height: 31px;
   padding: 0 9px;
@@ -3700,6 +3859,88 @@ select:focus-visible,
   color: var(--nex-ink);
   background: var(--nex-paper);
   font-size: var(--nex-text-3xs);
+  transition: border-color 0.14s ease;
+}
+
+.select-trigger:hover:not(:disabled) {
+  border-color: rgba(var(--nex-primary-rgb), 0.4);
+}
+
+.select-trigger:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.select-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-trigger svg {
+  flex: 0 0 auto;
+  color: var(--nex-muted-soft);
+  transition: transform 0.14s ease;
+}
+
+.select-trigger svg.is-open {
+  transform: rotate(180deg);
+}
+
+.select-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  z-index: 30;
+  display: grid;
+  gap: 1px;
+  min-width: 100%;
+  max-height: 288px;
+  margin: 0;
+  padding: 5px;
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--nex-line);
+  border-radius: 11px;
+  background: var(--nex-paper);
+  box-shadow: var(--shadow-float);
+}
+
+.select-menu.is-start {
+  left: 0;
+}
+
+.select-menu.is-end {
+  right: 0;
+}
+
+.select-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--nex-ink);
+  background: none;
+  font-size: var(--nex-text-3xs);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.select-menu button.is-active {
+  background: var(--nex-primary-tint);
+}
+
+.select-menu button.is-current {
+  color: var(--nex-primary-strong);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.select-menu svg {
+  flex: 0 0 auto;
+  color: var(--nex-primary);
 }
 
 .whitelist-add {
@@ -3822,16 +4063,6 @@ select:focus-visible,
   font-weight: var(--nex-weight-semibold);
 }
 
-.settings-footer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 13px;
-  color: var(--nex-muted-soft);
-  font-size: var(--nex-text-3xs);
-  text-align: center;
-}
 
 /* Update panel */
 
@@ -4246,12 +4477,6 @@ select:focus-visible,
   line-height: var(--nex-leading-body);
 }
 
-.setup-note {
-  margin: 14px 1px 0;
-  color: var(--nex-muted-soft);
-  font-size: var(--nex-text-3xs);
-  line-height: var(--nex-leading-body);
-}
 
 .setup-foot {
   display: flex;
@@ -4705,7 +4930,7 @@ select:focus-visible,
   }
 
   .overview-hero {
-    grid-template-columns: minmax(0, 1.2fr) 250px;
+    grid-template-columns: minmax(0, 1fr) 330px;
     padding: 27px;
   }
 
@@ -4738,7 +4963,7 @@ select:focus-visible,
   }
 
   .overview-hero {
-    grid-template-columns: minmax(0, 1fr) 218px;
+    grid-template-columns: minmax(0, 1fr) 285px;
     padding: 24px;
   }
 
@@ -4746,8 +4971,17 @@ select:focus-visible,
     font-size: var(--nex-text-hero);
   }
 
-  .overview-gauge-wrap .gauge {
-    transform: scale(0.86);
+  .overview-hero-copy {
+    padding-right: 12px;
+  }
+
+  .overview-machine {
+    padding-left: 18px;
+  }
+
+  .machine-row {
+    grid-template-columns: 22px 66px minmax(0, 1fr);
+    gap: 6px;
   }
 
   .quick-grid,
@@ -5136,10 +5370,12 @@ select:focus-visible,
 }
 
 /* One row for everything that can be opened: a finding, a startup item, a
-   quarantined file. The tone class is the only difference between them. */
+   quarantined file. Flat rows divided by one hairline, the way every older list
+   in the app is built — no card per entry, no rounded corners, no indicator bar.
+   A tone tints the text of a row, never its edge. */
 .item-list {
-  display: grid;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -5149,24 +5385,33 @@ select:focus-visible,
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--nex-line);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.62);
+  min-height: 44px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--nex-line);
+  background: transparent;
+  transition: background 0.14s ease;
 }
 
-.item-row.is-danger {
-  border-left: 3px solid var(--nex-danger);
+.item-row:last-child {
+  border-bottom: 0;
 }
 
-.item-row.is-warning,
-.item-row.is-risky {
-  border-left: 3px solid var(--nex-warning);
+.item-row:hover {
+  background: var(--nex-cream);
+}
+
+.item-row.is-danger .item-copy strong {
+  color: var(--nex-danger-strong);
+}
+
+.item-row.is-warning .item-copy strong,
+.item-row.is-risky .item-copy strong {
+  color: var(--nex-warning-strong);
 }
 
 .item-row.is-handled,
 .item-row.is-off {
-  opacity: 0.62;
+  opacity: 0.64;
 }
 
 /* The whole row is one button, which is why the reset is here rather than in a
@@ -5226,22 +5471,6 @@ select:focus-visible,
   gap: 6px;
 }
 
-.level-dot {
-  flex: 0 0 8px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--nex-muted-soft);
-}
-
-.level-dot.is-danger {
-  background: var(--nex-danger);
-}
-
-.level-dot.is-warning {
-  background: var(--nex-warning);
-}
-
 /* Detail drawer body, shared by findings, startup items and processes. */
 .item-detail {
   display: grid;
@@ -5284,21 +5513,25 @@ select:focus-visible,
 
 .evidence-list {
   display: grid;
-  gap: 7px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* One hairline per row, like every other list: the evidence is a table of facts,
+   not a stack of cards. */
 .evidence-list li {
   display: grid;
   grid-template-columns: 108px 1fr;
   gap: 10px;
-  padding: 9px 11px;
-  border-radius: var(--radius-sm);
-  background: var(--nex-cream);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--nex-line);
   font-size: var(--nex-text-2xs);
   line-height: var(--nex-leading-body);
+}
+
+.evidence-list li:last-child {
+  border-bottom: 0;
 }
 
 .evidence-key {
@@ -5469,44 +5702,10 @@ select:focus-visible,
   text-align: center;
 }
 
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
-  gap: 12px;
-}
 
-.stat {
-  display: grid;
-  gap: 2px;
-  padding: 13px 15px;
-  border: 1px solid var(--nex-line);
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.73);
-  box-shadow: var(--shadow-card);
-}
 
-.stat strong {
-  font-size: var(--nex-text-xl);
-  font-weight: var(--nex-weight-bold);
-}
 
-.stat span {
-  color: var(--nex-muted);
-  font-size: var(--nex-text-3xs);
-}
 
-.stat.is-warning {
-  border-color: rgba(var(--nex-warning-rgb), 0.26);
-  background: var(--nex-warning-soft);
-}
-
-.startup-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-  max-width: 46%;
-}
 
 /* Where the entry is declared: LaunchAgent, Run, a login item. quieter than the
    name it qualifies, because most rows are the kind the user never touches. */
@@ -5517,18 +5716,6 @@ select:focus-visible,
   white-space: nowrap;
 }
 
-.risk-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(var(--nex-warning-rgb), 0.14);
-  color: var(--nex-warning-strong);
-  font-size: var(--nex-text-3xs);
-  font-weight: var(--nex-weight-medium);
-  white-space: nowrap;
-}
 
 .muted-note {
   display: inline-flex;
@@ -5539,28 +5726,72 @@ select:focus-visible,
   white-space: nowrap;
 }
 
-.startup-batch {
+/* Startup groups: one application and the entries it installed. The head is the
+   same flat, hairline-separated row as everything else it contains, and the rows
+   under it are ordinary `.item-row`s that have only been indented. */
+.group-list {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 10px 14px;
-  border: 1px solid rgba(var(--nex-primary-rgb), 0.24);
-  border-radius: var(--radius-md);
-  background: var(--nex-primary-tint);
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.startup-batch-all {
+.group-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--nex-line);
+  background: transparent;
+  text-align: left;
+  transition: background 0.14s ease;
+}
+
+.group-head:hover {
+  background: var(--nex-cream);
+}
+
+.group-head > .item-copy strong {
+  font-size: var(--nex-text-xs);
+}
+
+.group-meta {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.group-count {
+  min-width: 22px;
   color: var(--nex-muted);
-  font-size: var(--nex-text-2xs);
+  font-size: var(--nex-text-3xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
-.startup-batch-actions {
-  display: flex;
-  gap: 8px;
+.group-arrow {
+  flex: 0 0 auto;
+  color: var(--nex-muted-soft);
+  transition: transform 0.14s ease;
+}
+
+.group-arrow.is-open {
+  transform: rotate(180deg);
+}
+
+/* Nested rather than boxed: the rows belong to the group above them, which a card
+   around each one would deny. */
+.item-list.is-nested .item-row {
+  padding-left: 28px;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.item-list.is-nested .item-row:last-child {
+  border-bottom: 1px solid var(--nex-line);
 }
 
 /* -------------------------------------------------------------- process table */
@@ -5604,7 +5835,6 @@ select:focus-visible,
 
 .ptable.pt-rows {
   display: grid;
-  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -5615,11 +5845,14 @@ select:focus-visible,
 .ptable.pt-rows li {
   min-height: 38px;
   padding: 5px 11px;
-  border-radius: var(--radius-sm);
 }
 
-.ptable.pt-rows li:nth-child(odd) {
-  background: rgba(255, 255, 255, 0.55);
+.ptable.pt-rows li:not(:last-child) {
+  border-bottom: 1px solid var(--nex-line);
+}
+
+.ptable.pt-rows li:hover {
+  background: var(--nex-cream);
 }
 
 .ptable.pt-rows li.is-flagged {
@@ -5703,8 +5936,15 @@ select:focus-visible,
 /* Grouped by application: the group header is a row of the same shape, so the
    columns line up with the rows it opens. */
 .process-grouped {
-  display: grid;
-  gap: 3px;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.process-grouped > li:not(:last-child) > .process-group-head {
+  border-bottom: 1px solid var(--nex-line);
 }
 
 .process-group-head {
@@ -5714,13 +5954,11 @@ select:focus-visible,
   align-items: center;
   width: 100%;
   padding: 9px 11px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.55);
   text-align: left;
 }
 
 .process-group-head:hover {
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--nex-cream);
 }
 
 .process-group-head strong {
@@ -5803,9 +6041,5 @@ select:focus-visible,
 
   .item-row {
     flex-wrap: wrap;
-  }
-
-  .startup-meta {
-    max-width: 100%;
   }
 }

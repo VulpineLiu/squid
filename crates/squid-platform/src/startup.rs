@@ -7,6 +7,10 @@
 //! default: every entry says whether squid may change it, and the ones it may
 //! not say why in the same field the UI shows.
 //!
+//! Entries are also attributed to the application that installed them, because
+//! nobody reads 800 plist labels: both operating systems show this list per app,
+//! and `StartupOwner` is what makes that possible without guessing.
+//!
 //! Disabling an entry means renaming its plist to `*.plist.disabled` on macOS
 //! and moving its registry value into a sibling backup key on Windows. Both are
 //! reversible without a privileged helper, which is the whole point: squid never
@@ -63,6 +67,9 @@ pub enum StartupRisk {
     InTempDir,
     /// The target exists but carries no usable code signature.
     Unsigned,
+    /// The target is not readable by this user, so its signature was never asked
+    /// about. Different from `Unsigned`, which is an answer and an accusation.
+    SignatureUnreadable,
     /// Started through a script interpreter rather than a binary.
     ScriptInterpreter,
     /// Created within the last fortnight.
@@ -73,7 +80,66 @@ pub enum StartupRisk {
     HiddenHomeDirectory,
 }
 
+/// Which of the two lists the operating systems themselves show an entry
+/// belongs to. macOS splits "Login Items" (apps that open when you log in) from
+/// "Allow in the Background" (helpers that keep running); Windows splits the
+/// Startup folder and Run keys from scheduled tasks and services. A page that
+/// shows one flat list of 800 labels answers neither question.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StartupCategory {
+    /// Opens an application or window at login: a login item, a Startup folder
+    /// shortcut, or a Run value that launches an app.
+    OpenAtLogin,
+    /// A helper that keeps running without a window: LaunchAgents and
+    /// LaunchDaemons, scheduled tasks, services.
+    Background,
+}
+
+impl StartupCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StartupCategory::OpenAtLogin => "open-at-login",
+            StartupCategory::Background => "background",
+        }
+    }
+}
+
+/// Why squid will not change an entry. A typed answer rather than a sentence
+/// from the platform layer, because the platform layer does not know which
+/// language the page is wearing; each variant becomes one short localised phrase.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StartupLock {
+    /// Apple's or Microsoft's own entry.
+    OperatingSystem,
+    /// Root-owned plist, HKLM value, system task or service: one authorisation away.
+    NeedsAuthorisation,
+    /// The declaring file or folder is not writable by this user.
+    NotWritable,
+    /// macOS owns the login-item list and changes it through System Settings.
+    ManagedBySystemSettings,
+    /// This release reports these entries and leaves them alone.
+    NotManaged,
+}
+
+/// The application an entry belongs to, worked out from the paths launchd or the
+/// registry name, never from the entry's label. This is what lets the list be
+/// "Docker · 3 background items" instead of three opaque plist names.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupOwner {
+    /// The name to show the user: the bundle's `CFBundleDisplayName`, or the
+    /// application folder name when the bundle cannot be read.
+    pub name: String,
+    /// The `.app` bundle, or the directory the entry lives in.
+    pub bundle_path: Option<PathBuf>,
+    /// True when the owning application is Apple's or Microsoft's own.
+    pub vendor: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StartupItem {
     /// Stable identifier: the plist path, registry value, task path or service.
     pub id: String,
@@ -91,12 +157,17 @@ pub struct StartupItem {
     /// An entry the operating system vendor owns.
     pub system_vendor: bool,
     pub disabled: bool,
-    /// False means squid will refuse to touch it, with `readonly_reason`.
+    /// False means squid will refuse to touch it, and `lock` says which kind of
+    /// refusal it is.
     pub modifiable: bool,
-    pub readonly_reason: Option<String>,
+    pub lock: Option<StartupLock>,
     pub hidden: bool,
     pub modified_ms: Option<u64>,
     pub risks: Vec<StartupRisk>,
+    /// Which list of the operating system's own this entry would appear in.
+    pub category: StartupCategory,
+    /// The application that installed the entry, when one could be named.
+    pub owner: Option<StartupOwner>,
 }
 
 impl StartupItem {
@@ -124,20 +195,66 @@ impl StartupItem {
             system_vendor: false,
             disabled: false,
             modifiable: false,
-            readonly_reason: None,
+            lock: None,
             hidden: false,
             modified_ms: None,
             risks: Vec::new(),
+            category: StartupCategory::Background,
+            owner: None,
         }
     }
 }
 
 /// Everything squid could read. Unreadable folders are simply absent, and the
-/// notes say which roots could not be listed.
+/// notes say which ones and why.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct StartupInventory {
     pub items: Vec<StartupItem>,
-    pub notes: Vec<String>,
+    pub notes: Vec<StartupNote>,
+}
+
+/// Something the page has to admit it could not read. `kind` is typed rather than
+/// a sentence, because the platform layer does not know whether the page is
+/// wearing Chinese or English; a note that arrives already translated is a note
+/// that arrives in the wrong language. `detail` carries the operating system's own
+/// words beside it, which are never translated and are therefore honest.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupNote {
+    pub kind: StartupNoteKind,
+    /// The folder, tool or list this note is about.
+    pub subject: String,
+    pub detail: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StartupNoteKind {
+    /// A folder holding entries that could not be listed.
+    UnreadableRoot,
+    /// The login-item list could not be read at all, which on macOS means the
+    /// automation permission has not been granted.
+    LoginItemsUnavailable,
+}
+
+/// The command line speaks English, so it prints the note whole; the GUI reads
+/// `kind` and translates it. One fact, two honest renderings.
+impl std::fmt::Display for StartupNote {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            StartupNoteKind::UnreadableRoot => {
+                write!(formatter, "{} could not be listed", self.subject)?;
+            }
+            StartupNoteKind::LoginItemsUnavailable => {
+                write!(formatter, "login items could not be read")?;
+            }
+        }
+        if self.detail.is_empty() {
+            Ok(())
+        } else {
+            write!(formatter, ": {}", self.detail)
+        }
+    }
 }
 
 impl StartupInventory {
@@ -215,6 +332,11 @@ pub fn entry_for(program: &Path) -> Option<StartupItem> {
     }
 }
 
+/// What a refused change says. The reason itself is shown from `StartupLock`,
+/// which the page can translate; this is only what the command returns when the
+/// inventory it was given has already gone stale.
+const LOCK_REFUSAL: &str = "Squid cannot change this entry.";
+
 pub fn home_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
 }
@@ -236,7 +358,8 @@ fn now_ms() -> u64 {
 
 const RECENT_MS: u64 = 14 * 24 * 60 * 60 * 1000;
 
-/// Judges one resolved program: signature, freshness, and where it lives.
+/// Judges one resolved program: freshness and where it lives. The signature half
+/// is deliberately not here — see `apply_trust`.
 fn judge_program(item: &mut StartupItem, program: Option<&Path>) {
     let Some(program) = program else {
         return;
@@ -286,12 +409,409 @@ fn judge_program(item: &mut StartupItem, program: Option<&Path>) {
             item.risks.push(StartupRisk::ScriptInterpreter);
         }
     }
+}
 
-    let trust = crate::trust::assess(program);
+/// The signature half of the judgement, kept apart from `judge_program` because
+/// on macOS it costs one `codesign` process per entry. An M1 Pro has ~870 startup
+/// entries, 845 of which Apple owns and nobody is going to inspect, so assessing
+/// all of them took 8 s to answer a question about 25. Entries whose target is
+/// gone are not assessed either: "not there" is already the finding.
+fn apply_trust(item: &mut StartupItem) {
+    if item.system_vendor || item.risks.contains(&StartupRisk::MissingTarget) {
+        return;
+    }
+    let Some(program) = item.program.clone() else {
+        return;
+    };
+    // A root-owned helper installed mode 0711 — `/Library/PrivilegedHelperTools/
+    // com.docker.socket`, for one — can be run and cannot be read, and `codesign`
+    // answers that with "Permission denied". Reporting it as *unsigned* would be a
+    // false accusation against a program that is signed and merely private.
+    if !program.is_dir() && std::fs::File::open(&program).is_err() {
+        item.risks.push(StartupRisk::SignatureUnreadable);
+        return;
+    }
+    let trust = crate::trust::assess(&program);
     item.signed = trust.signed;
     item.publisher = trust.signer.clone();
     if !trust.signed {
         item.risks.push(StartupRisk::Unsigned);
+    }
+}
+
+/// The `.app` bundle an entry belongs to, found in the path launchd will run.
+/// macOS nests helpers inside the bundle that owns them, which is why this works
+/// without asking Launch Services anything.
+#[cfg(target_os = "macos")]
+fn bundle_owning(path: &Path) -> Option<PathBuf> {
+    let mut current = Some(path);
+    while let Some(candidate) = current {
+        if candidate.to_string_lossy().to_lowercase().ends_with(".app") {
+            return Some(candidate.to_path_buf());
+        }
+        current = candidate.parent();
+    }
+    None
+}
+
+/// The installed applications, keyed by bundle id.
+///
+/// A helper installed in `/Library/PrivilegedHelperTools` says nothing about its
+/// owner in its path, but launchd's convention is that its label begins with the
+/// bundle id of the app that installed it. Checking that against what is actually
+/// installed is a lookup rather than a guess: `com.docker.socket` is Docker's
+/// because `com.docker.*` belongs to exactly one installed application.
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+struct AppIndex {
+    by_id: std::collections::BTreeMap<String, StartupOwner>,
+}
+
+#[cfg(target_os = "macos")]
+impl AppIndex {
+    fn scan() -> AppIndex {
+        let mut out = AppIndex::default();
+        let roots = [
+            PathBuf::from("/Applications"),
+            home_dir().join("Applications"),
+            PathBuf::from("/System/Applications"),
+            PathBuf::from("/System/Library/CoreServices"),
+        ];
+        for root in roots {
+            let Ok(entries) = std::fs::read_dir(&root) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.to_string_lossy().ends_with(".app") {
+                    continue;
+                }
+                let Some(info) = bundle_info(&path) else {
+                    continue;
+                };
+                out.by_id.entry(info.0).or_insert(StartupOwner {
+                    name: info.1,
+                    bundle_path: Some(path.clone()),
+                    vendor: root.starts_with("/System"),
+                });
+            }
+        }
+        out
+    }
+
+    /// The longest bundle-id prefix of `label` that one installed app owns.
+    fn owner_of(&self, label: &str) -> Option<StartupOwner> {
+        let mut parts: Vec<String> = label
+            .to_lowercase()
+            .split('.')
+            .map(|part| part.to_string())
+            .collect();
+        // The shortest usable prefix has two components. `org` on its own is a
+        // registry suffix, not a vendor, and stopping there matched
+        // `org.wireshark.ChmodBPF` to the only `org.*` application installed.
+        while parts.len() > 2 {
+            parts.pop();
+            let prefix = parts.join(".");
+            let matches: Vec<&StartupOwner> = self
+                .by_id
+                .range(prefix.clone()..)
+                .take_while(|(id, _)| *id == &prefix || id.starts_with(&format!("{prefix}.")))
+                .map(|(_, owner)| owner)
+                .collect();
+            // Only claim it when a single application is in the family; two
+            // installers sharing a vendor prefix is a tie, and a tie is a guess.
+            if matches.len() == 1 {
+                return Some(matches[0].clone());
+            }
+            if matches.len() > 1 {
+                break;
+            }
+        }
+        None
+    }
+}
+
+/// The bundle id and display name an `.app` declares for itself.
+#[cfg(target_os = "macos")]
+fn bundle_info(bundle: &Path) -> Option<(String, String)> {
+    let dict = plist::Value::from_file(bundle.join("Contents/Info.plist"))
+        .ok()?
+        .into_dictionary()?;
+    let id = dict
+        .get("CFBundleIdentifier")
+        .and_then(|value| value.as_string())?
+        .to_lowercase();
+    let name = ["CFBundleDisplayName", "CFBundleName"]
+        .iter()
+        .find_map(|key| dict.get(key).and_then(|value| value.as_string()))
+        .map(str::to_string)
+        .or_else(|| {
+            bundle
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+        })?;
+    Some((id, name))
+}
+
+/// Name the application every entry belongs to.
+///
+/// macOS nests helpers inside the `.app` that installed them, so the path usually
+/// answers it; where it does not, the entry's launchd label is matched against the
+/// bundle ids of the applications that are actually installed. Windows has no such
+/// nesting, so the install folder under Program Files carries the name. An entry
+/// that still names nothing stays ungrouped rather than being filed under a guess.
+#[cfg(target_os = "macos")]
+fn attribute_owners(items: &mut [StartupItem]) {
+    let mut index: Option<AppIndex> = None;
+    for item in items {
+        if item.system_vendor {
+            continue;
+        }
+        let bundle = item
+            .program
+            .clone()
+            .or_else(|| {
+                (item.id.contains('/') || item.id.ends_with(".app"))
+                    .then(|| PathBuf::from(&item.id))
+            })
+            .as_deref()
+            .and_then(bundle_owning);
+        if let Some(bundle) = bundle {
+            let vendor = bundle.starts_with("/System");
+            let name = bundle_info(&bundle)
+                .map(|(_, name)| name)
+                .unwrap_or_else(|| {
+                    bundle
+                        .file_stem()
+                        .map(|stem| stem.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| bundle.display().to_string())
+                });
+            item.owner = Some(StartupOwner {
+                name,
+                bundle_path: Some(bundle),
+                vendor,
+            });
+            continue;
+        }
+        // Nothing in the path names an application: a helper in
+        // `/Library/PrivilegedHelperTools`, or an entry whose target is gone.
+        let label = item
+            .id
+            .rsplit('/')
+            .next()
+            .unwrap_or(&item.id)
+            .trim_end_matches(".plist")
+            .trim_end_matches(".disabled");
+        let index = index.get_or_insert_with(AppIndex::scan);
+        if let Some(owner) = index.owner_of(label) {
+            item.owner = Some(owner);
+            continue;
+        }
+        // The signing organisation is the last honest answer, and it is the same
+        // one System Settings groups background items by.
+        if let Some(organisation) = item.publisher.as_deref().and_then(organisation_of) {
+            item.owner = Some(StartupOwner {
+                name: organisation,
+                bundle_path: None,
+                vendor: false,
+            });
+        }
+    }
+}
+
+/// `Developer ID Application: Docker Inc (9P49FL5KQ8)` to `Docker Inc`.
+#[cfg(target_os = "macos")]
+fn organisation_of(signer: &str) -> Option<String> {
+    let tail = signer.rsplit(": ").next().unwrap_or(signer);
+    let name = tail.split(" (").next().unwrap_or(tail).trim();
+    (!name.is_empty() && name != "not set").then(|| name.to_string())
+}
+
+#[cfg(windows)]
+fn attribute_owners(items: &mut [StartupItem]) {
+    for item in items {
+        if item.system_vendor {
+            continue;
+        }
+        let Some(program) = item.program.as_deref() else {
+            continue;
+        };
+        // The publisher the Authenticode signature names is what Control Panel and
+        // Task Manager both show, so it leads where the folder is a vendor directory.
+        if let Some(name) = item
+            .publisher
+            .as_deref()
+            .and_then(organisation_of)
+            .or_else(|| install_folder_owning(program))
+        {
+            item.owner = Some(StartupOwner {
+                name,
+                bundle_path: None,
+                vendor: false,
+            });
+        }
+    }
+}
+
+/// `CN = "Microsoft Corporation"` and `Microsoft Corporation` to one name.
+#[cfg(windows)]
+fn organisation_of(signer: &str) -> Option<String> {
+    let tail = signer.rsplit('=').next().unwrap_or(signer);
+    let name = tail.trim_matches(|c| c == '"' || c == '\'').trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// The folder under Program Files that holds one executable, which is the unit
+/// Windows itself groups installed programs by.
+#[cfg(windows)]
+fn install_folder_owning(program: &Path) -> Option<String> {
+    let text = program.to_string_lossy();
+    // Located without regard to case, then cut out of the original: the folder is
+    // shown to the user, and `MOZILLA firefox` is not what it is called.
+    let start = text.to_lowercase().find("program files")? + "program files".len();
+    let mut parts = text[start..]
+        .split(['\\', '/'])
+        .filter(|part| !part.trim().is_empty());
+    // ` (x86)` is part of the root, not a product, so the one folder after it is
+    // the vendor or product a person would recognise.
+    let first = parts.next()?;
+    let name = if first.trim_start().starts_with('(') {
+        parts.next()?
+    } else {
+        first
+    };
+    (!name.trim().is_empty()).then(|| name.trim().to_string())
+}
+
+/// What the operating system shows an entry under. Both platforms keep the same
+/// two lists — the things that open a window when you log in, and the helpers
+/// that run behind it — so the entry's own source decides it.
+fn categorise(item: &mut StartupItem) {
+    item.category = match item.source {
+        StartupSource::LoginItem | StartupSource::StartupFolder | StartupSource::RegistryRun => {
+            StartupCategory::OpenAtLogin
+        }
+        _ => StartupCategory::Background,
+    };
+}
+
+#[cfg(test)]
+mod attribution_tests {
+    use super::*;
+
+    /// The helper in `/Library/PrivilegedHelperTools` is named after nobody: its
+    /// path says where helpers live, not who installed it. Its label is matched
+    /// against installed bundle ids instead, which is honest only while exactly one
+    /// application owns the family.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_helper_is_claimed_only_by_an_unambiguous_bundle_family() {
+        let owner = |name: &str| StartupOwner {
+            name: name.to_string(),
+            bundle_path: None,
+            vendor: false,
+        };
+        let index = AppIndex {
+            by_id: [
+                ("com.docker.docker".to_string(), owner("Docker")),
+                (
+                    "com.apphousekitchen.aldente-pro".to_string(),
+                    owner("AlDente"),
+                ),
+                ("org.geogebra6.mac".to_string(), owner("GeoGebra")),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        assert_eq!(
+            index.owner_of("com.docker.socket").map(|o| o.name),
+            Some("Docker".into())
+        );
+        assert_eq!(
+            index
+                .owner_of("com.apphousekitchen.aldente-pro.helper")
+                .map(|o| o.name),
+            Some("AlDente".into())
+        );
+        // `org` on its own is a registry suffix, not a vendor. Without that bound
+        // `org.wireshark.ChmodBPF` was matched to the only `org.*` app installed.
+        assert_eq!(index.owner_of("org.wireshark.ChmodBPF"), None);
+        assert_eq!(index.owner_of("us.zoom.ZoomDaemon"), None);
+
+        // Two applications in one family is a tie, and a tie is not an answer.
+        let tied = AppIndex {
+            by_id: [
+                ("com.google.chrome".to_string(), owner("Chrome")),
+                ("com.google.keystone".to_string(), owner("Keystone")),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        // Where a prefix names one application exactly, that is the answer even
+        // though a shallower prefix would be a tie.
+        assert_eq!(
+            tied.owner_of("com.google.keystone.agent").map(|o| o.name),
+            Some("Keystone".into())
+        );
+        assert_eq!(
+            tied.owner_of("com.google.Chrome.helper").map(|o| o.name),
+            Some("Chrome".into()),
+            "the deeper prefix that does resolve is still used"
+        );
+        assert_eq!(
+            tied.owner_of("com.google.SomeUpdater"),
+            None,
+            "the only prefix left is a tie between two applications, so nothing is claimed"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_program_files_path_names_the_product_folder() {
+        assert_eq!(
+            install_folder_owning(Path::new(
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+            )),
+            Some("Google".into())
+        );
+        // ` (x86)` belongs to the root, so the product is the folder after it.
+        assert_eq!(
+            install_folder_owning(Path::new(
+                r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe"
+            )),
+            Some("Mozilla Firefox".into())
+        );
+        assert_eq!(
+            install_folder_owning(Path::new(
+                r"C:\program files (x86)\MOZILLA Firefox\firefox.exe"
+            )),
+            Some("MOZILLA Firefox".into()),
+            "found without regard to case, shown exactly as the folder is named"
+        );
+        assert_eq!(
+            install_folder_owning(Path::new(r"D:\tools\bin\thing.exe")),
+            None
+        );
+    }
+
+    #[test]
+    fn an_entry_goes_to_the_list_its_source_declares() {
+        let mut login = StartupItem::new(
+            "login-item://Docker",
+            "Docker",
+            StartupSource::LoginItem,
+            StartupScope::User,
+        );
+        let mut daemon = StartupItem::new(
+            "/Library/LaunchDaemons/com.docker.vmnetd.plist",
+            "com.docker.vmnetd",
+            StartupSource::LaunchDaemon,
+            StartupScope::System,
+        );
+        categorise(&mut login);
+        categorise(&mut daemon);
+        assert_eq!(login.category, StartupCategory::OpenAtLogin);
+        assert_eq!(daemon.category, StartupCategory::Background);
     }
 }
 
@@ -307,6 +827,24 @@ fn in_hidden_home_dir(program: &Path) -> bool {
         .next()
         .map(|first| first.as_os_str().to_string_lossy().starts_with('.'))
         .unwrap_or(false)
+}
+
+/// What happens to every entry once both platforms have finished collecting them.
+///
+/// Trust comes first because an entry whose path names no application is filed
+/// under whoever signed it, and that is only known once the signature has been
+/// asked about. On macOS that question costs one `codesign` process per entry, so
+/// it is asked in parallel: ~870 sequential calls took 8 s on an M1 Pro, and the
+/// same calls across the available cores take under 1 s.
+fn finish(items: &mut [StartupItem]) {
+    use rayon::prelude::*;
+
+    items.par_iter_mut().for_each(apply_trust);
+    attribute_owners(items);
+    for item in items.iter_mut() {
+        categorise(item);
+    }
+    sort_items(items);
 }
 
 /// Order user-owned entries first; inside a scope, alphabetically.
@@ -369,10 +907,11 @@ mod macos {
                 Ok(entries) => entries,
                 Err(error) => {
                     if error.kind() != std::io::ErrorKind::NotFound {
-                        out.notes.push(format!(
-                            "{} could not be listed: {error}",
-                            root.dir.display()
-                        ));
+                        out.notes.push(StartupNote {
+                            kind: StartupNoteKind::UnreadableRoot,
+                            subject: root.dir.display().to_string(),
+                            detail: error.to_string(),
+                        });
                     }
                     continue;
                 }
@@ -395,8 +934,8 @@ mod macos {
                 }
             }
         }
-        out.items.extend(login_items());
-        sort_items(&mut out.items);
+        out.items.extend(login_items(&mut out.notes));
+        finish(&mut out.items);
         out
     }
 
@@ -443,16 +982,16 @@ mod macos {
     /// entries Apple owns: a hundred unsigned system agents is not a signal.
     fn classify(item: &mut StartupItem, path: &Path, scope: StartupScope) {
         if item.system_vendor {
-            item.readonly_reason = Some("part of macOS".into());
+            item.lock = Some(StartupLock::OperatingSystem);
             item.risks.clear();
         } else if scope == StartupScope::System {
-            item.readonly_reason = Some("requires an administrator authorisation".into());
+            item.lock = Some(StartupLock::NeedsAuthorisation);
         } else {
             let writable = crate::is_user_writable(path)
                 && crate::is_user_writable(path.parent().unwrap_or(path));
             item.modifiable = writable;
             if !writable {
-                item.readonly_reason = Some("this file is not owned by you".into());
+                item.lock = Some(StartupLock::NotWritable);
             }
         }
     }
@@ -491,59 +1030,116 @@ mod macos {
             .unwrap_or(expanded)
     }
 
-    /// The login-item database macOS still maintains beside the modern
-    /// per-app setting. Reading it costs one file scan; changing it belongs to
-    /// System Settings, so these entries are reported read-only.
-    fn login_items() -> Vec<StartupItem> {
-        let path = home_dir().join(
-            "Library/Application Support/com.apple.backgroundtaskmanagementagent/backgrounditems.btm",
-        );
+    /// What System Settings shows under "Open at Login".
+    ///
+    /// Asking System Events rather than parsing a file is the point: the list is
+    /// maintained by backgroundtaskmanagement, its on-disk archive is a keychain
+    /// of security-scoped bookmarks that only root can resolve, and the one
+    /// readable copy in the home folder held 9 of the 30 groups the panel shows.
+    /// System Events *is* the panel's own view, so the two cannot disagree.
+    ///
+    /// Changing an entry still belongs to System Settings — the scriptable
+    /// `delete` is unreliable across macOS versions — so every row is reported
+    /// with its lock rather than with a toggle that might not hold.
+    fn login_items(notes: &mut Vec<StartupNote>) -> Vec<StartupItem> {
+        let script = "tell application \"System Events\"\n\
+            set collected to {}\n\
+            repeat with anItem in (every login item)\n\
+                set theName to \"\"\n\
+                try\n\
+                    set theName to name of anItem\n\
+                end try\n\
+                set thePath to \"\"\n\
+                try\n\
+                    set thePath to (path of anItem) as text\n\
+                end try\n\
+                set hiddenFlag to false\n\
+                try\n\
+                    set hiddenFlag to (hidden of anItem)\n\
+                end try\n\
+                set end of collected to theName & tab & thePath & tab & (hiddenFlag as text)\n\
+            end repeat\n\
+            set AppleScript's text item delimiters to linefeed\n\
+            return collected as text\n\
+            end tell";
+        let output = match std::process::Command::new("osascript")
+            .args(["-e", script])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).into_owned()
+            }
+            Ok(output) => {
+                let reason = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                notes.push(StartupNote {
+                    kind: StartupNoteKind::LoginItemsUnavailable,
+                    subject: String::new(),
+                    detail: if reason.is_empty() {
+                        "osascript failed".into()
+                    } else {
+                        reason
+                    },
+                });
+                return Vec::new();
+            }
+            Err(error) => {
+                notes.push(StartupNote {
+                    kind: StartupNoteKind::LoginItemsUnavailable,
+                    subject: String::new(),
+                    detail: error.to_string(),
+                });
+                return Vec::new();
+            }
+        };
+
+        parse_login_items(&output)
+    }
+
+    /// Turn the script's report into entries. One line per item, tab-separated:
+    /// name, path, and whether it launches hidden.
+    pub(super) fn parse_login_items(output: &str) -> Vec<StartupItem> {
         let mut items = Vec::new();
-        for found in printable_paths(&path, 8) {
-            if !found.contains("/Applications/") && !found.starts_with("/Library/") {
+        for line in output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
+            let mut fields = line.split('\t');
+            let name = fields.next().unwrap_or_default().trim();
+            if name.is_empty() {
                 continue;
             }
-            let label = Path::new(&found)
-                .file_name()
-                .map(|name| name.to_string_lossy().trim_end_matches(".app").to_string())
-                .unwrap_or_else(|| found.clone());
+            // System Events reports `missing value` for an item whose file is
+            // gone, which is the interesting case rather than a reason to drop it.
+            let path = fields.next().unwrap_or_default().trim();
+            let path = if path.is_empty() || path == "missing value" {
+                String::new()
+            } else {
+                path.to_string()
+            };
+            let hidden = fields.next().unwrap_or_default().trim() == "true";
             let mut item = StartupItem::builder(
-                found.clone(),
-                label,
+                format!("login-item://{name}"),
+                name.to_string(),
                 StartupSource::LoginItem,
                 StartupScope::User,
             );
-            item.command = found.clone();
-            judge_program(&mut item, Some(Path::new(&found)));
-            item.readonly_reason = Some("login items are managed in System Settings".into());
+            // Left empty rather than filled with the name: repeating the name under
+            // itself says nothing, and the page can say what is actually true.
+            item.command = path.clone();
+            item.hidden = hidden;
+            judge_program(
+                &mut item,
+                (!path.is_empty()).then(|| Path::new(path.as_str())),
+            );
+            if hidden {
+                item.risks.push(StartupRisk::HiddenEntry);
+            }
+            item.modifiable = false;
+            item.lock = Some(StartupLock::ManagedBySystemSettings);
             items.push(item);
         }
         items
-    }
-
-    /// Pull printable absolute paths out of a binary archive without a parser.
-    fn printable_paths(path: &Path, minimum: usize) -> Vec<String> {
-        let Ok(bytes) = std::fs::read(path) else {
-            return Vec::new();
-        };
-        let mut found = Vec::new();
-        let mut current = String::new();
-        for byte in bytes {
-            if byte.is_ascii_graphic() || byte == b' ' {
-                current.push(byte as char);
-            } else {
-                if current.len() >= minimum && current.starts_with('/') {
-                    found.push(current.clone());
-                }
-                current.clear();
-            }
-        }
-        if current.len() >= minimum && current.starts_with('/') {
-            found.push(current);
-        }
-        found.sort();
-        found.dedup();
-        found
     }
 
     pub fn set_enabled(id: &str, enabled: bool) -> Result<StartupItem, String> {
@@ -552,10 +1148,7 @@ mod macos {
             .find(id)
             .ok_or_else(|| "That startup item is no longer there.".to_string())?;
         if !item.modifiable {
-            return Err(item
-                .readonly_reason
-                .clone()
-                .unwrap_or_else(|| "Squid cannot change this item.".into()));
+            return Err(LOCK_REFUSAL.to_string());
         }
         let path = PathBuf::from(id);
         let to = if enabled {
@@ -678,6 +1271,54 @@ mod tests {
         )
         .expect("write plist");
         path
+    }
+
+    #[test]
+    fn a_login_item_report_becomes_entries_that_cannot_be_touched() {
+        // The shape System Events answers with: name, path, hidden. Nothing about a
+        // real machine is assumed, so the three rows are a bundle that is there, one
+        // that is gone, and the `missing value` an item whose file vanished is
+        // reported as. Dropping the last two would hide the entries worth seeing.
+        let f = fixture("loginitems");
+        let present = f.home.join("Keeper.app");
+        std::fs::create_dir_all(&present).expect("bundle");
+        let gone = f.home.join("Uninstalled.app");
+        let report = format!(
+            "Keeper\t{}\tfalse\nUninstalled\t{}\tfalse\nDoubao\tmissing value\ttrue\n",
+            present.display(),
+            gone.display()
+        );
+
+        let mut items = macos::parse_login_items(&report);
+        assert_eq!(items.len(), 3);
+        // Which list an entry belongs to is settled once, over the whole inventory,
+        // by the same step the real inventory runs.
+        for item in &mut items {
+            categorise(item);
+        }
+
+        for item in &items {
+            assert_eq!(item.source, StartupSource::LoginItem);
+            assert_eq!(item.scope, StartupScope::User);
+            assert_eq!(item.category, StartupCategory::OpenAtLogin);
+            assert!(!item.modifiable, "macOS owns this list");
+            assert_eq!(item.lock, Some(StartupLock::ManagedBySystemSettings));
+            assert_eq!(item.id, format!("login-item://{}", item.name));
+        }
+
+        assert_eq!(items[0].program.as_deref(), Some(present.as_path()));
+        assert!(
+            items[1].risks.contains(&StartupRisk::MissingTarget),
+            "an entry pointing at nothing says so rather than disappearing"
+        );
+
+        let vanished = &items[2];
+        assert!(
+            vanished.command.is_empty(),
+            "a name is not a path, and repeating one under the other says nothing"
+        );
+        assert!(vanished.hidden);
+        assert!(vanished.risks.contains(&StartupRisk::HiddenEntry));
     }
 
     #[test]
@@ -860,8 +1501,7 @@ mod windows {
                         program_of_command(&command).as_deref().map(Path::new),
                     );
                     if scope == StartupScope::System {
-                        item.readonly_reason =
-                            Some("requires an administrator authorisation".into());
+                        item.lock = Some(StartupLock::NeedsAuthorisation);
                     } else {
                         item.modifiable = true;
                     }
@@ -903,11 +1543,11 @@ mod windows {
                 item.modified_ms = modified_ms(&path);
                 judge_program(&mut item, Some(&path));
                 if scope == StartupScope::System {
-                    item.readonly_reason = Some("requires an administrator authorisation".into());
+                    item.lock = Some(StartupLock::NeedsAuthorisation);
                 } else {
                     item.modifiable = crate::is_user_writable(&folder);
                     if !item.modifiable {
-                        item.readonly_reason = Some("this folder is not writable".into());
+                        item.lock = Some(StartupLock::NotWritable);
                     }
                 }
                 out.items.push(item);
@@ -917,7 +1557,7 @@ mod windows {
         out.items.extend(parked_entries());
         out.items.extend(scheduled_tasks());
         out.items.extend(services());
-        sort_items(&mut out.items);
+        finish(&mut out.items);
         out
     }
 
@@ -978,7 +1618,7 @@ mod windows {
             );
             item.modifiable = hive_name == "HKCU";
             if !item.modifiable {
-                item.readonly_reason = Some("requires an administrator authorisation".into());
+                item.lock = Some(StartupLock::NeedsAuthorisation);
             }
             items.push(item);
         }
@@ -1058,7 +1698,7 @@ mod windows {
             if item.system_vendor {
                 item.risks.clear();
             }
-            item.readonly_reason = Some("scheduled tasks are read-only in this release".into());
+            item.lock = Some(StartupLock::NotManaged);
             items.push(item);
         }
         items
@@ -1152,7 +1792,7 @@ mod windows {
             if item.system_vendor {
                 item.risks.clear();
             }
-            item.readonly_reason = Some("services are read-only in this release".into());
+            item.lock = Some(StartupLock::NotManaged);
             items.push(item);
         }
         items
@@ -1180,10 +1820,7 @@ mod windows {
             .cloned()
             .ok_or_else(|| "That startup item is no longer there.".to_string())?;
         if !item.modifiable {
-            return Err(item
-                .readonly_reason
-                .clone()
-                .unwrap_or_else(|| "Squid cannot change this item.".into()));
+            return Err(LOCK_REFUSAL.to_string());
         }
         match item.source {
             StartupSource::RegistryRun => set_registry_enabled(&item, enabled),

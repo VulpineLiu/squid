@@ -2044,6 +2044,7 @@ mod tests {
                 name: "Demo".into(),
                 bundle_id: Some("com.example.Demo".into()),
                 path: "/Applications/Demo.app".into(),
+                icon_source: None,
                 version: Some("1.0".into()),
                 size: Bytes(1 << 20),
                 source: "Applications".into(),
@@ -2602,6 +2603,7 @@ mod tests {
             .map(|index| AppInfo {
                 name: format!("Sq{index:02}"),
                 path: format!("/Applications/Sq{index:02}.app").into(),
+                icon_source: None,
                 source: "Applications".into(),
                 size: Bytes(1 << 20),
                 ..Default::default()

@@ -8,8 +8,9 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "../i18n";
+import { api } from "../lib/api";
 import { formatBytes, formatCount, shortPath } from "../lib/format";
 import type { AppInfo, DeleteMode } from "../types";
 import type { AppsWorkspace } from "../hooks/useAppsWorkspace";
@@ -27,6 +28,55 @@ import {
   useToast,
 } from "../components/ui";
 
+const iconCache = new Map<string, string | null>();
+const iconRequests = new Map<string, Promise<string | null>>();
+
+function loadAppIcon(app: AppInfo): Promise<string | null> {
+  const key = app.bundle_id || app.path;
+  if (iconCache.has(key)) return Promise.resolve(iconCache.get(key) ?? null);
+  const existing = iconRequests.get(key);
+  if (existing) return existing;
+  const request = api
+    .appIcon(key)
+    .catch(() => null)
+    .then((icon) => {
+      iconCache.set(key, icon);
+      iconRequests.delete(key);
+      return icon;
+    });
+  iconRequests.set(key, request);
+  return request;
+}
+
+function AppGlyph({ app, large = false }: { app: AppInfo; large?: boolean }) {
+  const key = app.bundle_id || app.path;
+  const [icon, setIcon] = useState<string | null>(() => iconCache.get(key) ?? null);
+
+  useEffect(() => {
+    if (iconCache.has(key)) {
+      setIcon(iconCache.get(key) ?? null);
+      return;
+    }
+    let cancelled = false;
+    void loadAppIcon(app).then((next) => {
+      if (!cancelled) setIcon(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [app, key]);
+
+  const letter = app.name.trim().slice(0, 1).toUpperCase() || "?";
+  return (
+    <span
+      className={`app-glyph ${large ? "is-large" : ""} ${icon ? "has-icon" : ""}`}
+      aria-hidden="true"
+    >
+      {icon ? <img src={icon} alt="" /> : letter}
+    </span>
+  );
+}
+
 function AppRow({
   app,
   selected,
@@ -37,12 +87,9 @@ function AppRow({
   onSelect: () => void;
 }) {
   const { t } = useI18n();
-  const letter = app.name.trim().slice(0, 1).toUpperCase() || "?";
   return (
     <button className={`app-row ${selected ? "is-selected" : ""}`} onClick={onSelect}>
-      <span className="app-glyph" aria-hidden="true">
-        {letter}
-      </span>
+      <AppGlyph app={app} />
       <span className="app-row-copy">
         <span className="app-row-title">
           <strong>{app.name}</strong>
@@ -203,9 +250,7 @@ export function ApplicationsPage({
             ) : workspace.plan ? (
               <>
                 <div className="plan-head">
-                  <span className="app-glyph is-large">
-                    {workspace.plan.app.name.slice(0, 1).toUpperCase()}
-                  </span>
+                  <AppGlyph app={workspace.plan.app} large />
                   <div>
                     <span className="plan-kicker">{t("Removal plan", "卸载方案")}</span>
                     <h2>{workspace.plan.app.name}</h2>
@@ -303,12 +348,6 @@ export function ApplicationsPage({
                   <ShieldCheck size={26} />
                 </span>
                 <h2>{t("Choose an application", "选择一个应用")}</h2>
-                <p>
-                  {t(
-                    "Squid will map its caches, settings and support files before offering to remove anything.",
-                    "Squid 会先整理应用的缓存、设置与支持文件，再让您决定是否移除。",
-                  )}
-                </p>
               </div>
             )}
           </aside>
@@ -319,10 +358,6 @@ export function ApplicationsPage({
         <EmptyState
           icon={<AppWindow size={29} />}
           title={t("See what is installed", "查看已安装的应用")}
-          description={t(
-            "Scan your applications to remove an app completely, including files that would otherwise stay behind.",
-            "扫描应用后可连同原本会遗留的文件一起移除。",
-          )}
           action={
             <Button
               variant="primary"

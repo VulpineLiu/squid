@@ -292,10 +292,6 @@ export function CleanupInventory({
               ? categoryLabel(focus, lang)
               : t("Everything found in this scan", "本次扫描的全部项目")
           }
-          subtitle={t(
-            "Only checked items are touched. Protected items stay locked.",
-            "只会处理已勾选的项目，受保护项目始终保持锁定。",
-          )}
           action={
             focus ? (
               <Button variant="ghost" size="sm" onClick={() => setFocus(null)}>
@@ -369,8 +365,8 @@ export function CleanupInventory({
                 `文件将移入${bin}，之后可从历史记录中还原。`,
               )
             : t(
-                "Permanent removal cannot be undone. Squid re-checks every path before deleting it.",
-                "永久删除无法撤销。Squid 会在删除前重新检查每一个路径。",
+                "Permanent removal cannot be undone.",
+                "永久删除无法撤销。",
               )
         }
         confirmLabel={

@@ -1,116 +1,36 @@
 import {
-  AlertTriangle,
   AppWindow,
   ArrowRight,
   Boxes,
-  CheckCircle2,
   ChevronRight,
   CircleGauge,
+  Cpu,
   HardDrive,
+  Laptop,
+  MemoryStick,
+  Microchip,
+  Monitor,
   ScanSearch,
-  ShieldCheck,
-  ShieldQuestion,
   Sparkles,
   WandSparkles,
 } from "lucide-react";
 import { useI18n } from "../i18n";
-import { formatBytes, formatCount, percent } from "../lib/format";
-import type { Bootstrap, SystemSnapshot } from "../types";
+import {
+  formatBytes,
+  formatCount,
+  formatMemoryBytes,
+  percent,
+} from "../lib/format";
+import type { Bootstrap, PageId, SystemSnapshot, Volume } from "../types";
 import type { ScanWorkspace } from "../hooks/useScanWorkspace";
-import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
-import type { PageId } from "../types";
 import { CategorySummary } from "../components/CleanupView";
 import {
   Button,
-  Gauge,
   PageHeader,
   ProgressCard,
   SectionTitle,
   UsageBar,
 } from "../components/ui";
-
-/**
- * The security strip: what protects the machine, and whether anything is waiting.
- *
- * It says "not scanned yet" rather than showing a green tick. The whole point of
- * the roadmap's rule — never render an unknown as healthy — is that a strip which
- * defaults to calm teaches people to trust a colour that has not earned it.
- */
-function SecurityStrip({
-  security,
-  onNavigate,
-}: {
-  security: SecurityWorkspace;
-  onNavigate: (page: PageId) => void;
-}) {
-  const { t } = useI18n();
-  const status = security.status;
-  if (!status) {
-    return (
-      <section className="security-strip tone-neutral">
-        <span className="metric-icon">
-          <ShieldQuestion size={18} />
-        </span>
-        <span className="quick-copy">
-          <strong>{t("Reading this machine's protection…", "正在读取本机防护状态…")}</strong>
-        </span>
-      </section>
-    );
-  }
-  const scan = status.scan;
-  const alarmed = status.confirmed > 0;
-  const tone = alarmed ? "danger" : scan ? (scan.coverageComplete ? "success" : "warning") : "neutral";
-  const headline = alarmed
-    ? t(
-        `${status.confirmed} confirmed finding${status.confirmed === 1 ? "" : "s"} need a decision`,
-        `有 ${status.confirmed} 项已确认发现需要处理`,
-      )
-    : !scan
-      ? t("No scan of this machine yet", "尚未进行过扫描")
-      : !scan.coverageComplete
-        ? t("Nothing found — but coverage was limited", "未发现威胁，但覆盖范围受限")
-        : t("Nothing outstanding from the last scan", "上次扫描没有待处理项");
-  // One line, in the order someone asks about it: what guards the machine now,
-  // what squid last looked at, and whether it could look at everything.
-  const provider = !status.protection.known
-    ? t("protection unknown", "防护状态未知")
-    : status.protection.provider === "xprotect"
-      ? "XProtect"
-      : status.protection.productName || "Antivirus";
-  const detail = scan
-    ? t(
-        `${provider} · ${formatCount(scan.examined)} files checked · ${
-          scan.coverageComplete ? "full coverage" : "coverage limited"
-        }`,
-        `${provider} · 已检查 ${formatCount(scan.examined)} 个文件 · ${
-          scan.coverageComplete ? "覆盖完整" : "覆盖受限"
-        }`,
-      )
-    : t(
-        `${provider} · quick scan covers login items, apps and downloads`,
-        `${provider} · 快速扫描覆盖登录项、应用与下载目录`,
-      );
-
-  return (
-    <section className={`security-strip tone-${tone}`}>
-      <span className="metric-icon">
-        {alarmed ? <AlertTriangle size={18} /> : scan ? <CheckCircle2 size={18} /> : <ShieldQuestion size={18} />}
-      </span>
-      <div className="quick-copy">
-        <strong>{headline}</strong>
-        <small>{detail}</small>
-      </div>
-      <Button
-        variant={alarmed ? "danger" : "ghost"}
-        size="sm"
-        icon={<ArrowRight size={14} />}
-        onClick={() => onNavigate("security")}
-      >
-        {alarmed ? t("Review findings", "查看发现") : t("Open security", "打开安全")}
-      </Button>
-    </section>
-  );
-}
 
 function greeting(lang: "zh" | "en"): string {
   const hour = new Date().getHours();
@@ -125,17 +45,80 @@ function greeting(lang: "zh" | "en"): string {
   return "Good evening";
 }
 
+function coreLabel(snapshot: SystemSnapshot | null, t: (en: string, zh: string) => string) {
+  if (!snapshot) return t("Reading processor…", "正在读取处理器…");
+  const { physical_cores: physical, logical_cores: logical } = snapshot.cpu;
+  if (physical === logical) {
+    return t(`${physical} cores`, `${physical} 核`);
+  }
+  return t(`${physical} cores / ${logical} threads`, `${physical} 核 / ${logical} 线程`);
+}
+
+function machineRows(
+  bootstrap: Bootstrap,
+  snapshot: SystemSnapshot | null,
+  volume: Volume | null,
+  t: (en: string, zh: string) => string,
+) {
+  const model = bootstrap.hardware.split(" · ")[0]?.trim() || bootstrap.hardware;
+  const rows = [
+    {
+      key: "os",
+      icon: Monitor,
+      label: t("Operating system", "操作系统"),
+      value: bootstrap.osVersion || bootstrap.osName,
+    },
+    {
+      key: "model",
+      icon: Laptop,
+      label: t("Computer", "本机型号"),
+      value: model,
+    },
+    {
+      key: "cpu",
+      icon: Cpu,
+      label: t("Processor", "处理器"),
+      value: snapshot
+        ? snapshot.cpu.brand || t("Unknown processor", "未知处理器")
+        : t("Reading processor…", "正在读取处理器…"),
+    },
+    {
+      key: "memory",
+      icon: MemoryStick,
+      label: t("Memory", "内存"),
+      value: snapshot
+        ? formatMemoryBytes(snapshot.memory.total)
+        : t("Reading memory…", "正在读取内存…"),
+    },
+    {
+      key: "disk",
+      icon: HardDrive,
+      label: t("Primary disk", "主硬盘"),
+      value: volume
+        ? `${volume.name || volume.mount_point} · ${formatBytes(volume.total, 0)} · ${volume.filesystem.toUpperCase()}`
+        : t("Reading disks…", "正在读取磁盘…"),
+    },
+  ];
+  if (snapshot?.host.gpu) {
+    rows.push({
+      key: "gpu",
+      icon: Microchip,
+      label: t("Graphics", "显卡"),
+      value: snapshot.host.gpu,
+    });
+  }
+  return rows;
+}
+
 export function OverviewPage({
   bootstrap,
   snapshot,
   cleanup,
-  security,
   onNavigate,
 }: {
   bootstrap: Bootstrap;
   snapshot: SystemSnapshot | null;
   cleanup: ScanWorkspace;
-  security: SecurityWorkspace;
   onNavigate: (page: PageId) => void;
 }) {
   const { t, lang } = useI18n();
@@ -151,6 +134,11 @@ export function OverviewPage({
         .filter((item) => !item.lock)
         .reduce((sum, item) => sum + item.onDisk, 0)
     : 0;
+  const visibleVolumes = (snapshot?.volumes ?? []).slice(0, 2);
+  const startScan = () => {
+    if (cleanup.result) onNavigate("cleanup");
+    else void cleanup.runScan();
+  };
 
   return (
     <div className="page overview-page">
@@ -158,37 +146,25 @@ export function OverviewPage({
         eyebrow={`${greeting(lang)} · ${bootstrap.osName}`}
         title={t("Your computer, at its best.", "让电脑始终保持在最佳状态。")}
         description={t(
-          "Cleaning and security are two different scans here — one frees space, the other checks for threats.",
-          "清理与安全是两种不同的扫描：一个释放空间，另一个检查威胁。",
+          "One safe scan tidies clutter, space and everyday performance.",
+          "一次安全扫描，整理垃圾、空间与日常性能。",
         )}
         actions={
           <Button
             variant="primary"
             size="lg"
             icon={<Sparkles size={17} />}
-            onClick={() => {
-              if (cleanup.result) onNavigate("cleanup");
-              else void cleanup.runScan();
-            }}
+            onClick={startScan}
             disabled={cleanup.scanning}
           >
-            {cleanup.result
-              ? t("Review cleanup scan", "查看清理结果")
-              : t("Cleanup scan", "清理扫描")}
+            {cleanup.scanning
+              ? t("Scanning…", "扫描中…")
+              : cleanup.result
+                ? t("Review smart scan", "查看智能扫描")
+                : t("Smart scan", "智能扫描")}
           </Button>
         }
       />
-
-      {security.scanning ? (
-        <ProgressCard
-          progress={security.progress}
-          title={t("Scanning for malware", "正在扫描恶意软件")}
-          compact
-          onCancel={() => void security.cancel()}
-        />
-      ) : null}
-
-      <SecurityStrip security={security} onNavigate={onNavigate} />
 
       <section className="overview-hero">
         <div className="overview-hero-copy">
@@ -219,35 +195,19 @@ export function OverviewPage({
             <Button
               variant="primary"
               icon={cleanup.result ? <ArrowRight size={16} /> : <ScanSearch size={16} />}
-              onClick={() => {
-                if (cleanup.result) onNavigate("cleanup");
-                else void cleanup.runScan();
-              }}
+              onClick={startScan}
               disabled={cleanup.scanning}
             >
               {cleanup.result
                 ? t("Choose what to clean", "选择清理项目")
-                : t("Start a cleanup scan", "开始清理扫描")}
+                : t("Start smart scan", "开始智能扫描")}
             </Button>
-            {/* Two scans, two names, one screen. Merging them would let a user
-                believe the clutter sweep also looked for threats, and it does
-                not; this is the line the roadmap drew on purpose. */}
             <Button
               variant="secondary"
-              icon={<ShieldCheck size={16} />}
-              onClick={() => void security.start("quick")}
-              disabled={security.scanning}
-            >
-              {security.scanning
-                ? t("Security scan…", "安全扫描中…")
-                : t("Quick security scan", "安全快速扫描")}
-            </Button>
-            <Button
-              variant="ghost"
               icon={<CircleGauge size={16} />}
               onClick={() => onNavigate("system")}
             >
-              {t("Live system", "实时监控")}
+              {t("Live monitor", "实时监控")}
             </Button>
           </div>
           <div className="hero-assurances">
@@ -257,25 +217,23 @@ export function OverviewPage({
           </div>
         </div>
 
-        <div className="overview-gauge-wrap">
-          <div className="gauge-halo" />
-          <Gauge value={usedPercent} size={226} stroke={16} tone={usedPercent > 85 ? "danger" : "primary"}>
-            <span className="gauge-caption">{t("Disk in use", "磁盘已用")}</span>
-            <strong className="gauge-number">{Math.round(usedPercent)}%</strong>
-            <span className="gauge-sub">
-              {volume
-                ? t(
-                    `${formatBytes(volume.free)} free`,
-                    `剩余 ${formatBytes(volume.free)}`,
-                  )
-                : t("Reading volume…", "正在读取磁盘…")}
-            </span>
-          </Gauge>
-          <div className="hero-device">
-            <HardDrive size={14} />
-            <span>{bootstrap.hardware}</span>
+        <aside className="overview-machine">
+          <span className="machine-title">{t("This machine", "本机配置")}</span>
+          <div className="machine-list">
+            {machineRows(bootstrap, snapshot, volume, t).map((row) => {
+              const Icon = row.icon;
+              return (
+                <div className="machine-row" key={row.key}>
+                  <span className="machine-icon">
+                    <Icon size={15} />
+                  </span>
+                  <span className="machine-label">{row.label}</span>
+                  <strong title={row.value}>{row.value}</strong>
+                </div>
+              );
+            })}
           </div>
-        </div>
+        </aside>
       </section>
 
       {cleanup.scanning ? (
@@ -286,14 +244,118 @@ export function OverviewPage({
         />
       ) : null}
 
+      <section className="overview-metrics">
+        <article className="metric-panel">
+          <div className="metric-panel-head">
+            <span className="metric-icon tone-primary">
+              <Cpu size={18} />
+            </span>
+            <div>
+              <strong>{t("Processor", "处理器")}</strong>
+              <span>{coreLabel(snapshot, t)}</span>
+            </div>
+            <b>{Math.round(snapshot?.cpu.total ?? 0)}%</b>
+          </div>
+          <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="primary" />
+          <small>
+            {snapshot?.cpu.brand || t("Processor details unavailable", "暂无处理器信息")}
+          </small>
+        </article>
+
+        <article className="metric-panel">
+          <div className="metric-panel-head">
+            <span className="metric-icon tone-violet">
+              <MemoryStick size={18} />
+            </span>
+            <div>
+              <strong>{t("Memory", "内存")}</strong>
+              <span>
+                {snapshot
+                  ? `${formatMemoryBytes(snapshot.memory.used)} / ${formatMemoryBytes(
+                      snapshot.memory.total,
+                    )}`
+                  : t("Sampling…", "正在采样…")}
+              </span>
+            </div>
+            <b>{Math.round(memoryPercent)}%</b>
+          </div>
+          <UsageBar used={memoryPercent} total={100} tone="violet" />
+          <small>
+            {snapshot?.memory.compressed !== null &&
+            snapshot?.memory.compressed !== undefined
+              ? t(
+                  `Compressed ${formatMemoryBytes(snapshot.memory.compressed)} · Wired ${formatMemoryBytes(
+                    snapshot.memory.wired ?? 0,
+                  )}`,
+                  `压缩 ${formatMemoryBytes(snapshot.memory.compressed)} · 固定 ${formatMemoryBytes(
+                    snapshot.memory.wired ?? 0,
+                  )}`,
+                )
+              : snapshot
+                ? t(
+                    `${formatCount(snapshot.processes)} processes running`,
+                    `${formatCount(snapshot.processes)} 个进程正在运行`,
+                  )
+                : t("Reading activity", "正在读取活动")}
+          </small>
+        </article>
+
+        <article className="metric-panel overview-storage-card">
+          <div className="metric-panel-head">
+            <span className="metric-icon tone-success">
+              <HardDrive size={18} />
+            </span>
+            <div>
+              <strong>{t("Storage", "存储空间")}</strong>
+              <span>
+                {snapshot
+                  ? t(
+                      `${formatCount(snapshot.volumes.length)} partitions`,
+                      `${formatCount(snapshot.volumes.length)} 个分区`,
+                    )
+                  : t("Reading volume…", "正在读取磁盘…")}
+              </span>
+            </div>
+            <b>{Math.round(usedPercent)}%</b>
+          </div>
+          {visibleVolumes.length > 0 ? (
+            <div className="storage-volume-list">
+              {visibleVolumes.map((candidate) => {
+                const candidateUsed = candidate.total - candidate.free;
+                const candidatePercent = percent(candidateUsed, candidate.total);
+                return (
+                  <div className="storage-volume" key={candidate.mount_point}>
+                    <div className="storage-volume-head">
+                      <strong>
+                        {candidate.name || candidate.mount_point}
+                        {candidate.is_root ? ` · ${t("System", "系统")}` : ""}
+                      </strong>
+                      <span>
+                        {t(
+                          `Total ${formatBytes(candidate.total)} · ${formatBytes(candidate.free)} free`,
+                          `总 ${formatBytes(candidate.total)} · 可用 ${formatBytes(candidate.free)}`,
+                        )}
+                      </span>
+                    </div>
+                    <UsageBar
+                      used={candidateUsed}
+                      total={candidate.total}
+                      tone={candidatePercent > 88 ? "danger" : "success"}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <UsageBar used={0} total={100} tone="success" />
+          )}
+        </article>
+      </section>
+
       {cleanup.result && !cleanup.scanning ? (
         <section className="overview-found">
           <SectionTitle
             title={t("What the scan found", "扫描发现")}
-            subtitle={t(
-              "Uncheck anything you want to keep.",
-              "不想清理的项目可以随时取消勾选。",
-            )}
             action={
               <Button variant="ghost" size="sm" onClick={() => onNavigate("cleanup")}>
                 {t("Open cleanup", "打开清理")}
@@ -316,17 +378,7 @@ export function OverviewPage({
           subtitle={t("The right tool for the next five minutes.", "用几分钟完成最常用的事。")}
         />
         <div className="quick-grid">
-          <button className="quick-card tone-primary" onClick={() => onNavigate("security")}>
-            <span className="quick-icon">
-              <ShieldCheck size={22} />
-            </span>
-            <span className="quick-copy">
-              <strong>{t("Security", "安全")}</strong>
-              <small>{t("Scan, review findings, quarantine", "扫描、查看发现、隔离")}</small>
-            </span>
-            <ChevronRight size={17} />
-          </button>
-          <button className="quick-card tone-primary" onClick={() => onNavigate("applications")}>
+          <button className="quick-card tone-info" onClick={() => onNavigate("applications")}>
             <span className="quick-icon">
               <AppWindow size={22} />
             </span>
@@ -336,7 +388,7 @@ export function OverviewPage({
             </span>
             <ChevronRight size={17} />
           </button>
-          <button className="quick-card tone-neutral" onClick={() => onNavigate("storage")}>
+          <button className="quick-card tone-violet" onClick={() => onNavigate("storage")}>
             <span className="quick-icon">
               <Boxes size={22} />
             </span>
@@ -346,7 +398,7 @@ export function OverviewPage({
             </span>
             <ChevronRight size={17} />
           </button>
-          <button className="quick-card tone-primary" onClick={() => onNavigate("purge")}>
+          <button className="quick-card tone-violet" onClick={() => onNavigate("purge")}>
             <span className="quick-icon">
               <Sparkles size={22} />
             </span>
@@ -356,82 +408,6 @@ export function OverviewPage({
             </span>
             <ChevronRight size={17} />
           </button>
-        </div>
-      </section>
-
-      <section className="overview-metrics">
-        <div className="metric-panel">
-          <div className="metric-panel-head">
-            <span className="metric-icon tone-primary">
-              <CircleGauge size={18} />
-            </span>
-            <div>
-              <strong>{t("Processor", "处理器")}</strong>
-              <span>
-                {snapshot
-                  ? `${snapshot.cpu.logical_cores} ${t("cores", "核心")}`
-                  : t("Sampling…", "正在采样…")}
-              </span>
-            </div>
-            <b>{Math.round(snapshot?.cpu.total ?? 0)}%</b>
-          </div>
-          <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="primary" />
-          <small>
-            {snapshot?.cpu.brand || t("Processor details unavailable", "暂无处理器信息")}
-          </small>
-        </div>
-        <div className="metric-panel">
-          <div className="metric-panel-head">
-            <span className="metric-icon tone-neutral">
-              <Boxes size={18} />
-            </span>
-            <div>
-              <strong>{t("Memory", "内存")}</strong>
-              <span>
-                {snapshot
-                  ? `${formatBytes(snapshot.memory.used)} / ${formatBytes(
-                      snapshot.memory.total,
-                    )}`
-                  : t("Sampling…", "正在采样…")}
-              </span>
-            </div>
-            <b>{Math.round(memoryPercent)}%</b>
-          </div>
-          <UsageBar used={memoryPercent} total={100} tone="primary" />
-          <small>
-            {snapshot
-              ? t(
-                  `${formatCount(snapshot.processes)} processes running`,
-                  `${formatCount(snapshot.processes)} 个进程正在运行`,
-                )
-              : t("Reading activity", "正在读取活动")}
-          </small>
-        </div>
-        <div className="metric-panel">
-          <div className="metric-panel-head">
-            <span
-              className={`metric-icon ${
-                usedPercent > 85 ? "tone-warning" : "tone-success"
-              }`}
-            >
-              <HardDrive size={18} />
-            </span>
-            <div>
-              <strong>{t("Storage", "存储空间")}</strong>
-              <span>
-                {volume
-                  ? `${formatBytes(volume.free)} ${t("available", "可用")}`
-                  : t("Reading volume…", "正在读取磁盘…")}
-              </span>
-            </div>
-            <b>{Math.round(usedPercent)}%</b>
-          </div>
-          <UsageBar
-            used={usedPercent}
-            total={100}
-            tone={usedPercent > 85 ? "danger" : "success"}
-          />
-          <small>{volume?.mount_point || bootstrap.configPath}</small>
         </div>
       </section>
     </div>

@@ -5,6 +5,7 @@
 //! The engine still re-validates every path against the same safety policy and
 //! whitelist used by the CLI and TUI.
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use squid_core::ledger::{self, Session};
 use squid_core::paths;
 use squid_core::progress::{CancelToken, Event, Progress};
@@ -31,6 +32,7 @@ pub struct AppState {
     scans: Mutex<HashMap<String, ScanReport>>,
     plans: Mutex<HashMap<String, UninstallPlan>>,
     apps: Mutex<Vec<AppInfo>>,
+    app_icons: Mutex<HashMap<String, Option<String>>>,
     sampler: Mutex<Sampler>,
 }
 
@@ -620,7 +622,36 @@ pub async fn apps_scan(app: AppHandle, job_id: String) -> Result<AppsView, Strin
     if let Ok(mut cache) = app.state::<AppState>().apps.lock() {
         *cache = apps.clone();
     }
+    if let Ok(mut icons) = app.state::<AppState>().app_icons.lock() {
+        icons.clear();
+    }
     Ok(AppsView { apps, total })
+}
+
+/// Resolve one app's icon lazily so scanning does not pay for artwork the user
+/// never opens. The result is cached; a missing icon is cached as `None` too.
+#[tauri::command]
+pub async fn app_icon(app: AppHandle, app_key: String) -> Result<Option<String>, String> {
+    if let Some(cached) = AppState::lock(&app.state::<AppState>().app_icons)?
+        .get(&app_key)
+        .cloned()
+    {
+        return Ok(cached);
+    }
+    let chosen = AppState::lock(&app.state::<AppState>().apps)?
+        .iter()
+        .find(|candidate| candidate.key() == app_key)
+        .cloned();
+    let Some(chosen) = chosen else {
+        return Ok(None);
+    };
+    let png =
+        tauri::async_runtime::spawn_blocking(move || squid_platform::apps::icon_png(&chosen, 64))
+            .await
+            .map_err(|error| format!("Could not read the application icon: {error}"))?;
+    let icon = png.map(|bytes| format!("data:image/png;base64,{}", STANDARD.encode(bytes)));
+    AppState::lock(&app.state::<AppState>().app_icons)?.insert(app_key, icon.clone());
+    Ok(icon)
 }
 
 #[derive(Clone, serde::Serialize)]

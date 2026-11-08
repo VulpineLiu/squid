@@ -41,7 +41,6 @@ export function PurgePage({
   return (
     <div className="page">
       <PageHeader
-        eyebrow={t("Deep Clean", "深度清理")}
         title={t("Find the space normal cleaning misses.", "找到普通清理遗漏的空间。")}
         description={t(
           "Search projects for rebuildable build folders and dependency caches. Git history and source files are never selected.",
@@ -69,12 +68,6 @@ export function PurgePage({
             )}
             rows={3}
           />
-          <span className="field-help">
-            {t(
-              "Squid uses these as search roots, not as delete targets.",
-              "这些路径只用于查找，不会作为删除目标。",
-            )}
-          </span>
         </div>
         <div className="deep-option-side">
           <label className="field-label" htmlFor="purge-age">

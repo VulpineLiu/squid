@@ -116,6 +116,7 @@ export interface AppInfo {
   name: string;
   bundle_id: string | null;
   path: string;
+  icon_source: string | null;
   version: string | null;
   size: number;
   source: string;
@@ -212,6 +213,7 @@ export interface SystemSnapshot {
     os_name: string;
     os_version: string;
     hardware: string;
+    gpu: string;
     hostname: string;
     user: string;
     arch: string;
@@ -440,10 +442,31 @@ export type StartupRisk =
   | "missing-target"
   | "in-temp-dir"
   | "unsigned"
+  | "signature-unreadable"
   | "script-interpreter"
   | "recently-created"
   | "hidden-entry"
   | "hidden-home-directory";
+export type StartupCategory = "open-at-login" | "background";
+/** Something squid has to admit it could not read; the page says it in its own language. */
+export interface StartupNote {
+  kind: "unreadable-root" | "login-items-unavailable";
+  subject: string;
+  detail: string;
+}
+export type StartupLock =
+  | "operating-system"
+  | "needs-authorisation"
+  | "not-writable"
+  | "managed-by-system-settings"
+  | "not-managed";
+
+/** The application an entry belongs to, as both operating systems group them. */
+export interface StartupOwner {
+  name: string;
+  bundlePath: string | null;
+  vendor: boolean;
+}
 
 export interface StartupItem {
   id: string;
@@ -458,21 +481,22 @@ export interface StartupItem {
   systemVendor: boolean;
   disabled: boolean;
   modifiable: boolean;
-  readonlyReason: string | null;
+  lock: StartupLock | null;
   hidden: boolean;
   modifiedMs: number | null;
   risks: StartupRisk[];
+  category: StartupCategory;
+  owner: StartupOwner | null;
 }
 
 export interface StartupView {
   items: StartupItem[];
-  notes: string[];
-  userCount: number;
-  systemCount: number;
-  disabledCount: number;
+  notes: StartupNote[];
+  loginCount: number;
+  backgroundCount: number;
+  vendorCount: number;
   actionableCount: number;
   riskyCount: number;
-  sources: string[];
 }
 
 export interface StartupChange {

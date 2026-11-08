@@ -22,7 +22,7 @@ The desktop app supports macOS 12+ and Windows 10/11 x64. The CLI and TUI share 
 
 | Feature | Description |
 | --- | --- |
-| Computer overview | Disk health, common actions, and CPU, memory, and storage summaries |
+| Overview | Disk health, common actions, and CPU, memory, and storage summaries |
 | Daily cleanup | 38 built-in rules on macOS and 30 on Windows, covering app and browser caches, logs, crash reports, developer caches, Trash, and more |
 | Uninstall apps | Finds an app by name and builds one plan containing the app bundle plus preferences, caches, containers, or AppData leftovers |
 | Deep Clean | Finds rebuildable build output such as `node_modules`, disk images, installers, and stale downloads while protecting recently used projects |
@@ -39,7 +39,7 @@ Language settings offer only Simplified Chinese and English, with the current sy
 
 ### Sidebar
 
-- **Maintenance**: Computer overview, Daily cleanup, Uninstall apps, Deep Clean
+- **Maintenance**: Overview, Daily cleanup, Uninstall apps, Deep Clean
 - **Protection**: Security, Startup items
 - **Insights**: Storage, Real-time monitor
 - **Bottom**: History, Settings
