@@ -345,6 +345,8 @@ pub struct BootstrapView {
     os_name: String,
     os_version: String,
     hardware: String,
+    /// Static component facts (board/RAM/disk/GPU) for the overview panel.
+    hardware_info: squid_platform::HardwareInfo,
     arch: String,
     device: String,
     language: String,
@@ -368,6 +370,7 @@ pub fn bootstrap() -> BootstrapView {
         os_name: engine.platform().display_name(),
         os_version: engine.platform().os_version(),
         hardware: engine.platform().hardware_model(),
+        hardware_info: squid_platform::hardware_info(),
         arch: std::env::consts::ARCH.into(),
         device: match engine.platform().device() {
             squid_platform::Device::Mac => "mac".into(),
@@ -589,9 +592,17 @@ pub async fn purge_delete(
 }
 
 #[derive(Clone, serde::Serialize)]
+pub struct AppEntry {
+    #[serde(flatten)]
+    app: AppInfo,
+    /// `data:image/png;base64,…` of the app's icon (Windows only).
+    icon: Option<String>,
+}
+
+#[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppsView {
-    apps: Vec<AppInfo>,
+    apps: Vec<AppEntry>,
     total: u64,
 }
 
@@ -602,18 +613,44 @@ pub async fn apps_scan(app: AppHandle, job_id: String) -> Result<AppsView, Strin
     let reporter = ProgressReporter::start(app.clone(), job_id.clone(), "apps", progress.clone());
     let task = tauri::async_runtime::spawn_blocking(move || {
         let engine = Engine::new();
-        uninstall::scan_apps(&engine, true, &progress, &token)
+        let apps = uninstall::scan_apps(&engine, true, &progress, &token)
+            .map_err(|error| error.to_string())?;
+        let total = apps.iter().map(|app| app.size.as_u64()).sum();
+        // Icon extraction touches every binary: run it in this blocking task,
+        // once per install path.
+        let mut icons: std::collections::HashMap<String, Option<String>> = Default::default();
+        let entries = apps
+            .iter()
+            .map(|entry| {
+                let icon = icons
+                    .entry(entry.key())
+                    .or_insert_with(|| {
+                        squid_platform::permissions::app_icon(entry).map(|png| {
+                            use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+                            format!("data:image/png;base64,{}", B64.encode(&png))
+                        })
+                    })
+                    .clone();
+                AppEntry {
+                    app: entry.clone(),
+                    icon,
+                }
+            })
+            .collect::<Vec<_>>();
+        Ok::<_, String>((apps, entries, total))
     })
     .await
     .map_err(|error| format!("Application scan failed: {error}"))?;
     reporter.finish();
     app.state::<AppState>().finish(&job_id);
-    let apps = task.map_err(|error| error.to_string())?;
-    let total = apps.iter().map(|app| app.size.as_u64()).sum();
+    let (apps, entries, total) = task?;
     if let Ok(mut cache) = app.state::<AppState>().apps.lock() {
-        *cache = apps.clone();
+        *cache = apps;
     }
-    Ok(AppsView { apps, total })
+    Ok(AppsView {
+        apps: entries,
+        total,
+    })
 }
 
 #[derive(Clone, serde::Serialize)]

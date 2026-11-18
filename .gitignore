@@ -64,3 +64,6 @@ __pycache__/
 !release/0.1.3/Squid-Setup-0.1.3-win-x64.exe
 !release/0.1.4/Squid-0.1.4-macOS-universal.dmg
 !release/0.1.4/Squid-Setup-0.1.4-win-x64.exe
+
+# 输入法/软件在 cwd 落的调试日志（sogou 等）
+debug.log

@@ -4777,3 +4777,857 @@ select:focus-visible,
     justify-content: flex-end;
   }
 }
+
+/* ---- 权限管理 (permissions page) ---------------------------------------- */
+
+.perm-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 20px;
+}
+
+.perm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border: 1px solid var(--nex-line);
+  border-radius: 12px;
+  background: transparent;
+  color: #909fad;
+  font-size: var(--nex-text-sm);
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.perm-tab b {
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(86, 182, 246, 0.12);
+  color: var(--nex-primary);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.perm-tab.is-active {
+  border-color: var(--nex-primary-soft);
+  background: rgba(86, 182, 246, 0.10);
+  color: var(--blue-deep);
+  font-weight: var(--nex-weight-medium);
+}
+
+/* Context-menu categories: horizontal nav instead of stacked sections. */
+.perm-ext-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 4px;
+}
+
+.perm-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.perm-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 13px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #909fad;
+  font-size: var(--nex-text-2xs);
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.perm-cat:hover {
+  color: var(--nex-ink);
+}
+
+.perm-cat b {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(144, 159, 173, 0.14);
+  color: inherit;
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.perm-cat.is-active {
+  border-color: var(--nex-primary-soft);
+  background: rgba(86, 182, 246, 0.10);
+  color: var(--blue-deep);
+  font-weight: var(--nex-weight-medium);
+}
+
+.perm-cat.is-active b {
+  background: rgba(86, 182, 246, 0.16);
+  color: var(--blue-deep);
+}
+
+.perm-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.perm-rows .settings-row small {
+  overflow: hidden;
+  color: #909fad;
+  font-size: var(--nex-text-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perm-rows .settings-row.is-muted {
+  opacity: 0.55;
+}
+
+.perm-rows .settings-row.is-busy {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.perm-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 18px 0 2px;
+  color: var(--nex-primary);
+  font-size: var(--nex-text-xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.perm-group-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.perm-group-icon-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #d7dfe8;
+  color: #5c6c7d;
+  font-size: 11px;
+  font-weight: var(--nex-weight-semibold);
+}
+
+.perm-group b {
+  color: #909fad;
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-regular);
+}
+
+/* Per-row software icon (电脑管家 shows the app icon on every list row). */
+.settings-row > .perm-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.perm-row > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.perm-row-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  object-fit: contain;
+  flex: 0 0 auto;
+  background: #fff;
+}
+
+.perm-row-icon-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #d7dfe8;
+  color: #5c6c7d;
+  font-size: 12px;
+  font-weight: var(--nex-weight-semibold);
+}
+
+.perm-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-direction: row !important;
+}
+
+.perm-empty {
+  padding: 14px 0;
+  color: #6c7a87;
+  font-size: var(--nex-text-xs);
+}
+
+.perm-recent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 14px;
+  border: 1px solid var(--nex-line);
+  border-radius: 10px;
+  background: rgba(86, 182, 246, 0.06);
+  color: #405d77;
+  font-size: var(--nex-text-xs);
+}
+
+.perm-recent svg {
+  color: var(--nex-primary);
+}
+
+.perm-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 0;
+  color: #909fad;
+  font-size: var(--nex-text-sm);
+}
+
+.perm-spin {
+  animation: perm-spin 1.1s linear infinite;
+  color: var(--nex-primary);
+}
+
+@keyframes perm-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- overview spec panel + drives list + real app icons ---- */
+
+/* The gauge is gone; the hero shrinks to its content and the right column
+   becomes the machine-spec list. */
+
+.overview-hero {
+  /* Specs column takes the larger share so values never truncate, and sits
+     closer to the centre of the card. */
+  grid-template-columns: minmax(0, 0.92fr) minmax(390px, 1.08fr);
+  align-items: center;
+  min-height: 0;
+  padding: 26px 24px 26px 30px;
+  gap: 18px;
+}
+
+.overview-gauge-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 2px;
+}
+
+.overview-specs {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 7px;
+  width: 100%;
+}
+
+.specs-kicker {
+  margin-bottom: 2px;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spec-row {
+  display: grid;
+  grid-template-columns: 22px 58px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+}
+
+.spec-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+  align-self: center;
+  background: rgba(var(--nex-primary-rgb), 0.09);
+  color: var(--nex-primary);
+}
+
+.spec-label {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+}
+
+.spec-row strong {
+  color: var(--nex-ink-strong);
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-bold);
+  /* Long model strings wrap instead of truncating — the whole point of the
+     panel is reading the machine's identity. */
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* Metrics row: three equal panels; usage bars keep breathing room on both
+   sides instead of spanning the full card width. */
+.overview-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.overview-metrics .usage-bar {
+  margin-inline: 12px;
+}
+
+.metric-drives {
+  align-content: start;
+}
+
+.drive-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.drive-row {
+  display: grid;
+  gap: 5px;
+}
+
+.metric-drives .usage-bar {
+  height: 5px;
+}
+
+.drive-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.drive-line strong {
+  overflow: hidden;
+  color: var(--nex-ink);
+  font-size: var(--nex-text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drive-line span {
+  flex: 0 0 auto;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+}
+
+.drive-line .drive-pct {
+  margin-right: 7px;
+  color: var(--nex-ink-strong);
+  font-weight: var(--nex-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Application list + plan header use the real icon when the scan provided one. */
+.app-glyph img,
+.plan-head .app-glyph img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+  background: #fff;
+}
+
+.app-glyph:has(img) {
+  border-color: rgba(48, 87, 126, 0.12);
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+/* Fit-the-window pass: the default 1220×800 frame should show the whole
+   overview without a vertical scrollbar. */
+.overview-page {
+  padding-top: 18px;
+  padding-bottom: 24px;
+}
+
+.overview-page .page-header {
+  margin-bottom: 14px;
+}
+
+.overview-page .page-header h1 {
+  font-size: 25px;
+}
+
+.overview-page .overview-hero {
+  padding: 20px 24px;
+}
+
+.overview-page .overview-hero h2 {
+  font-size: 29px;
+}
+
+.overview-page .hero-kicker {
+  margin-bottom: 9px;
+}
+
+.overview-page .overview-hero-copy > p {
+  margin-top: 9px;
+}
+
+.overview-page .hero-actions {
+  margin-top: 14px;
+}
+
+.overview-page .hero-assurances {
+  margin-top: 12px;
+}
+
+.overview-page .overview-metrics {
+  margin-top: 14px;
+}
+
+.overview-page .metric-panel {
+  padding: 12px 14px;
+}
+
+.overview-page .metric-panel-head {
+  margin-bottom: 9px;
+}
+
+.overview-page .quick-actions {
+  margin-top: 16px;
+}
+
+.overview-page .quick-card {
+  padding: 11px 13px;
+}
+
+.overview-page .quick-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+}
+
+.overview-page .section-title {
+  margin-bottom: 9px;
+}
+
+/* ---- 桌面小工具 (desktop widget) -------------------------------------- */
+
+/* The widget window reuses this bundle; punch the opaque app background
+   through so the rounded card cluster floats over the desktop. */
+html.widget-mode,
+html.widget-mode body,
+html.widget-mode #root {
+  height: auto;
+  min-height: 100%;
+  background: transparent;
+}
+
+html.widget-mode body {
+  overflow: hidden;
+}
+
+.widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 350px;
+  padding: 10px;
+  border-radius: 26px;
+  /* 90% solid: at most a whisper of the desktop bleeds through the dock. */
+  background: rgba(206, 213, 224, 0.9);
+  color: #1c2430;
+}
+
+.widget-window {
+  box-shadow: none;
+  font-size: 13px;
+}
+
+.widget-loading {
+  min-height: 80px;
+}
+
+.wd-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  /* Solid cards: content never competes with the wallpaper behind it. */
+  background: #fafbfd;
+  color: #1c2430;
+}
+
+.wd-card h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.wd-head {
+  display: flex;
+  align-items: center;
+  padding: 9px 12px;
+}
+
+.wd-head-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: transparent;
+  color: #1c2430;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.wd-head-btn:hover {
+  background: rgba(28, 36, 48, 0.07);
+}
+
+.wd-chevron svg {
+  transition: transform 0.18s ease;
+}
+
+.wd-chevron.is-collapsed svg {
+  transform: rotate(180deg);
+}
+
+.wd-head-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: #cdd6e2;
+}
+
+.wd-head-spacer {
+  flex: 1;
+}
+
+/* run-state card: title/uptime full width, ring cluster floats right */
+
+.wd-run {
+  position: relative;
+  min-height: 170px;
+}
+
+.wd-run-left {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  width: 160px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wd-run-left > strong {
+  font-size: 14px;
+}
+
+.wd-rings {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  display: grid;
+  grid-template-columns: repeat(2, 74px);
+  gap: 12px 6px;
+}
+
+.wd-ring {
+  position: relative;
+  width: 76px;
+  height: 76px;
+}
+
+.wd-ring-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.wd-ring-text b {
+  font-size: 12px;
+  font-weight: 600;
+  color: #3d4a5c;
+}
+
+.wd-ring-text span {
+  font-size: 11px;
+  color: #8a96a6;
+}
+
+.wd-uptime {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+}
+
+.wd-uptime span {
+  font-size: 12px;
+  color: #8a96a6;
+}
+
+.wd-uptime b {
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* chart cards */
+
+.wd-line-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.wd-rate {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.wd-rate b {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.wd-rate .up {
+  color: #16b364;
+}
+
+.wd-rate .down {
+  color: #2f6bff;
+}
+
+.wd-spark {
+  display: block;
+  width: 100%;
+  height: 46px;
+  margin-top: 8px;
+}
+
+.wd-spark + .wd-spark {
+  margin-top: -34px;
+}
+
+/* storage card */
+
+.wd-pad {
+  margin-bottom: 10px;
+}
+
+.wd-vol {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+}
+
+.wd-vol + .wd-vol {
+  border-top: 1px solid #eef1f6;
+}
+
+.wd-vol-ico {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.wd-vol-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.wd-vol-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.wd-vol-top span {
+  color: #5a6779;
+}
+
+.wd-vol-top b {
+  font-weight: 600;
+  color: #2c3644;
+  white-space: nowrap;
+}
+
+.wd-vol-bar {
+  height: 5px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: #e8ecf2;
+  overflow: hidden;
+}
+
+.wd-vol-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2f6bff;
+}
+
+/* settings popover card inside the widget */
+
+.wd-settings h4 {
+  margin-bottom: 10px;
+}
+
+.wd-set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  font-size: 13px;
+  color: #3d4a5c;
+}
+
+.wd-set-row + .wd-set-row {
+  border-top: 1px solid #eef1f6;
+}
+
+.wd-set-toggle {
+  position: relative;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 21px;
+  border-radius: 999px;
+  background: #d7dde6;
+  transition: background 0.15s ease;
+}
+
+.wd-set-toggle::after {
+  content: "";
+  position: absolute;
+  top: 2.5px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(20, 30, 50, 0.35);
+  transition: left 0.15s ease;
+}
+
+.wd-set-toggle.is-on {
+  background: #2f6bff;
+}
+
+.wd-set-toggle.is-on::after {
+  left: 17px;
+}
+
+.wd-range {
+  width: 110px;
+  accent-color: #2f6bff;
+}
+
+.wd-close-line {
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 0;
+  border-radius: 11px;
+  background: rgba(224, 74, 58, 0.09);
+  color: #b2402f;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.wd-close-line:hover {
+  background: rgba(224, 74, 58, 0.16);
+}
+
+/* management page */
+
+.widget-note {
+  margin: 4px 0 14px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(47, 107, 255, 0.07);
+  color: #44546a;
+  font-size: 12.5px;
+}
+
+.widget-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.widget-row-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: rgba(47, 107, 255, 0.1);
+  color: #2f6bff;
+  font-size: 13px;
+}
+
+.widget-range {
+  width: 150px;
+  accent-color: var(--nex-primary);
+}
+
+.widget-preview-section .section-title {
+  margin-bottom: 10px;
+}
+
+.widget-preview-stage {
+  display: flex;
+  justify-content: center;
+  padding: 22px 14px;
+  border-radius: 18px;
+  background:
+    radial-gradient(420px 200px at 70% 110%, rgba(120, 140, 170, 0.5), transparent 60%),
+    linear-gradient(180deg, #131d33, #2c3b55);
+}
+
+.widget-preview {
+  width: 330px;
+}
+
+.widget-off-hint {
+  color: #5a6779;
+  font-size: 12.5px;
+  text-align: center;
+}

@@ -690,6 +690,7 @@ pub async fn update_download(app: AppHandle) -> Result<UpdateStatus, String> {
     .map_err(|error| format!("Update download failed: {error}"))?
 }
 
+#[cfg(target_os = "macos")]
 fn bundle_path(exe: &Path) -> Option<PathBuf> {
     let contents = exe.parent()?.parent()?;
     let bundle = contents.parent()?;
@@ -796,7 +797,9 @@ fn spawn_handoff(name: &str, script: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let mut command = crate::process::command("cmd.exe");
     #[cfg(target_os = "windows")]
-    command.args(["/D", "/C", &path.to_string_lossy().to_string()]);
+    let script = path.to_string_lossy();
+    #[cfg(target_os = "windows")]
+    command.args(["/D", "/C", &*script]);
     #[cfg(not(target_os = "windows"))]
     let mut command = crate::process::command("/bin/sh");
     #[cfg(not(target_os = "windows"))]
@@ -815,6 +818,7 @@ fn quit_for_update(app: &AppHandle) {
     });
 }
 
+#[cfg(not(target_os = "windows"))]
 fn open_artifact(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -879,7 +883,6 @@ pub async fn update_install(app: AppHandle) -> Result<String, String> {
             let script = windows_handoff(pid, &artifact, &log);
             spawn_handoff("Squid-update.cmd", &script)?;
             quit_for_update(&app);
-            return Ok(path);
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {

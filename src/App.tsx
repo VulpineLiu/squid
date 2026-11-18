@@ -6,6 +6,7 @@ import {
   Eraser,
   History,
   LayoutDashboard,
+  MonitorSmartphone,
   RefreshCw,
   Settings,
   ShieldCheck,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAppsWorkspace } from "./hooks/useAppsWorkspace";
+import { usePermissionsWorkspace } from "./hooks/usePermissionsWorkspace";
 import { useScanWorkspace } from "./hooks/useScanWorkspace";
 import { useSystemSnapshot } from "./hooks/useSystemSnapshot";
 import { useUpdateFlow } from "./hooks/useUpdateFlow";
@@ -34,10 +36,12 @@ import { ApplicationsPage } from "./pages/ApplicationsPage";
 import { CleanupPage } from "./pages/CleanupPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { OverviewPage } from "./pages/OverviewPage";
+import { PermissionsPage } from "./pages/PermissionsPage";
 import { PurgePage } from "./pages/PurgePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { StoragePage } from "./pages/StoragePage";
 import { SystemPage } from "./pages/SystemPage";
+import { WidgetPage } from "./pages/WidgetPage";
 
 const NAV_GROUPS: {
   labelEn: string;
@@ -77,6 +81,12 @@ const NAV_GROUPS: {
         labelZh: "深度清理",
         icon: WandSparkles,
       },
+      {
+        id: "permissions",
+        labelEn: "Permissions",
+        labelZh: "权限管理",
+        icon: ShieldCheck,
+      },
     ],
   },
   {
@@ -97,6 +107,18 @@ const NAV_GROUPS: {
       },
     ],
   },
+  {
+    labelEn: "Desktop",
+    labelZh: "桌面",
+    items: [
+      {
+        id: "widget",
+        labelEn: "Desktop widget",
+        labelZh: "桌面小工具",
+        icon: MonitorSmartphone,
+      },
+    ],
+  },
 ];
 
 const PAGE_TITLES: Record<PageId, [string, string]> = {
@@ -104,6 +126,8 @@ const PAGE_TITLES: Record<PageId, [string, string]> = {
   cleanup: ["Daily cleanup", "日常清理"],
   applications: ["Uninstall apps", "应用卸载"],
   purge: ["Deep Clean", "深度清理"],
+  permissions: ["Permissions", "权限管理"],
+  widget: ["Desktop widget", "桌面小工具"],
   storage: ["Storage", "存储空间"],
   system: ["Real-time monitor", "实时监控"],
   history: ["History", "历史记录"],
@@ -164,6 +188,7 @@ export default function App() {
   const cleanup = useScanWorkspace("cleanup");
   const purge = useScanWorkspace("purge");
   const apps = useAppsWorkspace();
+  const permissions = usePermissionsWorkspace(page === "permissions");
   const systemActive = page === "overview" || page === "system";
   const system = useSystemSnapshot(systemActive);
   const update = useUpdateFlow(bootstrap?.updateFeedUrl ?? "", autoCheck);
@@ -212,14 +237,17 @@ export default function App() {
       "cleanup",
       "applications",
       "purge",
+      "permissions",
       "storage",
       "system",
       "history",
       "settings",
+      "widget",
     ];
+    // Ctrl/Cmd+1..9 map in order; the 10th (desktop widget) rides on "0".
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
-      const index = Number(event.key) - 1;
+      const index = event.key === "0" ? 9 : Number(event.key) - 1;
       if (!Number.isInteger(index) || index < 0 || index >= order.length) return;
       event.preventDefault();
       setPage(order[index]);
@@ -308,6 +336,8 @@ export default function App() {
             onHistory={() => setPage("history")}
           />
         ) : null}
+        {page === "permissions" ? <PermissionsPage workspace={permissions} /> : null}
+        {page === "widget" ? <WidgetPage /> : null}
         {page === "storage" ? <StoragePage bootstrap={bootstrap} /> : null}
         {page === "system" ? (
           <SystemPage

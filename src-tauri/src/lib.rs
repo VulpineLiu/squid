@@ -1,7 +1,9 @@
 mod app;
+mod manage;
 mod permissions;
 mod process;
 mod update;
+mod widget;
 
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -33,6 +35,9 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "退出 Squid", true, None::<&str>)?;
     let first_separator = PredefinedMenuItem::separator(app)?;
     let last_separator = PredefinedMenuItem::separator(app)?;
+    // Flips the widget master switch; state is shown on the 桌面小工具 page.
+    let widget_toggle =
+        MenuItem::with_id(app, "widget", "显示/隐藏桌面小工具", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
@@ -41,6 +46,7 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             &cleanup,
             &apps,
             &purge,
+            &widget_toggle,
             &last_separator,
             &quit,
         ],
@@ -60,6 +66,11 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             "cleanup" => navigate_to(app, "cleanup"),
             "applications" => navigate_to(app, "applications"),
             "purge" => navigate_to(app, "purge"),
+            "widget" => {
+                if let Err(error) = widget::toggle_from_tray(app) {
+                    eprintln!("widget toggle failed: {error}");
+                }
+            }
             "quit" => app.exit(0),
             _ => {}
         })
@@ -76,6 +87,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
@@ -83,6 +97,8 @@ pub fn run() {
         })
         .manage(app::AppState::default())
         .manage(update::UpdateState::default())
+        .manage(manage::ManageState::default())
+        .manage(widget::WidgetState::default())
         .invoke_handler(tauri::generate_handler![
             app::bootstrap,
             app::cancel_job,
@@ -106,6 +122,18 @@ pub fn run() {
             app::open_trash,
             permissions::permission_status,
             permissions::open_full_disk_access_settings,
+            manage::manage_scan,
+            manage::startup_set_enabled,
+            manage::extension_set_registered,
+            manage::popup_list,
+            manage::popup_close,
+            manage::popup_add_rule,
+            manage::popup_rule_update,
+            manage::popup_rule_remove,
+            manage::popup_watcher_set,
+            widget::widget_get,
+            widget::widget_set,
+            widget::widget_hide,
             update::update_check,
             update::update_status,
             update::update_download,
@@ -116,6 +144,8 @@ pub fn run() {
         .setup(|app| {
             create_tray(app.handle())?;
             update::spawn_startup_check(app.handle());
+            manage::spawn_watcher(app.handle().clone());
+            widget::spawn_startup(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())

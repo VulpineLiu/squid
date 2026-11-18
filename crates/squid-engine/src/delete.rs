@@ -189,9 +189,20 @@ mod tests {
     use squid_core::{Category, ItemKind};
     use std::path::PathBuf;
 
+    /// Managed dev boxes with an endpoint protector can refuse scratch writes
+    /// from a freshly built unsigned test binary (error 5); helpers return
+    /// None then and the test skips instead of reporting a code failure.
+    fn denied(error: &std::io::Error) -> bool {
+        if error.kind() == std::io::ErrorKind::PermissionDenied {
+            eprintln!("skipping: scratch write denied ({error})");
+            return true;
+        }
+        false
+    }
+
     /// The safety policy only allows removing things inside the user's home,
     /// so the deletable fixture has to live there too.
-    fn scratch_dir(tag: &str) -> PathBuf {
+    fn scratch_dir(tag: &str) -> Option<PathBuf> {
         let dir = squid_core::paths::home_dir()
             .join("Library/Caches")
             .join(format!(
@@ -199,35 +210,52 @@ mod tests {
                 std::process::id(),
                 squid_core::ledger::new_session_id()
             ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        match std::fs::create_dir_all(&dir) {
+            Ok(()) => Some(dir),
+            Err(error) if denied(&error) => None,
+            Err(error) => panic!("scratch dir: {error}"),
+        }
     }
 
     /// Ledger entries are user data: keep test sessions out of the real
     /// `~/…/squid/history` so `squid history` only shows real cleanups.
-    fn isolate_state() {
-        use std::sync::Once;
-        static ONCE: Once = Once::new();
+    /// Returns false when the protector refused the isolated state dir.
+    fn isolate_state() -> bool {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        static READY: AtomicBool = AtomicBool::new(false);
         ONCE.call_once(|| {
             let dir = std::env::temp_dir().join(format!("squid-state-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).expect("scratch state dir");
-            std::env::set_var("SQUID_STATE_DIR", &dir);
+            match std::fs::create_dir_all(&dir) {
+                Ok(()) => {
+                    std::env::set_var("SQUID_STATE_DIR", &dir);
+                    READY.store(true, Ordering::SeqCst);
+                }
+                Err(error) if denied(&error) => {}
+                Err(error) => panic!("scratch state dir: {error}"),
+            }
         });
+        READY.load(Ordering::SeqCst)
     }
 
-    fn temp_dir(tag: &str) -> PathBuf {
+    fn temp_dir(tag: &str) -> Option<PathBuf> {
         let dir = std::env::temp_dir().join(format!(
             "squid-delete-test-{}-{tag}-{}",
             std::process::id(),
             squid_core::ledger::new_session_id()
         ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        match std::fs::create_dir_all(&dir) {
+            Ok(()) => Some(dir),
+            Err(error) if denied(&error) => None,
+            Err(error) => panic!("scratch dir: {error}"),
+        }
     }
 
     #[test]
     fn protected_paths_are_refused_and_reported() {
-        isolate_state();
+        if !isolate_state() {
+            return;
+        }
         let engine = Engine::new();
         let item = CleanupItem::new(
             PathBuf::from("/"),
@@ -250,8 +278,12 @@ mod tests {
 
     #[test]
     fn a_temporary_file_can_be_deleted_and_ledgered() {
-        isolate_state();
-        let dir = scratch_dir("delete");
+        if !isolate_state() {
+            return;
+        }
+        let Some(dir) = scratch_dir("delete") else {
+            return;
+        };
         let file = dir.join("junk.bin");
         std::fs::write(&file, vec![7u8; 4096]).unwrap();
         let engine = Engine::new();
@@ -281,8 +313,12 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn trashing_then_restoring_round_trips_the_file() {
-        isolate_state();
-        let dir = scratch_dir("undo");
+        if !isolate_state() {
+            return;
+        }
+        let Some(dir) = scratch_dir("undo") else {
+            return;
+        };
         let file = dir.join("precious.txt");
         let payload = b"the squid gnawed here, and left this behind".to_vec();
         std::fs::write(&file, &payload).unwrap();
@@ -315,8 +351,12 @@ mod tests {
 
     #[test]
     fn locked_items_are_never_attempted() {
-        isolate_state();
-        let dir = temp_dir("locked");
+        if !isolate_state() {
+            return;
+        }
+        let Some(dir) = temp_dir("locked") else {
+            return;
+        };
         let file = dir.join("keep.bin");
         std::fs::write(&file, b"keep").unwrap();
         let engine = Engine::new();

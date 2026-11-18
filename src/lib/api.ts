@@ -8,9 +8,12 @@ import type {
   HistorySession,
   JobProgress,
   LargestFile,
+  ManageView,
   PageId,
   PermissionStatus,
   PlanResult,
+  PopupClosedEvent,
+  PopupWindowItem,
   ScanResult,
   SettingsView,
   StorageNode,
@@ -19,6 +22,8 @@ import type {
   UpdateCheckResult,
   UpdateProgress,
   UpdateStatus,
+  WidgetPatch,
+  WidgetPrefs,
 } from "../types";
 
 export interface SettingsPatch {
@@ -71,6 +76,22 @@ export const api = {
   openTrash: () => invoke<void>("open_trash"),
   permissionStatus: () => invoke<PermissionStatus>("permission_status"),
   openFullDiskAccessSettings: () => invoke<void>("open_full_disk_access_settings"),
+  manageScan: () => invoke<ManageView>("manage_scan"),
+  startupSetEnabled: (id: string, enabled: boolean) =>
+    invoke<number>("startup_set_enabled", { id, enabled }),
+  extensionSetRegistered: (id: string, registered: boolean) =>
+    invoke<void>("extension_set_registered", { id, registered }),
+  popupList: () => invoke<PopupWindowItem[]>("popup_list"),
+  popupClose: (hwnd: number) => invoke<void>("popup_close", { hwnd }),
+  popupAddRule: (hwnd: number, matcher: string) =>
+    invoke<void>("popup_add_rule", { hwnd, matcher }),
+  popupRuleUpdate: (index: number, enabled?: boolean, resetCount?: boolean) =>
+    invoke<void>("popup_rule_update", { index, enabled, resetCount }),
+  popupRuleRemove: (index: number) => invoke<void>("popup_rule_remove", { index }),
+  popupWatcherSet: (enabled: boolean) => invoke<void>("popup_watcher_set", { enabled }),
+  widgetGet: () => invoke<{ prefs: WidgetPrefs }>("widget_get"),
+  widgetSet: (patch: WidgetPatch) => invoke<WidgetPrefs>("widget_set", { patch }),
+  widgetHide: () => invoke<void>("widget_hide"),
   updateCheck: () => invoke<UpdateCheckResult>("update_check"),
   updateStatus: () => invoke<UpdateStatus | null>("update_status"),
   updateDownload: () => invoke<UpdateStatus>("update_download"),
@@ -86,6 +107,10 @@ export const api = {
     listen<UpdateStatus | null>("update://status", (event) => handler(event.payload)),
   onNavigate: (handler: (page: PageId) => void) =>
     listen<PageId>("squid://navigate", (event) => handler(event.payload)),
+  onPopupClosed: (handler: (event: PopupClosedEvent) => void) =>
+    listen<PopupClosedEvent>("popup://closed", (event) => handler(event.payload)),
+  onWidgetSettings: (handler: (prefs: WidgetPrefs) => void) =>
+    listen<WidgetPrefs>("widget://settings", (event) => handler(event.payload)),
 };
 
 export async function subscribeJobProgress(

@@ -15,6 +15,7 @@ import { api } from "../lib/api";
 import {
   formatBytes,
   formatCount,
+  formatMemory,
   formatRate,
   formatUptime,
   messageFrom,
@@ -149,8 +150,8 @@ export function SystemPage({
               <strong>{t("Memory", "内存")}</strong>
               <span>
                 {snapshot
-                  ? `${formatBytes(snapshot.memory.used)} / ${formatBytes(
-                      snapshot.memory.total,
+                  ? `${formatMemory(snapshot.memory.used)} / ${formatMemory(
+                      Math.max(snapshot.memory.installed, snapshot.memory.total),
                     )}`
                   : t("Reading memory…", "正在读取内存…")}
               </span>
@@ -165,19 +166,32 @@ export function SystemPage({
           >
             <strong className="gauge-number is-small">{Math.round(memoryPercent)}%</strong>
             <span className="gauge-sub">
-              {snapshot ? formatBytes(snapshot.memory.available) : "—"} {t("free", "可用")}
+              {snapshot ? formatMemory(snapshot.memory.available) : "—"} {t("free", "可用")}
             </span>
           </Gauge>
           <div className="memory-split">
             <div>
               <span>{t("Used", "已用")}</span>
-              <strong>{formatBytes(snapshot?.memory.used ?? 0)}</strong>
+              <strong>{formatMemory(snapshot?.memory.used ?? 0)}</strong>
             </div>
+            {(snapshot?.memory.installed ?? 0) > (snapshot?.memory.total ?? 0) ? (
+              <div>
+                <span>{t("Reserved (GPU)", "硬件保留（含核显）")}</span>
+                <strong>
+                  {formatMemory(
+                    Math.max(
+                      0,
+                      (snapshot?.memory.installed ?? 0) - (snapshot?.memory.total ?? 0),
+                    ),
+                  )}
+                </strong>
+              </div>
+            ) : null}
             <div>
               <span>{t("Swap", "交换")}</span>
               <strong>
-                {formatBytes(snapshot?.memory.swap_used ?? 0)}
-                <small> / {formatBytes(snapshot?.memory.swap_total ?? 0)}</small>
+                {formatMemory(snapshot?.memory.swap_used ?? 0)}
+                <small> / {formatMemory(snapshot?.memory.swap_total ?? 0)}</small>
               </strong>
             </div>
           </div>
@@ -344,7 +358,10 @@ export function SystemPage({
             <div>
               <strong>{snapshot?.host.hostname || t("This computer", "这台电脑")}</strong>
               <span>
-                {[snapshot?.host.os_name, snapshot?.host.os_version, snapshot?.host.arch]
+                {[
+                  snapshot?.host.os_version || snapshot?.host.os_name,
+                  snapshot?.host.arch,
+                ]
                   .filter(Boolean)
                   .join(" · ")}
               </span>

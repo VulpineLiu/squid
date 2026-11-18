@@ -368,6 +368,10 @@ pub struct AppInfo {
     pub has_sibling_install: bool,
     pub publisher: Option<String>,
     pub installed_ms: Option<u64>,
+    /// Raw `DisplayIcon` registry value (Windows): a path, optionally with an
+    /// `,index` suffix — the icon Explorer shows for this app.
+    #[serde(default)]
+    pub display_icon: Option<String>,
 }
 
 impl AppInfo {

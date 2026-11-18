@@ -471,6 +471,7 @@ mod tests {
             has_sibling_install: false,
             publisher: None,
             installed_ms: None,
+            display_icon: None,
         }
     }
 

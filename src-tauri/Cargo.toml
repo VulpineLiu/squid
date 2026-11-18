@@ -1,6 +1,6 @@
 [package]
 name = "squid-desktop"
-version = "0.1.4"
+version = "0.1.9"
 description = "Squid — a CleanMyMac-inspired cleaner, uninstaller and system monitor."
 authors = ["squid contributors"]
 edition = "2021"

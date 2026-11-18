@@ -14,6 +14,7 @@ pub mod apps;
 pub mod console;
 pub mod currency;
 pub mod leftovers;
+pub mod permissions;
 pub mod process;
 #[cfg(unix)]
 pub mod volumes;
@@ -226,6 +227,44 @@ pub enum TrashTarget {
     Folder(PathBuf),
     /// Nothing reachable — sending to the Trash would end up permanent.
     Unreachable,
+}
+
+/// One physical memory module read from SMBIOS (Windows).
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct MemoryStick {
+    pub manufacturer: String,
+    pub size_bytes: u64,
+    pub speed_mhz: u32,
+}
+
+/// Static component facts for the overview's spec panel: what the machine
+/// is built from, as opposed to what it is busy with right now.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct HardwareInfo {
+    pub board: String,
+    pub cpu_model: String,
+    pub memory_sticks: Vec<MemoryStick>,
+    pub disk_vendor: String,
+    pub disk_model: String,
+    pub disk_bus: String,
+    pub disk_size_bytes: u64,
+    pub gpu_vendor: String,
+    pub gpu_model: String,
+    pub gpu_vram_bytes: u64,
+}
+
+/// Component facts for the current machine. Windows reads SMBIOS, the
+/// storage stack and the class registry; other platforms report what they
+/// already know elsewhere (CPU brand via snapshots) and leave the rest empty.
+pub fn hardware_info() -> HardwareInfo {
+    #[cfg(windows)]
+    {
+        windows::hardware_info()
+    }
+    #[cfg(not(windows))]
+    {
+        HardwareInfo::default()
+    }
 }
 
 /// Concrete adapter for the host we are running on.

@@ -12,6 +12,22 @@ export function formatBytes(value: number, fractionDigits = 1): string {
   return `${remaining.toFixed(digits)} ${units[unit]}`;
 }
 
+/// RAM is sold in powers of two (a "32 GB" stick holds 32 GiB); disks are not.
+/// Memory readouts must divide by 1024 or a 32 GiB machine shows "34.4 GB".
+export function formatMemory(value: number, fractionDigits = 1): string {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let remaining = value;
+  let unit = 0;
+  while (remaining >= 1024 && unit < units.length - 1) {
+    remaining /= 1024;
+    unit += 1;
+  }
+  if (unit === 0) return `${Math.round(remaining)} B`;
+  const digits = remaining >= 100 ? 0 : fractionDigits;
+  return `${remaining.toFixed(digits)} ${units[unit]}`;
+}
+
 export function formatBytesExact(value: number): string {
   if (value <= 0) return "0 B";
   const formatted = formatBytes(value, 2);

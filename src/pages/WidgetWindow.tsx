@@ -1,0 +1,221 @@
+/* The 桌面小工具 window content (index.html?view=widget): header bar with
+ * settings + collapse, live panels, and a compact settings popover that
+ * writes straight through to widget_set (broadcast keeps the main page in
+ * sync). */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { api } from "../lib/api";
+import { messageFrom } from "../lib/format";
+import type { WidgetPrefs } from "../types";
+import { WidgetPanels, useHistory } from "../components/WidgetPanels";
+import type { SystemSnapshot } from "../types";
+
+const PANELS: { key: keyof WidgetPrefs; label: string }[] = [
+  { key: "panelRun", label: "运行状态" },
+  { key: "panelNetwork", label: "网络" },
+  { key: "panelDisk", label: "存储读写" },
+  { key: "panelStorage", label: "存储空间" },
+];
+
+export function WidgetWindow() {
+  const [prefs, setPrefs] = useState<WidgetPrefs | null>(null);
+  const [snapshot, setSnapshot] = useState<SystemSnapshot | null>(null);
+  const [open, setOpen] = useState(false);
+  const [history, bump] = useHistory();
+  const windowRef = useRef(getCurrentWindow());
+
+  useEffect(() => {
+    // The window is transparent; punch through the app's opaque body paint.
+    document.documentElement.classList.add("widget-mode");
+    return () => document.documentElement.classList.remove("widget-mode");
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let stop: (() => void) | null = null;
+    void api
+      .widgetGet()
+      .then((view) => !cancelled && setPrefs(view.prefs))
+      .catch((reason) => console.error(messageFrom(reason)));
+    void api
+      .onWidgetSettings((next) => !cancelled && setPrefs(next))
+      .then((unlisten) => {
+        if (cancelled) unlisten();
+        else stop = unlisten;
+      });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, []);
+
+  // Poll at the configured cadence; pausing while hidden saves cycles.
+  const intervalMs = prefs?.intervalMs ?? 2000;
+  useEffect(() => {
+    if (!prefs?.enabled) return;
+    let live = true;
+    const tick = async () => {
+      if (!live || document.hidden) return;
+      try {
+        const next = await api.systemSnapshot();
+        if (live) {
+          setSnapshot(next);
+          bump(next);
+        }
+      } catch {
+        /* sampler busy — next beat will catch up */
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), intervalMs);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, [bump, intervalMs, prefs?.enabled]);
+
+  const patch = useCallback((values: Parameters<typeof api.widgetSet>[0]) => {
+    void api
+      .widgetSet(values)
+      .then(setPrefs)
+      .catch((reason) => console.error(messageFrom(reason)));
+  }, []);
+
+  const collapsed = Boolean(prefs?.collapsed);
+
+  // Last persisted drag position; null while the widget is corner-docked.
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
+
+  // Grow/shrink the window to the stacked cards so transparent space never
+  // eats desktop clicks (scrollHeight is CSS px == LogicalSize units).
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    let frame = 0;
+    const fit = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const height = Math.max(64, root.scrollHeight + 4);
+        void windowRef.current
+          ?.setSize(new LogicalSize(350, height))
+          .then(() => {
+            // Keep the docked corner anchored after the size change.
+            if (!lastPos.current) void api.widgetSet({ redock: true }).catch(() => undefined);
+          })
+          .catch(() => undefined);
+      });
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(root);
+    fit();
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [prefs, open, collapsed]);
+
+  const toggleCollapsed = () => {
+    setOpen(false);
+    patch({ collapsed: !collapsed });
+  };
+
+  // Persist a dragged position after the pointer settles (the header is a
+  // native drag region, so poll once shortly after mouseup).
+  useEffect(() => {
+    const onUp = () => {
+      window.setTimeout(() => {
+        void windowRef.current
+          ?.outerPosition()
+          .then((position) => {
+            const previous = lastPos.current;
+            if (previous && previous.x === position.x && previous.y === position.y) return;
+            lastPos.current = position;
+            patch({ position: [position.x, position.y], keepPosition: true });
+          })
+          .catch(() => undefined);
+      }, 350);
+    };
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [patch]);
+
+  if (!prefs) return <div className="widget widget-loading" />;
+  return (
+    <div
+      ref={rootRef}
+      className="widget widget-window"
+      style={{ opacity: (prefs.opacity ?? 100) / 100 }}
+    >
+      <div className="wd-card wd-head" data-tauri-drag-region>
+        <button
+          type="button"
+          className="wd-head-btn"
+          aria-label="小部件设置"
+          title="小部件设置"
+          onClick={() => setOpen((value) => !value)}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M4 7h10M18 7h2M4 12h2M10 12h10M4 17h13" />
+            <circle cx="16" cy="7" r="2" />
+            <circle cx="8" cy="12" r="2" />
+            <circle cx="19" cy="17" r="2" />
+          </svg>
+        </button>
+        <span className="wd-head-spacer" />
+        <button
+          type="button"
+          className={`wd-head-btn wd-chevron ${collapsed ? "is-collapsed" : ""}`}
+          aria-label={collapsed ? "展开" : "折叠"}
+          title={collapsed ? "展开" : "折叠"}
+          onClick={toggleCollapsed}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m6 15 6-6 6 6" />
+          </svg>
+        </button>
+      </div>
+
+      {open && !collapsed ? (
+        <div className="wd-card wd-settings">
+          <h4>小部件设置</h4>
+          {PANELS.map((panel) => (
+            <div className="wd-set-row" key={panel.key}>
+              <span>{panel.label}</span>
+              <button
+                type="button"
+                className={`wd-set-toggle ${prefs[panel.key] ? "is-on" : ""}`}
+                role="switch"
+                aria-checked={Boolean(prefs[panel.key])}
+                aria-label={panel.label}
+                onClick={() => patch({ [panel.key]: !prefs[panel.key] })}
+              />
+            </div>
+          ))}
+          <div className="wd-set-row">
+            <span>不透明度</span>
+            <input
+              className="wd-range"
+              type="range"
+              min={90}
+              max={100}
+              value={prefs.opacity}
+              onChange={(event) => patch({ opacity: Number(event.target.value) })}
+            />
+          </div>
+          <button
+            type="button"
+            className="wd-close-line"
+            onClick={() => patch({ enabled: false })}
+          >
+            关闭小工具
+          </button>
+        </div>
+      ) : null}
+
+      {!collapsed ? (
+        <WidgetPanels snapshot={snapshot} prefs={prefs} history={history} zh />
+      ) : null}
+    </div>
+  );
+}

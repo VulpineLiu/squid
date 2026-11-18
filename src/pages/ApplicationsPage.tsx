@@ -41,7 +41,7 @@ function AppRow({
   return (
     <button className={`app-row ${selected ? "is-selected" : ""}`} onClick={onSelect}>
       <span className="app-glyph" aria-hidden="true">
-        {letter}
+        {app.icon ? <img src={app.icon} alt="" /> : letter}
       </span>
       <span className="app-row-copy">
         <span className="app-row-title">
@@ -86,6 +86,14 @@ export function ApplicationsPage({
         app.publisher?.toLowerCase().includes(needle),
     );
   }, [query, workspace.apps]);
+
+  // The scan carries icons; the plan's AppInfo does not, so look it up.
+  const planIcon = useMemo(() => {
+    const planApp = workspace.plan?.app;
+    if (!planApp) return null;
+    const key = planApp.bundle_id || planApp.path;
+    return workspace.apps.find((a) => (a.bundle_id || a.path) === key)?.icon ?? null;
+  }, [workspace.plan, workspace.apps]);
 
   const uninstall = async () => {
     const result = await workspace.uninstall(mode);
@@ -204,7 +212,7 @@ export function ApplicationsPage({
               <>
                 <div className="plan-head">
                   <span className="app-glyph is-large">
-                    {workspace.plan.app.name.slice(0, 1).toUpperCase()}
+                    {planIcon ? <img src={planIcon} alt="" /> : workspace.plan.app.name.slice(0, 1).toUpperCase()}
                   </span>
                   <div>
                     <span className="plan-kicker">{t("Removal plan", "卸载方案")}</span>

@@ -76,7 +76,7 @@ export function UpdatePanel({
         <div className="update-system-copy">
           <small>{t("Current system", "当前系统")}</small>
           <strong>
-            {bootstrap.osName} {bootstrap.osVersion}
+            {bootstrap.osVersion || bootstrap.osName}
           </strong>
         </div>
         <div className="update-system-facts">

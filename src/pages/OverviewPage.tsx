@@ -3,21 +3,26 @@ import {
   ArrowRight,
   Boxes,
   ChevronRight,
+  CircuitBoard,
   CircleGauge,
+  Cpu,
   HardDrive,
+  MemoryStick,
+  MonitorCog,
   ScanSearch,
   Sparkles,
   WandSparkles,
+  Waypoints,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { useI18n } from "../i18n";
-import { formatBytes, formatCount, percent } from "../lib/format";
-import type { Bootstrap, SystemSnapshot } from "../types";
+import { formatBytes, formatCount, formatMemory, percent } from "../lib/format";
+import type { Bootstrap, SystemSnapshot, Volume } from "../types";
 import type { ScanWorkspace } from "../hooks/useScanWorkspace";
 import type { PageId } from "../types";
 import { CategorySummary } from "../components/CleanupView";
 import {
   Button,
-  Gauge,
   PageHeader,
   ProgressCard,
   SectionTitle,
@@ -37,6 +42,31 @@ function greeting(lang: "zh" | "en"): string {
   return "Good evening";
 }
 
+/// Windows mounts read `C:\`; everything else shows its own label.
+function driveLabel(volume: Volume): string {
+  return /^[A-Za-z]:/.exec(volume.mount_point)?.[0] ?? volume.mount_point;
+}
+
+function SpecRow({
+  icon,
+  label,
+  value,
+  t,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  t: (en: string, zh: string) => string;
+}) {
+  return (
+    <div className="spec-row">
+      <span className="spec-icon">{icon}</span>
+      <span className="spec-label">{label}</span>
+      <strong title={value || undefined}>{value || t("—", "—")}</strong>
+    </div>
+  );
+}
+
 export function OverviewPage({
   bootstrap,
   snapshot,
@@ -49,18 +79,63 @@ export function OverviewPage({
   onNavigate: (page: PageId) => void;
 }) {
   const { t, lang } = useI18n();
-  const volume =
-    snapshot?.volumes.find((candidate) => candidate.is_root) ?? snapshot?.volumes[0] ?? null;
-  const used = volume ? volume.total - volume.free : 0;
-  const usedPercent = volume ? percent(used, volume.total) : 0;
-  const memoryPercent = snapshot
-    ? percent(snapshot.memory.used, snapshot.memory.total)
+  const volumes = snapshot?.volumes ?? [];
+  const rootVolume = volumes.find((candidate) => candidate.is_root) ?? volumes[0] ?? null;
+  const memoryInstalled = snapshot
+    ? Math.max(snapshot.memory.installed, snapshot.memory.total)
+    : 0;
+  const memoryReserved = snapshot
+    ? Math.max(0, memoryInstalled - snapshot.memory.total)
     : 0;
   const found = cleanup.result
     ? cleanup.result.items
         .filter((item) => !item.lock)
         .reduce((sum, item) => sum + item.onDisk, 0)
     : 0;
+
+  const hardware = bootstrap.hardwareInfo;
+  const ramBrands = [
+    ...new Set(hardware.memory_sticks.map((stick) => stick.manufacturer).filter(Boolean)),
+  ].join(" / ");
+  const ramSpeed = hardware.memory_sticks.reduce(
+    (top, stick) => Math.max(top, stick.speed_mhz),
+    0,
+  );
+  const specs = {
+    os: bootstrap.osVersion,
+    board: hardware.board || bootstrap.hardware,
+    cpu: snapshot
+      ? `${snapshot.cpu.brand} · ${snapshot.cpu.physical_cores} ${t("cores", "核")} / ${
+          snapshot.cpu.logical_cores
+        } ${t("threads", "线程")}`
+      : hardware.cpu_model,
+    memory:
+      [
+        memoryInstalled ? formatMemory(memoryInstalled) : "",
+        ramBrands,
+        ramSpeed ? `${ramSpeed} MT/s` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ") || (memoryReserved ? formatMemory(memoryInstalled) : ""),
+    disk:
+      [
+        [hardware.disk_vendor, hardware.disk_model].filter(Boolean).join(" "),
+        hardware.disk_size_bytes ? formatBytes(hardware.disk_size_bytes) : "",
+        hardware.disk_bus,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    gpu:
+      [
+        hardware.gpu_model &&
+        hardware.gpu_model.toLowerCase().startsWith(hardware.gpu_vendor.toLowerCase())
+          ? hardware.gpu_model
+          : [hardware.gpu_vendor, hardware.gpu_model].filter(Boolean).join(" "),
+        hardware.gpu_vram_bytes ? formatBytes(hardware.gpu_vram_bytes) : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+  };
 
   return (
     <div className="page overview-page">
@@ -143,24 +218,44 @@ export function OverviewPage({
           </div>
         </div>
 
-        <div className="overview-gauge-wrap">
-          <div className="gauge-halo" />
-          <Gauge value={usedPercent} size={226} stroke={16} tone={usedPercent > 85 ? "red" : "blue"}>
-            <span className="gauge-caption">{t("Disk in use", "磁盘已用")}</span>
-            <strong className="gauge-number">{Math.round(usedPercent)}%</strong>
-            <span className="gauge-sub">
-              {volume
-                ? t(
-                    `${formatBytes(volume.free)} free`,
-                    `剩余 ${formatBytes(volume.free)}`,
-                  )
-                : t("Reading volume…", "正在读取磁盘…")}
-            </span>
-          </Gauge>
-          <div className="hero-device">
-            <HardDrive size={14} />
-            <span>{bootstrap.hardware}</span>
-          </div>
+        <div className="overview-specs">
+          <span className="specs-kicker">{t("This machine", "本机配置")}</span>
+          <SpecRow
+            icon={<MonitorCog size={15} />}
+            label={t("System", "操作系统")}
+            value={specs.os}
+            t={t}
+          />
+          <SpecRow
+            icon={<CircuitBoard size={15} />}
+            label={t("Motherboard", "主板")}
+            value={specs.board}
+            t={t}
+          />
+          <SpecRow
+            icon={<Cpu size={15} />}
+            label={t("Processor", "处理器")}
+            value={specs.cpu}
+            t={t}
+          />
+          <SpecRow
+            icon={<MemoryStick size={15} />}
+            label={t("Memory", "内存")}
+            value={specs.memory}
+            t={t}
+          />
+          <SpecRow
+            icon={<HardDrive size={15} />}
+            label={t("Primary disk", "主硬盘")}
+            value={specs.disk}
+            t={t}
+          />
+          <SpecRow
+            icon={<Waypoints size={15} />}
+            label={t("Graphics", "显卡")}
+            value={specs.gpu}
+            t={t}
+          />
         </div>
       </section>
 
@@ -195,6 +290,115 @@ export function OverviewPage({
           />
         </section>
       ) : null}
+
+      <section className="overview-metrics">
+        <div className="metric-panel">
+          <div className="metric-panel-head">
+            <span className="metric-icon tone-blue">
+              <CircleGauge size={18} />
+            </span>
+            <div>
+              <strong>{t("Processor", "处理器")}</strong>
+              <span>
+                {snapshot
+                  ? `${snapshot.cpu.physical_cores} ${t("cores", "核")} / ${snapshot.cpu.logical_cores} ${t("threads", "线程")}`
+                  : t("Sampling…", "正在采样…")}
+              </span>
+            </div>
+            <b>{Math.round(snapshot?.cpu.total ?? 0)}%</b>
+          </div>
+          <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="blue" />
+          <small>
+            {snapshot?.cpu.brand || t("Processor details unavailable", "暂无处理器信息")}
+          </small>
+        </div>
+        <div className="metric-panel">
+          <div className="metric-panel-head">
+            <span className="metric-icon tone-violet">
+              <Boxes size={18} />
+            </span>
+            <div>
+              <strong>{t("Memory", "内存")}</strong>
+              <span>
+                {snapshot
+                  ? `${formatMemory(snapshot.memory.used)} / ${formatMemory(memoryInstalled)}`
+                  : t("Sampling…", "正在采样…")}
+              </span>
+            </div>
+            <b>
+              {Math.round(
+                snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0,
+              )}
+              %
+            </b>
+          </div>
+          <UsageBar
+            used={snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0}
+            total={100}
+            tone="violet"
+          />
+          <small>
+            {memoryReserved > 0
+              ? t(
+                  `Hardware reserved (integrated graphics): ${formatMemory(memoryReserved)}`,
+                  `硬件保留（含核显）：${formatMemory(memoryReserved)}`,
+                )
+              : snapshot
+                ? t(
+                    `${formatCount(snapshot.processes)} processes running`,
+                    `${formatCount(snapshot.processes)} 个进程正在运行`,
+                  )
+                : t("Reading activity", "正在读取活动")}
+          </small>
+        </div>
+        <div className="metric-panel metric-drives">
+          <div className="metric-panel-head">
+            <span className="metric-icon tone-green">
+              <HardDrive size={18} />
+            </span>
+            <div>
+              <strong>{t("Storage", "存储空间")}</strong>
+              <span>
+                {volumes.length > 0
+                  ? t(
+                      `${volumes.length} drives`,
+                      `${volumes.length} 个分区`,
+                    )
+                  : t("Reading volumes…", "正在读取磁盘…")}
+              </span>
+            </div>
+          </div>
+          <div className="drive-list">
+            {volumes.slice(0, 4).map((volume) => {
+              const usedPercent = percent(volume.total - volume.free, volume.total);
+              return (
+                <div className="drive-row" key={volume.mount_point}>
+                  <div className="drive-line">
+                    <strong>
+                      {driveLabel(volume)}
+                      {volume.name && volume.name !== driveLabel(volume)
+                        ? ` · ${volume.name}`
+                        : ""}
+                    </strong>
+                    <span>
+                      <b className="drive-pct">{Math.round(usedPercent)}%</b>
+                      {t(
+                        `total ${formatBytes(volume.total)} · ${formatBytes(volume.free)} free`,
+                        `总 ${formatBytes(volume.total)} · 可用 ${formatBytes(volume.free)}`,
+                      )}
+                    </span>
+                  </div>
+                  <UsageBar
+                    used={usedPercent}
+                    total={100}
+                    tone={usedPercent > 85 ? "red" : "green"}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
 
       <section className="quick-actions">
         <SectionTitle
@@ -232,78 +436,6 @@ export function OverviewPage({
             </span>
             <ChevronRight size={17} />
           </button>
-        </div>
-      </section>
-
-      <section className="overview-metrics">
-        <div className="metric-panel">
-          <div className="metric-panel-head">
-            <span className="metric-icon tone-blue">
-              <CircleGauge size={18} />
-            </span>
-            <div>
-              <strong>{t("Processor", "处理器")}</strong>
-              <span>
-                {snapshot
-                  ? `${snapshot.cpu.logical_cores} ${t("cores", "核心")}`
-                  : t("Sampling…", "正在采样…")}
-              </span>
-            </div>
-            <b>{Math.round(snapshot?.cpu.total ?? 0)}%</b>
-          </div>
-          <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="blue" />
-          <small>
-            {snapshot?.cpu.brand || t("Processor details unavailable", "暂无处理器信息")}
-          </small>
-        </div>
-        <div className="metric-panel">
-          <div className="metric-panel-head">
-            <span className="metric-icon tone-violet">
-              <Boxes size={18} />
-            </span>
-            <div>
-              <strong>{t("Memory", "内存")}</strong>
-              <span>
-                {snapshot
-                  ? `${formatBytes(snapshot.memory.used)} / ${formatBytes(
-                      snapshot.memory.total,
-                    )}`
-                  : t("Sampling…", "正在采样…")}
-              </span>
-            </div>
-            <b>{Math.round(memoryPercent)}%</b>
-          </div>
-          <UsageBar used={memoryPercent} total={100} tone="violet" />
-          <small>
-            {snapshot
-              ? t(
-                  `${formatCount(snapshot.processes)} processes running`,
-                  `${formatCount(snapshot.processes)} 个进程正在运行`,
-                )
-              : t("Reading activity", "正在读取活动")}
-          </small>
-        </div>
-        <div className="metric-panel">
-          <div className="metric-panel-head">
-            <span className="metric-icon tone-green">
-              <HardDrive size={18} />
-            </span>
-            <div>
-              <strong>{t("Storage", "存储空间")}</strong>
-              <span>
-                {volume
-                  ? `${formatBytes(volume.free)} ${t("available", "可用")}`
-                  : t("Reading volume…", "正在读取磁盘…")}
-              </span>
-            </div>
-            <b>{Math.round(usedPercent)}%</b>
-          </div>
-          <UsageBar
-            used={usedPercent}
-            total={100}
-            tone={usedPercent > 85 ? "red" : "green"}
-          />
-          <small>{volume?.mount_point || bootstrap.configPath}</small>
         </div>
       </section>
     </div>
