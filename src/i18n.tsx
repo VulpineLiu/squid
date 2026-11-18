@@ -15,18 +15,23 @@ const I18nContext = createContext<I18nValue | null>(null);
 export function I18nProvider({
   lang,
   setLang,
+  binNoun = "trash",
   children,
 }: {
   lang: Language;
   setLang: (language: Language) => void;
+  binNoun?: "trash" | "recycle-bin";
   children: ReactNode;
 }) {
+  // Windows calls it 回收站; macOS and freedesktop keep 废纸篓.
+  const zhBin = binNoun === "recycle-bin" ? "回收站" : "废纸篓";
+  const enBin = binNoun === "recycle-bin" ? "Recycle Bin" : "Trash";
   const value: I18nValue = {
     lang,
     setLang,
     t: (en, zh) => (lang === "zh" ? zh : en),
-    bin: lang === "zh" ? "废纸篓" : "Trash",
-    binLower: lang === "zh" ? "废纸篓" : "trash",
+    bin: lang === "zh" ? zhBin : enBin,
+    binLower: lang === "zh" ? zhBin : enBin.toLowerCase(),
     currency: lang === "zh" ? "zh-CN" : "en-US",
   };
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;

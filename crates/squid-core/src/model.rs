@@ -19,10 +19,11 @@ pub enum Category {
     Trash,
     LanguagePacks,
     Leftovers,
+    UpdateInstallers,
 }
 
 impl Category {
-    pub const ALL: [Category; 9] = [
+    pub const ALL: [Category; 10] = [
         Category::SystemJunk,
         Category::AppCaches,
         Category::BrowserCaches,
@@ -32,6 +33,7 @@ impl Category {
         Category::Trash,
         Category::LanguagePacks,
         Category::Leftovers,
+        Category::UpdateInstallers,
     ];
 
     pub fn id(self) -> &'static str {
@@ -45,6 +47,7 @@ impl Category {
             Category::Trash => "trash",
             Category::LanguagePacks => "languages",
             Category::Leftovers => "leftovers",
+            Category::UpdateInstallers => "update-installers",
         }
     }
 
@@ -59,6 +62,7 @@ impl Category {
             Category::Trash => "Trash",
             Category::LanguagePacks => "Unneeded Languages",
             Category::Leftovers => "Uninstaller Leftovers",
+            Category::UpdateInstallers => "Update Installers",
         }
     }
 
@@ -76,6 +80,7 @@ impl Category {
             Category::Trash => "Files waiting in the Trash",
             Category::LanguagePacks => "Speech and localization data for languages you do not use",
             Category::Leftovers => "Data belonging to apps that are no longer installed",
+            Category::UpdateInstallers => "Installer packages apps keep after a successful update",
         }
     }
 
@@ -101,6 +106,9 @@ impl Category {
             "trash" => Category::Trash,
             "language" | "languages" | "language-packs" | "localization" => Category::LanguagePacks,
             "leftover" | "leftovers" | "uninstall-leftovers" => Category::Leftovers,
+            "update-installer" | "update-installers" | "upgrades" | "upgrade-packages" => {
+                Category::UpdateInstallers
+            }
             _ => return None,
         };
         Some(alias)

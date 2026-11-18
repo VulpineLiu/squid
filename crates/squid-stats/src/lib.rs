@@ -251,6 +251,15 @@ impl Sampler {
     }
 
     pub fn refresh(&mut self) -> SystemSnapshot {
+        self.refresh_with(true)
+    }
+
+    /// `want_processes=false` is the widget-grade light refresh: it skips the
+    /// per-pid CPU/memory walk (hundreds of Get-ProcessTimes calls on
+    /// Windows) and the top-process sort, keeping only a cheap pid sweep for
+    /// the process count. The always-on desktop widget pays this on every
+    /// beat; only 实时监控 asks for the full table.
+    pub fn refresh_with(&mut self, want_processes: bool) -> SystemSnapshot {
         let elapsed = self.last.elapsed().max(Duration::from_millis(80));
         self.last = Instant::now();
 
@@ -258,11 +267,19 @@ impl Sampler {
             .refresh_cpu_specifics(sysinfo::CpuRefreshKind::nothing().with_cpu_usage());
         self.system
             .refresh_memory_specifics(sysinfo::MemoryRefreshKind::nothing().with_ram().with_swap());
-        self.system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            true,
-            ProcessRefreshKind::nothing().with_cpu().with_memory(),
-        );
+        if want_processes {
+            self.system.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                true,
+                ProcessRefreshKind::nothing().with_cpu().with_memory(),
+            );
+        } else {
+            self.system.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                true,
+                ProcessRefreshKind::nothing(),
+            );
+        }
         self.networks.refresh(true);
         self.disks
             .refresh_specifics(true, DiskRefreshKind::nothing().with_io_usage());
@@ -272,7 +289,11 @@ impl Sampler {
         let memory = memory_stats(&self.system);
         let network = net_rates(&self.networks, seconds);
         let disk = disk_rates(&self.disks, seconds);
-        let top_processes = top_processes(&self.system, 12);
+        let top_processes = if want_processes {
+            top_processes(&self.system, 12)
+        } else {
+            Vec::new()
+        };
 
         let mut snapshot = SystemSnapshot {
             taken_at_ms: now_ms(),
@@ -915,6 +936,24 @@ mod tests {
         assert!(snapshot.processes > 0);
         let apps = sampler.applications(5);
         assert!(!apps.is_empty());
+    }
+
+    /// The widget-grade light refresh: every meter the desktop panel draws
+    /// still moves, but the per-process table stays empty (that walk is the
+    /// expensive part of a refresh on Windows).
+    #[test]
+    fn the_light_refresh_keeps_the_meters_and_drops_the_table() {
+        let mut sampler = Sampler::new();
+        std::thread::sleep(Duration::from_millis(220));
+        let snapshot = sampler.refresh_with(false);
+        assert_eq!(snapshot.cpu.per_core.len(), snapshot.cpu.logical_cores);
+        assert!(snapshot.memory.total.as_u64() > 0);
+        assert!(snapshot.processes > 0);
+        assert!(snapshot.top_processes.is_empty());
+        // A light beat must not poison the full one: the next full refresh
+        // still walks processes and produces a ranking.
+        let full = sampler.refresh_with(true);
+        assert!(!full.top_processes.is_empty() || full.processes == 0);
     }
 
     #[test]

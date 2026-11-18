@@ -277,7 +277,7 @@ export function ApplicationsPage({
                         <strong>{item.label}</strong>
                         <span title={item.displayPath}>{shortPath(item.displayPath, 44)}</span>
                         <small>
-                          {categoryLabel(item.category, lang)}
+                          {categoryLabel(item.category, lang, bin)}
                           {item.note ? ` · ${item.note}` : ""}
                           {item.lock ? ` · ${lockLabel(item.lock, t)}` : ""}
                         </small>

@@ -49,8 +49,9 @@ export function WidgetPage() {
   useEffect(() => {
     let live = true;
     const tick = async () => {
+      if (document.hidden) return;
       try {
-        const next = await api.systemSnapshot();
+        const next = await api.systemSnapshot(false);
         if (live) {
           setSnapshot(next);
           bump(next);
@@ -84,6 +85,15 @@ export function WidgetPage() {
       desc: t(
         "CPU / memory / GPU rings, device name and session uptime.",
         "CPU / 内存 / GPU 占用圆环、设备名、本次运行时长",
+      ),
+    },
+    {
+      key: "panelCpu" as const,
+      icon: "▦",
+      name: "CPU",
+      desc: t(
+        "Total usage curve plus a full-width row of gradient load bars, one per logical core.",
+        "总体占用率曲线 + 整行渐变占用柱，一根柱对应一个逻辑核心（绿→黄→橙→红连续渐变，悬停看具体百分比）",
       ),
     },
     {

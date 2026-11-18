@@ -12,6 +12,7 @@ import type { SystemSnapshot } from "../types";
 
 const PANELS: { key: keyof WidgetPrefs; label: string }[] = [
   { key: "panelRun", label: "运行状态" },
+  { key: "panelCpu", label: "CPU" },
   { key: "panelNetwork", label: "网络" },
   { key: "panelDisk", label: "存储读写" },
   { key: "panelStorage", label: "存储空间" },
@@ -49,15 +50,18 @@ export function WidgetWindow() {
     };
   }, []);
 
-  // Poll at the configured cadence; pausing while hidden saves cycles.
+  // Poll at the configured cadence. The widget never shows the per-process
+  // table, so it rides the light refresh, and an all-collapsed widget goes
+  // silent until the header is opened again.
+  const collapsed = Boolean(prefs?.collapsed);
   const intervalMs = prefs?.intervalMs ?? 2000;
   useEffect(() => {
-    if (!prefs?.enabled) return;
+    if (!prefs?.enabled || collapsed) return;
     let live = true;
     const tick = async () => {
       if (!live || document.hidden) return;
       try {
-        const next = await api.systemSnapshot();
+        const next = await api.systemSnapshot(false);
         if (live) {
           setSnapshot(next);
           bump(next);
@@ -72,7 +76,7 @@ export function WidgetWindow() {
       live = false;
       window.clearInterval(timer);
     };
-  }, [bump, intervalMs, prefs?.enabled]);
+  }, [bump, collapsed, intervalMs, prefs?.enabled]);
 
   const patch = useCallback((values: Parameters<typeof api.widgetSet>[0]) => {
     void api
@@ -81,14 +85,19 @@ export function WidgetWindow() {
       .catch((reason) => console.error(messageFrom(reason)));
   }, []);
 
-  const collapsed = Boolean(prefs?.collapsed);
-
   // Last persisted drag position; null while the widget is corner-docked.
   const lastPos = useRef<{ x: number; y: number } | null>(null);
 
   // Grow/shrink the window to the stacked cards so transparent space never
   // eats desktop clicks (scrollHeight is CSS px == LogicalSize units).
+  // Only an actual height change may call setSize/redock: setSize answers
+  // with a resize event that re-arms the observer, and redock round-trips
+  // through widget_set → widget://settings → setPrefs. Without this gate the
+  // two effects re-fire each other forever (IPC storm + a config write per
+  // loop turn — the old "widget costs 3% CPU" bug).
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const lastFit = useRef(0);
+  const ready = Boolean(prefs);
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -97,13 +106,17 @@ export function WidgetWindow() {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         const height = Math.max(64, root.scrollHeight + 4);
+        if (height === lastFit.current) return;
+        lastFit.current = height;
         void windowRef.current
           ?.setSize(new LogicalSize(350, height))
           .then(() => {
             // Keep the docked corner anchored after the size change.
             if (!lastPos.current) void api.widgetSet({ redock: true }).catch(() => undefined);
           })
-          .catch(() => undefined);
+          .catch(() => {
+            lastFit.current = 0;
+          });
       });
     };
     const observer = new ResizeObserver(fit);
@@ -113,7 +126,7 @@ export function WidgetWindow() {
       observer.disconnect();
       window.cancelAnimationFrame(frame);
     };
-  }, [prefs, open, collapsed]);
+  }, [ready, collapsed, open]);
 
   const toggleCollapsed = () => {
     setOpen(false);

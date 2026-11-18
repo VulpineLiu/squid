@@ -50,6 +50,7 @@ export interface MetricHistory {
   netDown: number[];
   diskRead: number[];
   diskWrite: number[];
+  cpu: number[];
 }
 
 /** Append-only ring buffers over the snapshot stream (sparkline source). */
@@ -59,6 +60,7 @@ export function useHistory(): [MetricHistory, (snapshot: SystemSnapshot) => void
     netDown: [],
     diskRead: [],
     diskWrite: [],
+    cpu: [],
   });
   const bump = useMemo(
     () => (snapshot: SystemSnapshot) => {
@@ -70,18 +72,27 @@ export function useHistory(): [MetricHistory, (snapshot: SystemSnapshot) => void
       push(ref.current.netDown, snapshot.network.rx_per_sec);
       push(ref.current.diskRead, snapshot.disk.read_per_sec);
       push(ref.current.diskWrite, snapshot.disk.write_per_sec);
+      push(ref.current.cpu, snapshot.cpu.total);
     },
     [],
   );
   return [ref.current, bump];
 }
 
-function Spark({ values, color }: { values: number[]; color: string }) {
+function Spark({
+  values,
+  color,
+  max,
+}: {
+  values: number[];
+  color: string;
+  max?: number;
+}) {
   // The history array is mutated in place between renders, so the polyline
   // must be rebuilt every render — a useMemo on identity would freeze the
   // first (empty) result forever.
   if (values.length < 2) return <svg className="wd-spark" viewBox="0 0 300 56" />;
-  const top = Math.max(...values, 1);
+  const top = max ?? Math.max(...values, 1);
   const width = 300;
   const step = width / (HISTORY - 1);
   const offset = HISTORY - values.length;
@@ -107,6 +118,92 @@ export function uptimeFull(seconds: number, zh: boolean): string {
   return zh
     ? `${d} 天 ${h} 时 ${m} 分 ${s} 秒`
     : `${d}d ${h}h ${m}m ${s}s`;
+}
+
+/* 逻辑核心占用柱状图：整行均分（核心多则柱变窄），柱色 = 占用率在
+ * 绿→黄→橙→红 四个锚点之间连续插值，柱内再做纵向微渐变；悬停显示
+ * 「核心 N: xx%」（编号与任务管理器一致从 0 开始）。 */
+const LOAD_STOPS: Array<[number, [number, number, number]]> = [
+  [0, [46, 204, 113]],
+  [33, [247, 224, 120]],
+  [66, [245, 165, 76]],
+  [100, [233, 87, 63]],
+];
+
+function loadRgb(value: number): [number, number, number] {
+  const v = Math.max(0, Math.min(100, value));
+  for (let i = 1; i < LOAD_STOPS.length; i += 1) {
+    const [at, rgb] = LOAD_STOPS[i];
+    if (v <= at) {
+      const [prevAt, prevRgb] = LOAD_STOPS[i - 1];
+      const t = (v - prevAt) / (at - prevAt);
+      return rgb.map((channel, k) =>
+        Math.round(prevRgb[k] + (channel - prevRgb[k]) * t),
+      ) as [number, number, number];
+    }
+  }
+  return LOAD_STOPS[LOAD_STOPS.length - 1][1];
+}
+
+function loadColor(value: number): string {
+  return `rgb(${loadRgb(value).join(",")})`;
+}
+
+function barFill(value: number): string {
+  const base = loadRgb(value);
+  const deep = base.map((channel) => Math.round(channel * 0.62));
+  const gloss = base.map((channel) => Math.round(channel + (255 - channel) * 0.35));
+  const css = (rgb: number[]) => `rgb(${rgb.join(",")})`;
+  return `linear-gradient(180deg, ${css(gloss)} 0%, ${css(base)} 45%, ${css(deep)} 100%)`;
+}
+
+function CpuPanel({
+  total,
+  cores,
+  history,
+  zh,
+}: {
+  total: number;
+  cores: number[];
+  history: MetricHistory;
+  zh: boolean;
+}) {
+  return (
+    <div className="wd-card">
+      <div className="wd-line-head">
+        <h4>CPU</h4>
+        <div className="wd-rate">
+          <b className="wd-cpu-total" style={{ color: loadColor(total) }}>
+            {Math.round(total)}%
+          </b>
+        </div>
+      </div>
+      <Spark values={history.cpu} color="#2f6bff" max={100} />
+      {cores.length > 0 ? (
+        <>
+          <div className="wd-bars">
+            {cores.map((value, index) => (
+              <span
+                key={index}
+                className="wd-bar"
+                title={`${zh ? "核心" : "Core"} ${index}: ${Math.round(value)}%`}
+              >
+                <i
+                  style={{
+                    height: `${Math.max(8, Math.min(100, value))}%`,
+                    background: barFill(value),
+                  }}
+                />
+              </span>
+            ))}
+          </div>
+          <div className="wd-bars-caption">
+            {zh ? `逻辑核心 ×${cores.length}` : `Logical cores ×${cores.length}`}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 export function DiskGlyph() {
@@ -175,6 +272,15 @@ export function WidgetPanels({
             </div>
           </div>
         </div>
+      ) : null}
+
+      {prefs.panelCpu ? (
+        <CpuPanel
+          total={snapshot?.cpu.total ?? 0}
+          cores={snapshot?.cpu.per_core ?? []}
+          history={history}
+          zh={zh}
+        />
       ) : null}
 
       {prefs.panelNetwork ? (

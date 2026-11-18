@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   Code2,
+  DownloadCloud,
   FileWarning,
   Globe2,
   Languages,
@@ -88,8 +89,8 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     tone: "teal",
   },
   trash: {
-    en: "Trash",
-    zh: "废纸篓",
+    en: "Recycle Bin",
+    zh: "回收站",
     blurbEn: "Files waiting to be emptied",
     blurbZh: "等待清空的文件",
     icon: Trash2,
@@ -111,11 +112,25 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     icon: Puzzle,
     tone: "amber",
   },
+  "update-installers": {
+    en: "Update installers",
+    zh: "升级安装包",
+    blurbEn: "Installer packages apps keep after updating",
+    blurbZh: "应用升级后留下的安装包，需要时会自动重新下载",
+    icon: DownloadCloud,
+    tone: "green",
+  },
 };
 
 export const CATEGORY_ORDER = Object.keys(CATEGORY_META) as Category[];
 
-export function categoryLabel(category: Category, language: "zh" | "en"): string {
+export function categoryLabel(
+  category: Category,
+  language: "zh" | "en",
+  binName?: string,
+): string {
+  // The bin category borrows the OS word for it: 回收站 on Windows, 废纸篓 on macOS.
+  if (category === "trash" && binName) return binName;
   return language === "zh" ? CATEGORY_META[category].zh : CATEGORY_META[category].en;
 }
 
@@ -612,7 +627,7 @@ export function CategoryCard({
   onInspect: () => void;
   focused?: boolean;
 }) {
-  const { lang, t } = useI18n();
+  const { lang, t, bin } = useI18n();
   const meta = CATEGORY_META[category];
   const Icon = meta.icon;
   return (
@@ -630,11 +645,11 @@ export function CategoryCard({
           checked={selected}
           disabled={disabled}
           onChange={onToggle}
-          label={categoryLabel(category, lang)}
+          label={categoryLabel(category, lang, bin)}
         />
       </div>
       <div className="category-copy">
-        <strong>{categoryLabel(category, lang)}</strong>
+        <strong>{categoryLabel(category, lang, bin)}</strong>
         <span>{lang === "zh" ? meta.blurbZh : meta.blurbEn}</span>
       </div>
       <div className="category-card-foot">

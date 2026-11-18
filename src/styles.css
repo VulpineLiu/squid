@@ -4472,6 +4472,46 @@ select:focus-visible,
   box-shadow: 0 3px 8px rgba(47, 80, 112, 0.07);
 }
 
+.confirm-updater-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(23, 122, 84, 0.18);
+  border-radius: 10px;
+  background: rgba(23, 122, 84, 0.06);
+  color: #177a54;
+}
+
+.confirm-updater-banner > svg {
+  flex-shrink: 0;
+}
+
+.confirm-updater-banner div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.confirm-updater-banner strong {
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.confirm-updater-banner span {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  line-height: var(--nex-leading-body);
+}
+
+.confirm-updater-banner button {
+  flex-shrink: 0;
+  color: #177a54;
+}
+
 /* Toast */
 
 .toast-stack {
@@ -5439,6 +5479,42 @@ html.widget-mode body {
 
 .wd-spark + .wd-spark {
   margin-top: -34px;
+}
+
+/* CPU card: total % + one full-width row of per-core load bars */
+
+.wd-cpu-total {
+  color: #16b364;
+}
+
+.wd-bars {
+  display: flex;
+  gap: 2px;
+  height: 30px;
+  margin-top: 10px;
+}
+
+.wd-bar {
+  display: flex;
+  flex: 1;
+  align-items: flex-end;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #eef1f6;
+}
+
+.wd-bar i {
+  display: block;
+  width: 100%;
+  border-radius: 3px;
+  /* height + background come from the core load (连续渐变 in line) */
+}
+
+.wd-bars-caption {
+  margin-top: 6px;
+  color: #8b96a5;
+  font-size: 10px;
 }
 
 /* storage card */

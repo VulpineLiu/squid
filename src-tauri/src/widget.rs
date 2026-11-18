@@ -87,6 +87,7 @@ pub struct WidgetPrefs {
     /// Master switch: hides the window entirely when off.
     pub enabled: bool,
     pub panel_run: bool,
+    pub panel_cpu: bool,
     pub panel_network: bool,
     pub panel_disk: bool,
     pub panel_storage: bool,
@@ -109,6 +110,7 @@ impl Default for WidgetPrefs {
         Self {
             enabled: true,
             panel_run: true,
+            panel_cpu: true,
             panel_network: true,
             panel_disk: true,
             panel_storage: true,
@@ -229,7 +231,11 @@ fn place_window(app: &AppHandle, prefs: &WidgetPrefs) {
 /// ordinary app window, so it can never cover the user's work.
 fn sync_window(app: &AppHandle, prefs: &WidgetPrefs) {
     if !prefs.enabled
-        || (!prefs.panel_run && !prefs.panel_network && !prefs.panel_disk && !prefs.panel_storage)
+        || !(prefs.panel_run
+            || prefs.panel_cpu
+            || prefs.panel_network
+            || prefs.panel_disk
+            || prefs.panel_storage)
     {
         if let Some(window) = app.get_webview_window(WIDGET_LABEL) {
             let _ = window.hide();
@@ -290,6 +296,7 @@ pub fn widget_get(app: AppHandle) -> WidgetView {
 pub struct WidgetPatch {
     pub enabled: Option<bool>,
     pub panel_run: Option<bool>,
+    pub panel_cpu: Option<bool>,
     pub panel_network: Option<bool>,
     pub panel_disk: Option<bool>,
     pub panel_storage: Option<bool>,
@@ -318,6 +325,9 @@ pub fn widget_set(app: AppHandle, patch: WidgetPatch) -> Result<WidgetPrefs, Str
         }
         if let Some(value) = patch.panel_run {
             prefs.panel_run = value;
+        }
+        if let Some(value) = patch.panel_cpu {
+            prefs.panel_cpu = value;
         }
         if let Some(value) = patch.panel_network {
             prefs.panel_network = value;
@@ -423,6 +433,7 @@ mod tests {
         // keys the frontend types.ts promises must appear serialized
         for key in [
             "\"panelRun\"",
+            "\"panelCpu\"",
             "\"intervalMs\"",
             "\"rememberCollapsed\"",
             "\"collapsed\"",

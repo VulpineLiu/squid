@@ -19,6 +19,8 @@ fn show_main_window(app: &AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+        // The page stops sampling while parked in the tray; wake it up.
+        let _ = app.emit("squid://visible", true);
     }
 }
 
@@ -93,6 +95,9 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                // A hidden window must not keep sampling the whole machine;
+                // the page pauses its polling on this signal.
+                let _ = window.emit("squid://visible", false);
             }
         })
         .manage(app::AppState::default())

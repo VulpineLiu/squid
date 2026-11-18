@@ -64,7 +64,7 @@ export const api = {
     invoke<StorageNode>("storage_explore", { jobId, path, depth, top }),
   storageLargestFiles: (jobId: string, path: string, limit = 40) =>
     invoke<LargestFile[]>("storage_largest_files", { jobId, path, limit }),
-  systemSnapshot: () => invoke<SystemSnapshot>("system_snapshot"),
+  systemSnapshot: (full = false) => invoke<SystemSnapshot>("system_snapshot", { full }),
   stopProcess: (process: SystemSnapshot["top_processes"][number]) =>
     invoke<void>("stop_process", { process }),
   historyList: (limit = 60) => invoke<HistorySession[]>("history_list", { limit }),
@@ -107,6 +107,8 @@ export const api = {
     listen<UpdateStatus | null>("update://status", (event) => handler(event.payload)),
   onNavigate: (handler: (page: PageId) => void) =>
     listen<PageId>("squid://navigate", (event) => handler(event.payload)),
+  onWindowVisible: (handler: (visible: boolean) => void) =>
+    listen<boolean>("squid://visible", (event) => handler(event.payload)),
   onPopupClosed: (handler: (event: PopupClosedEvent) => void) =>
     listen<PopupClosedEvent>("popup://closed", (event) => handler(event.payload)),
   onWidgetSettings: (handler: (prefs: WidgetPrefs) => void) =>

@@ -32,6 +32,9 @@ pub struct AppState {
     plans: Mutex<HashMap<String, UninstallPlan>>,
     apps: Mutex<Vec<AppInfo>>,
     sampler: Mutex<Sampler>,
+    /// Last light snapshot, so the widget window and the main window polling
+    /// a beat apart share one refresh instead of paying for two.
+    snapshot_cache: Mutex<Option<(Instant, squid_stats::SystemSnapshot)>>,
 }
 
 impl AppState {
@@ -824,10 +827,34 @@ pub async fn storage_largest_files(
 }
 
 #[tauri::command]
-pub fn system_snapshot(app: AppHandle) -> Result<SystemSnapshot, String> {
+pub fn system_snapshot(app: AppHandle, full: Option<bool>) -> Result<SystemSnapshot, String> {
+    // `full` costs a per-pid CPU/memory walk of every process on the machine
+    // (hundreds of syscalls) plus the top-12 sort — the 实时监控 page needs
+    // it; the desktop widget, overview tiles and every background poll pass
+    // false and ride the light refresh. Light answers are cached for two
+    // seconds so windows polling in step pay for one refresh, not several.
     let state = app.state::<AppState>();
+    if full.unwrap_or(false) {
+        let mut sampler = AppState::lock(&state.sampler)?;
+        let snapshot = sampler.refresh();
+        if let Ok(mut cache) = AppState::lock(&state.snapshot_cache) {
+            *cache = Some((Instant::now(), snapshot.clone()));
+        }
+        return Ok(snapshot);
+    }
+    if let Ok(cache) = AppState::lock(&state.snapshot_cache) {
+        if let Some((at, snapshot)) = cache.as_ref() {
+            if at.elapsed() < Duration::from_secs(2) {
+                return Ok(snapshot.clone());
+            }
+        }
+    }
     let mut sampler = AppState::lock(&state.sampler)?;
-    Ok(sampler.refresh())
+    let snapshot = sampler.refresh_with(false);
+    if let Ok(mut cache) = AppState::lock(&state.snapshot_cache) {
+        *cache = Some((Instant::now(), snapshot.clone()));
+    }
+    Ok(snapshot)
 }
 
 #[tauri::command]

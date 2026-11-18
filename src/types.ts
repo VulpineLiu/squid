@@ -21,7 +21,8 @@ export type Category =
   | "project-artifacts"
   | "trash"
   | "language-packs"
-  | "leftovers";
+  | "leftovers"
+  | "update-installers";
 export type ItemKind = "path" | "contents" | "file";
 export type LockReason =
   | "app-running"
@@ -393,6 +394,7 @@ export type WidgetCorner = "top-right" | "top-left" | "bottom-right" | "bottom-l
 export interface WidgetPrefs {
   enabled: boolean;
   panelRun: boolean;
+  panelCpu: boolean;
   panelNetwork: boolean;
   panelDisk: boolean;
   panelStorage: boolean;
@@ -408,6 +410,7 @@ export interface WidgetPrefs {
 export interface WidgetPatch {
   enabled?: boolean;
   panelRun?: boolean;
+  panelCpu?: boolean;
   panelNetwork?: boolean;
   panelDisk?: boolean;
   panelStorage?: boolean;

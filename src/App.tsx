@@ -185,12 +185,16 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [autoCheck, setAutoCheck] = useState(true);
   const [setupOpen, setSetupOpen] = useState(false);
+  // The 托盘驻留 case: a hidden main window must stop sampling the machine.
+  const [windowVisible, setWindowVisible] = useState(true);
   const cleanup = useScanWorkspace("cleanup");
   const purge = useScanWorkspace("purge");
   const apps = useAppsWorkspace();
   const permissions = usePermissionsWorkspace(page === "permissions");
-  const systemActive = page === "overview" || page === "system";
-  const system = useSystemSnapshot(systemActive);
+  const systemActive = (page === "overview" || page === "system") && windowVisible;
+  // Only the 实时监控 top-process table needs the expensive per-pid walk;
+  // the overview tiles ride the light refresh.
+  const system = useSystemSnapshot(systemActive, 1800, page === "system");
   const update = useUpdateFlow(bootstrap?.updateFeedUrl ?? "", autoCheck);
 
   useEffect(() => {
@@ -220,6 +224,23 @@ export default function App() {
     void api
       .onNavigate((next) => {
         if (!cancelled) setPage(next);
+      })
+      .then((stop) => {
+        if (cancelled) stop();
+        else unlisten = stop;
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void api
+      .onWindowVisible((next) => {
+        if (!cancelled) setWindowVisible(next);
       })
       .then((stop) => {
         if (cancelled) stop();
@@ -303,7 +324,7 @@ export default function App() {
       : null;
 
   return (
-    <I18nProvider lang={lang} setLang={setLang}>
+    <I18nProvider lang={lang} setLang={setLang} binNoun={bootstrap.binNoun}>
       <AppChrome
         bootstrap={bootstrap}
         page={page}
