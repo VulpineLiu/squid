@@ -71,11 +71,13 @@ export function OverviewPage({
   bootstrap,
   snapshot,
   cleanup,
+  purge,
   onNavigate,
 }: {
   bootstrap: Bootstrap;
   snapshot: SystemSnapshot | null;
   cleanup: ScanWorkspace;
+  purge: ScanWorkspace;
   onNavigate: (page: PageId) => void;
 }) {
   const { t, lang } = useI18n();
@@ -87,11 +89,33 @@ export function OverviewPage({
   const memoryReserved = snapshot
     ? Math.max(0, memoryInstalled - snapshot.memory.total)
     : 0;
-  const found = cleanup.result
-    ? cleanup.result.items
-        .filter((item) => !item.lock)
-        .reduce((sum, item) => sum + item.onDisk, 0)
-    : 0;
+  const scanned = Boolean(cleanup.result || purge.result);
+  const scanning = cleanup.scanning || purge.scanning;
+  const found = [cleanup, purge].reduce(
+    (sum, workspace) =>
+      sum +
+      (workspace.result
+        ? workspace.result.items
+            .filter((item) => !item.lock)
+            .reduce((total, item) => total + item.onDisk, 0)
+        : 0),
+    0,
+  );
+  // 智能扫描 lives on the 空间清理 page now; the workspaces are app-level so
+  // kicking both stages from here simply continues on that page. It uses the
+  // default deep-scan settings — tweak them there and re-scan if needed.
+  const smartScan = () => {
+    if (!scanned) {
+      void cleanup.runScan().then(() =>
+        purge.runScan({
+          roots: bootstrap.settings.purgeRoots,
+          minAgeDays: bootstrap.settings.purgeMinAgeDays || 7,
+          force: false,
+        }),
+      );
+    }
+    onNavigate("space");
+  };
 
   const hardware = bootstrap.hardwareInfo;
   const ramBrands = [
@@ -151,13 +175,10 @@ export function OverviewPage({
             variant="primary"
             size="lg"
             icon={<Sparkles size={17} />}
-            onClick={() => {
-              if (cleanup.result) onNavigate("cleanup");
-              else void cleanup.runScan();
-            }}
-            disabled={cleanup.scanning}
+            onClick={smartScan}
+            disabled={scanning}
           >
-            {cleanup.result
+            {scanned
               ? t("Review scan", "查看扫描结果")
               : t("Smart scan", "智能扫描")}
           </Button>
@@ -171,7 +192,7 @@ export function OverviewPage({
             {t("Smart Care", "智能维护")}
           </div>
           <h2>
-            {cleanup.result
+            {scanned
               ? t(
                   `${formatBytes(found)} found safely.`,
                   `安全发现 ${formatBytes(found)} 可清理空间。`,
@@ -179,7 +200,7 @@ export function OverviewPage({
               : t("A lighter, faster machine.", "更轻盈，更顺畅。")}
           </h2>
           <p>
-            {cleanup.result
+            {scanned
               ? t(
                   "Review each category before anything is removed. Locked files stay untouched.",
                   "清理前可逐项检查，锁定文件始终不会被处理。",
@@ -192,14 +213,11 @@ export function OverviewPage({
           <div className="hero-actions">
             <Button
               variant="primary"
-              icon={cleanup.result ? <ArrowRight size={16} /> : <ScanSearch size={16} />}
-              onClick={() => {
-                if (cleanup.result) onNavigate("cleanup");
-                else void cleanup.runScan();
-              }}
-              disabled={cleanup.scanning}
+              icon={scanned ? <ArrowRight size={16} /> : <ScanSearch size={16} />}
+              onClick={smartScan}
+              disabled={scanning}
             >
-              {cleanup.result
+              {scanned
                 ? t("Choose what to clean", "选择清理项目")
                 : t("Start a smart scan", "开始智能扫描")}
             </Button>
@@ -259,15 +277,15 @@ export function OverviewPage({
         </div>
       </section>
 
-      {cleanup.scanning ? (
+      {scanning ? (
         <ProgressCard
-          progress={cleanup.progress}
+          progress={cleanup.progress ?? purge.progress}
           title={t("Looking for safe things to clean…", "正在查找可安全清理的项目…")}
-          onCancel={() => void cleanup.cancel()}
+          onCancel={() => void (cleanup.scanning ? cleanup.cancel() : purge.cancel())}
         />
       ) : null}
 
-      {cleanup.result && !cleanup.scanning ? (
+      {scanned && !scanning ? (
         <section className="overview-found">
           <SectionTitle
             title={t("What the scan found", "扫描发现")}
@@ -276,18 +294,20 @@ export function OverviewPage({
               "不想清理的项目可以随时取消勾选。",
             )}
             action={
-              <Button variant="ghost" size="sm" onClick={() => onNavigate("cleanup")}>
-                {t("Open cleanup", "打开清理")}
+              <Button variant="ghost" size="sm" onClick={() => onNavigate("space")}>
+                {t("Open space cleaning", "打开空间清理")}
                 <ChevronRight size={14} />
               </Button>
             }
           />
-          <CategorySummary
-            result={cleanup.result}
-            selected={cleanup.selected}
-            onToggle={cleanup.toggleCategory}
-            onInspect={() => onNavigate("cleanup")}
-          />
+          {cleanup.result ? (
+            <CategorySummary
+              result={cleanup.result}
+              selected={cleanup.selected}
+              onToggle={cleanup.toggleCategory}
+              onInspect={() => onNavigate("space")}
+            />
+          ) : null}
         </section>
       ) : null}
 
@@ -426,13 +446,18 @@ export function OverviewPage({
             </span>
             <ChevronRight size={17} />
           </button>
-          <button className="quick-card tone-violet" onClick={() => onNavigate("purge")}>
+          <button className="quick-card tone-violet" onClick={smartScan}>
             <span className="quick-icon">
               <Sparkles size={22} />
             </span>
             <span className="quick-copy">
-              <strong>{t("Deep clean", "深度清理")}</strong>
-              <small>{t("Clear build artefacts safely", "安全清理项目构建产物")}</small>
+              <strong>{t("Space cleaning", "空间清理")}</strong>
+              <small>
+                {t(
+                  "Caches, logs and build artefacts in one scan",
+                  "一次扫描清掉缓存、垃圾与构建产物",
+                )}
+              </small>
             </span>
             <ChevronRight size={17} />
           </button>

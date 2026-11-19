@@ -84,7 +84,7 @@ export function CategorySummary({
   );
 }
 
-function ItemRow({
+export function ItemRow({
   item,
   checked,
   onToggle,

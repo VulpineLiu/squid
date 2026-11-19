@@ -1,9 +1,8 @@
 export type Language = "zh" | "en";
 export type PageId =
   | "overview"
-  | "cleanup"
+  | "space"
   | "applications"
-  | "purge"
   | "permissions"
   | "widget"
   | "storage"

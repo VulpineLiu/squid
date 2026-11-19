@@ -35,6 +35,7 @@ export interface ScanWorkspace {
   cancel: () => Promise<void>;
   toggleItem: (index: number) => void;
   toggleCategory: (category: Category) => void;
+  setCategorySelection: (category: Category, on: boolean) => void;
   deselect: (indexes: number[]) => void;
   selectAll: () => void;
   clearSelection: () => void;
@@ -150,6 +151,29 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
 
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
+  // Deterministic category state: the 空间清理 page uses this to leave the
+  // optional groups (升级安装包 / 项目产物 / 开发文件) unchecked after a
+  // scan, wherever the rule defaults happened to point.
+  const setCategorySelection = useCallback(
+    (category: Category, on: boolean) => {
+      if (!result) return;
+      const indexes = result.items
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.category === category && !item.lock)
+        .map(({ index }) => index);
+      if (indexes.length === 0) return;
+      setSelected((current) => {
+        const next = new Set(current);
+        for (const index of indexes) {
+          if (on) next.add(index);
+          else next.delete(index);
+        }
+        return next;
+      });
+    },
+    [result],
+  );
+
   const deselect = useCallback((indexes: number[]) => {
     if (indexes.length === 0) return;
     const drop = new Set(indexes);
@@ -230,6 +254,7 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
     cancel,
     toggleItem,
     toggleCategory,
+    setCategorySelection,
     deselect,
     selectAll,
     clearSelection,

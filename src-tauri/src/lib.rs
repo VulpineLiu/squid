@@ -31,9 +31,8 @@ fn navigate_to(app: &AppHandle, page: &'static str) {
 
 fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "打开 Squid", true, None::<&str>)?;
-    let cleanup = MenuItem::with_id(app, "cleanup", "日常清理", true, None::<&str>)?;
+    let space = MenuItem::with_id(app, "space", "空间清理", true, None::<&str>)?;
     let apps = MenuItem::with_id(app, "applications", "应用卸载", true, None::<&str>)?;
-    let purge = MenuItem::with_id(app, "purge", "深度清理", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出 Squid", true, None::<&str>)?;
     let first_separator = PredefinedMenuItem::separator(app)?;
     let last_separator = PredefinedMenuItem::separator(app)?;
@@ -45,9 +44,8 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         &[
             &open,
             &first_separator,
-            &cleanup,
+            &space,
             &apps,
-            &purge,
             &widget_toggle,
             &last_separator,
             &quit,
@@ -66,9 +64,8 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main_window(app),
-            "cleanup" => navigate_to(app, "cleanup"),
+            "space" => navigate_to(app, "space"),
             "applications" => navigate_to(app, "applications"),
-            "purge" => navigate_to(app, "purge"),
             "widget" => {
                 if let Err(error) = widget::toggle_from_tray(app) {
                     eprintln!("widget toggle failed: {error}");

@@ -11,7 +11,6 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
-  WandSparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAppsWorkspace } from "./hooks/useAppsWorkspace";
@@ -33,12 +32,11 @@ import { useToast } from "./components/ui";
 import { SetupPanel } from "./components/SetupPanel";
 import appIconUrl from "../src-tauri/icons/128x128.png";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
-import { CleanupPage } from "./pages/CleanupPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PermissionsPage } from "./pages/PermissionsPage";
-import { PurgePage } from "./pages/PurgePage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { SpacePage } from "./pages/SpacePage";
 import { StoragePage } from "./pages/StoragePage";
 import { SystemPage } from "./pages/SystemPage";
 import { WidgetPage } from "./pages/WidgetPage";
@@ -64,9 +62,9 @@ const NAV_GROUPS: {
         icon: LayoutDashboard,
       },
       {
-        id: "cleanup",
-        labelEn: "Daily cleanup",
-        labelZh: "日常清理",
+        id: "space",
+        labelEn: "Space cleaning",
+        labelZh: "空间清理",
         icon: Eraser,
       },
       {
@@ -74,12 +72,6 @@ const NAV_GROUPS: {
         labelEn: "Uninstall apps",
         labelZh: "应用卸载",
         icon: AppWindow,
-      },
-      {
-        id: "purge",
-        labelEn: "Deep Clean",
-        labelZh: "深度清理",
-        icon: WandSparkles,
       },
       {
         id: "permissions",
@@ -123,9 +115,8 @@ const NAV_GROUPS: {
 
 const PAGE_TITLES: Record<PageId, [string, string]> = {
   overview: ["Computer overview", "电脑概览"],
-  cleanup: ["Daily cleanup", "日常清理"],
+  space: ["Space cleaning", "空间清理"],
   applications: ["Uninstall apps", "应用卸载"],
-  purge: ["Deep Clean", "深度清理"],
   permissions: ["Permissions", "权限管理"],
   widget: ["Desktop widget", "桌面小工具"],
   storage: ["Storage", "存储空间"],
@@ -255,17 +246,16 @@ export default function App() {
   useEffect(() => {
     const order: PageId[] = [
       "overview",
-      "cleanup",
+      "space",
       "applications",
-      "purge",
       "permissions",
       "storage",
       "system",
+      "widget",
       "history",
       "settings",
-      "widget",
     ];
-    // Ctrl/Cmd+1..9 map in order; the 10th (desktop widget) rides on "0".
+    // Ctrl/Cmd+1..9 map in navigation order.
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
       const index = event.key === "0" ? 9 : Number(event.key) - 1;
@@ -336,26 +326,21 @@ export default function App() {
             bootstrap={bootstrap}
             snapshot={system.snapshot}
             cleanup={cleanup}
+            purge={purge}
             onNavigate={setPage}
           />
         ) : null}
-        {page === "cleanup" ? (
-          <CleanupPage
-            workspace={cleanup}
+        {page === "space" ? (
+          <SpacePage
+            cleanup={cleanup}
+            purge={purge}
+            bootstrap={bootstrap}
             deleteMode={deleteMode}
             onHistory={() => setPage("history")}
           />
         ) : null}
         {page === "applications" ? (
           <ApplicationsPage workspace={apps} onHistory={() => setPage("history")} />
-        ) : null}
-        {page === "purge" ? (
-          <PurgePage
-            workspace={purge}
-            bootstrap={bootstrap}
-            deleteMode={deleteMode}
-            onHistory={() => setPage("history")}
-          />
         ) : null}
         {page === "permissions" ? <PermissionsPage workspace={permissions} /> : null}
         {page === "widget" ? <WidgetPage /> : null}
@@ -435,7 +420,7 @@ function AppChrome({
                   >
                     <Icon size={18} />
                     <span>{lang === "zh" ? item.labelZh : item.labelEn}</span>
-                    {item.id === "cleanup" && page !== "cleanup" ? (
+                    {item.id === "space" && page !== "space" ? (
                       <i className="nav-dot" />
                     ) : null}
                   </button>
