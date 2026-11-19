@@ -341,12 +341,20 @@ fn item_for(candidate: &Candidate) -> CleanupItem {
 /// (shallow) so a project in an unexpected place is still found.
 fn resolve_roots(engine: &Engine, options: &PurgeOptions) -> Vec<PathBuf> {
     if !options.roots.is_empty() {
-        return options
+        let chosen: Vec<PathBuf> = options
             .roots
             .iter()
             .map(|root| squid_core::paths::expand(&root.to_string_lossy()))
             .filter(|path| path.is_dir())
             .collect();
+        // All the caller's paths are dead (classic case: the default roots
+        // are macOS-flavoured ~/code-style folders that never exist on
+        // Windows). Falling through to settings + home beats a scan that
+        // refuses to run and tells the user to pick a folder that is
+        // already in the box.
+        if !chosen.is_empty() {
+            return chosen;
+        }
     }
     let mut roots = engine.settings().purge_root_paths();
     let home = squid_core::paths::home_dir();

@@ -7,7 +7,7 @@ mod widget;
 
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, WindowEvent,
 };
 
@@ -62,7 +62,8 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .icon(icon)
         .tooltip("Squid")
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        // 左键/双击 = 直接打开主界面，右键 = 菜单（电脑管家式交互）。
+        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main_window(app),
             "cleanup" => navigate_to(app, "cleanup"),
@@ -75,6 +76,21 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             "quit" => app.exit(0),
             _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            let app = tray.app_handle();
+            match event {
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+                | TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                } => show_main_window(app),
+                _ => {}
+            }
         })
         .build(app)?;
     Ok(())

@@ -1,10 +1,12 @@
 import {
   AlertTriangle,
+  FolderOpen,
   FolderSearch,
   GitBranch,
   ScanSearch,
   ShieldAlert,
 } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
 import { useI18n } from "../i18n";
 import type { Bootstrap, DeleteMode } from "../types";
@@ -27,6 +29,25 @@ export function PurgePage({
   const [roots, setRoots] = useState(bootstrap.settings.purgeRoots.join("\n"));
   const [minAge, setMinAge] = useState(bootstrap.settings.purgeMinAgeDays);
   const [force, setForce] = useState(false);
+
+  const browse = async () => {
+    const chosen = await open({
+      directory: true,
+      multiple: true,
+      title: t("Choose project folders to inspect", "选择要检查的项目目录"),
+    });
+    if (!chosen) return;
+    const picked = (Array.isArray(chosen) ? chosen : [chosen]).filter(
+      (path) => !roots.split(/\r?\n/).some((line) => line.trim() === path),
+    );
+    if (picked.length > 0) {
+      setRoots((current) =>
+        current.trim().length > 0
+          ? `${current.trimEnd()}\n${picked.join("\n")}`
+          : picked.join("\n"),
+      );
+    }
+  };
 
   const run = () =>
     void workspace.runScan({
@@ -54,10 +75,23 @@ export function PurgePage({
         }
       />
 
+      {workspace.error && !workspace.scanning ? (
+        <div className="error-banner">{workspace.error}</div>
+      ) : null}
+
       <div className="deep-options">
         <div className="deep-option-main">
           <label className="field-label" htmlFor="purge-roots">
             {t("Project folders to inspect", "要检查的项目目录")}
+            <button
+              type="button"
+              className="text-button"
+              style={{ marginLeft: 10 }}
+              onClick={() => void browse()}
+            >
+              <FolderOpen size={13} />
+              {t("Browse…", "浏览…")}
+            </button>
           </label>
           <textarea
             id="purge-roots"
