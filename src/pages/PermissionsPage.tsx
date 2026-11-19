@@ -226,8 +226,7 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
                     className={`settings-row ${workspace.busyId === item.id ? "is-busy" : ""}`}
                     key={item.id}
                   >
-                    <div className="perm-row">
-                      <RowIcon icon={item.icon} label={item.displayName} />
+                    <div className="perm-row perm-row-noicon">
                       <div>
                         <span>{item.name}</span>
                         <small title={item.command}>

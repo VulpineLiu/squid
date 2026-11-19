@@ -4947,9 +4947,9 @@ select:focus-visible,
 }
 
 .perm-group-icon {
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
   object-fit: contain;
   flex: 0 0 auto;
 }
@@ -4977,6 +4977,12 @@ select:focus-visible,
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+/* Startup rows live under a software-group header that already carries the
+   icon — the icon shows once per group, children just align under its text. */
+.perm-row-noicon {
+  padding-left: 30px;
 }
 
 .perm-row > div {
@@ -5447,43 +5453,226 @@ select:focus-visible,
   flex-shrink: 0;
 }
 
-.hint-strip {
-  margin-top: 12px;
-  padding: 9px 14px;
-  border: 1px dashed #e3d2b2;
-  border-radius: 10px;
-  background: #fbf4e7;
-  color: #8a7a60;
-  font-size: var(--nex-text-2xs);
+/* ---- 空间清理 v2: sticky summary + category accordions ----------------- */
+
+.space-sum {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 20px;
+  border: 1px solid #f2ddba;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fff7ea, #ffefdb);
+  box-shadow: 0 10px 24px rgba(150, 106, 40, 0.08);
 }
 
-.category-slot {
-  position: relative;
+.space-sum .grow {
+  flex: 1;
+  min-width: 0;
 }
 
-.opt-tag {
-  position: absolute;
-  top: -8px;
-  right: 8px;
-  z-index: 2;
-  /* Sits over the card corner where the checkbox lives: it is a label,
-     never a click target, so the tick underneath stays hittable. */
-  pointer-events: none;
-  border-radius: 99px;
-  padding: 2px 9px;
-  background: #3f6bbd;
-  color: #fff;
-  font-size: 10px;
+.space-sum .big {
+  color: var(--nex-ink);
+  font-size: 19px;
   font-weight: var(--nex-weight-bold);
 }
 
-.category-slot .category-card {
-  height: 100%;
+.space-sum .big em {
+  font-style: normal;
+  color: var(--nex-primary);
 }
 
-.category-slot:has(.opt-tag) .category-card {
-  border-style: dashed;
-  border-color: #b9c6e4;
+.space-sum .sub {
+  margin-top: 3px;
+  color: #9a8a6d;
+  font-size: var(--nex-text-3xs);
+}
+
+.space-sec {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 22px 2px 8px;
+}
+
+.space-sec h2 {
+  color: var(--nex-ink);
+  font-size: 14px;
+  font-weight: var(--nex-weight-bold);
+}
+
+.space-sec .tip {
+  color: #97a2b0;
+  font-size: var(--nex-text-3xs);
+}
+
+.space-sec .r {
+  margin-left: auto;
+  color: #97a2b0;
+  font-size: var(--nex-text-3xs);
+}
+
+.space-sec .r b {
+  color: var(--nex-primary);
+  font-size: 13px;
+}
+
+.space-sec .r.is-opt b {
+  color: #2fa06b;
+}
+
+.space-cat {
+  margin-bottom: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(47, 87, 126, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 253, 248, 0.92);
+  box-shadow: var(--shadow-card);
+}
+
+.space-cat-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+
+.space-cat-head:hover {
+  background: rgba(255, 248, 235, 0.7);
+}
+
+.space-cat-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--tone);
+}
+
+.space-cat-name {
+  flex: 0 0 auto;
+  color: var(--nex-ink);
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.space-cat-desc {
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  color: #99a4b2;
+  font-size: var(--nex-text-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-cat-n {
+  flex: 0 0 auto;
+  color: #a5aebb;
+  font-size: var(--nex-text-3xs);
+}
+
+.space-cat-size {
+  flex: 0 0 auto;
+  color: var(--nex-primary);
+  font-size: 13px;
+  font-weight: var(--nex-weight-semibold);
+}
+
+.space-cat-size.is-opt {
+  color: #2fa06b;
+}
+
+.space-cat-chv {
+  flex: 0 0 auto;
+  color: #b7bfca;
+  transition: transform 0.15s ease;
+}
+
+.space-cat.is-open .space-cat-chv {
+  transform: rotate(90deg);
+}
+
+.space-cat-items {
+  border-top: 1px dashed #eee0c8;
+  background: rgba(255, 254, 251, 0.9);
+}
+
+.space-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 16px 9px 46px;
+  border-top: 1px solid #f6efe2;
+  cursor: pointer;
+}
+
+.space-item:first-child {
+  border-top: 0;
+}
+
+.space-item:hover {
+  background: rgba(253, 244, 228, 0.75);
+}
+
+.space-item.is-locked {
+  cursor: default;
+}
+
+.space-item.is-locked:hover {
+  background: transparent;
+}
+
+.space-item-name {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: #42505e;
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-item-path {
+  flex: 1 1 auto;
+  overflow: hidden;
+  min-width: 0;
+  color: #8b98a8;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: var(--nex-text-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-item-meta {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid #ecd9b4;
+  border-radius: 99px;
+  color: #b3854d;
+  font-size: var(--nex-text-3xs);
+}
+
+.space-item-meta.is-locked {
+  border-color: #e5c8c8;
+  color: #a94c52;
+}
+
+.space-item-size {
+  flex: 0 0 auto;
+  color: #5a6776;
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.space-item-go {
+  flex: 0 0 auto;
+  color: #c0a06a;
 }
 
 .confirm-updater-actions {

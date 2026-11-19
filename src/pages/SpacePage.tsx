@@ -7,17 +7,24 @@
  * three optional groups (升级安装包 / 项目产物 / 开发文件) start untouched
  * and join the same delete run when the user checks their card. */
 import {
+  ArrowUpRight,
+  ChevronRight,
   DownloadCloud,
   FolderOpen,
   ScanSearch,
-  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
-import { formatBytes, formatCount } from "../lib/format";
+import { formatBytes, formatCount, shortPath } from "../lib/format";
 import type {
   Bootstrap,
   Category,
@@ -26,17 +33,18 @@ import type {
   DeleteResult,
 } from "../types";
 import type { ScanWorkspace } from "../hooks/useScanWorkspace";
-import { ItemRow } from "../components/CleanupView";
 import {
   Button,
+  CATEGORY_META,
   CATEGORY_ORDER,
-  CategoryCard,
+  Checkbox,
   ConfirmDialog,
   InlineError,
   ProgressCard,
   SectionTitle,
   Toggle,
   categoryLabel,
+  lockLabel,
   useToast,
 } from "../components/ui";
 
@@ -54,6 +62,40 @@ type Entry = {
 };
 
 const AGE_CHOICES = [3, 7, 30];
+
+/* One candidate inside an expanded category. The whole row reveals the path
+ * in Explorer (电脑管家 habit: 点击定位); only the tick box changes the
+ * selection, so browsing never mis-toggles. */
+function AccItem({ entry }: { entry: Entry }) {
+  const { t } = useI18n();
+  const { item, source, index } = entry;
+  const checked = source.selected.has(index);
+  return (
+    <div
+      className={`space-item ${item.lock ? "is-locked" : ""}`}
+      onClick={() => void api.revealPath(item.path).catch(() => undefined)}
+      title={t("Open the location in Explorer", "在资源管理器中打开所在位置")}
+    >
+      <Checkbox
+        checked={checked}
+        disabled={Boolean(item.lock)}
+        onChange={() => source.toggleItem(index)}
+        label={item.label}
+      />
+      <span className="space-item-name">{item.label}</span>
+      <span className="space-item-path" title={item.displayPath}>
+        {shortPath(item.displayPath, 96)}
+      </span>
+      {item.lock || item.note ? (
+        <span className={`space-item-meta ${item.lock ? "is-locked" : ""}`}>
+          {item.lock ? lockLabel(item.lock, t) : item.note}
+        </span>
+      ) : null}
+      <span className="space-item-size">{formatBytes(item.onDisk)}</span>
+      <ArrowUpRight className="space-item-go" size={14} />
+    </div>
+  );
+}
 
 export function SpacePage({
   cleanup,
@@ -74,7 +116,16 @@ export function SpacePage({
   const [minAge, setMinAge] = useState(bootstrap.settings.purgeMinAgeDays || 7);
   const [force, setForce] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [focus, setFocus] = useState<Category | null>(null);
+  // Open accordions. On first results we auto-expand the biggest category so
+  // the list never reads as a dead panel; that initial choice is remembered
+  // here (null until the first scan lands).
+  const [expanded, setExpanded] = useState<Category[] | null>(null);
+  const toggleExpanded = (category: Category) =>
+    setExpanded((current) =>
+      (current ?? []).includes(category)
+        ? (current ?? []).filter((item) => item !== category)
+        : [...(current ?? []), category],
+    );
   const [mode, setMode] = useState<DeleteMode>(deleteMode);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<DeleteResult | null>(null);
@@ -176,20 +227,6 @@ export function SpacePage({
     return { count, total };
   }, [entries, cleanup.selected, purge.selected]);
 
-  const optionalSelected = useMemo(() => {
-    let count = 0;
-    for (const entry of entries) {
-      if (
-        OPTIONAL_CATEGORIES.includes(entry.item.category) &&
-        entry.source.selected.has(entry.index) &&
-        !entry.item.lock
-      ) {
-        count += 1;
-      }
-    }
-    return count;
-  }, [entries, cleanup.selected, purge.selected]);
-
   // 升级安装包 keep the confirm-dialog escape: count them inside the current
   // selection so the banner can offer "skip installers, clean the rest".
   const selectedUpdaters = useMemo(() => {
@@ -207,6 +244,21 @@ export function SpacePage({
     }
     return { count, total };
   }, [entries, cleanup.selected, purge.selected]);
+
+  // First results in: pre-open the single fattest category so the page never
+  // looks inert; afterwards the user owns the open set entirely.
+  useEffect(() => {
+    if (expanded !== null || entries.length === 0) return;
+    let biggest: Category | null = null;
+    let best = 0;
+    for (const [category, group] of groups) {
+      if (group.removable > 0 && group.total > best) {
+        best = group.total;
+        biggest = category;
+      }
+    }
+    setExpanded(biggest ? [biggest] : []);
+  }, [entries, expanded, groups]);
 
   const toggleGroup = (category: Category) => {
     const allOn = groupSelected(category);
@@ -361,7 +413,9 @@ export function SpacePage({
           onClick={() => void runScan()}
           disabled={scanning || deleting}
         >
-          {t("Start scan", "开始扫描")}
+          {cleanup.result || purge.result
+            ? t("Rescan", "重新扫描")
+            : t("Start scan", "开始扫描")}
         </Button>
       </div>
 
@@ -475,135 +529,160 @@ export function SpacePage({
 
       {!scanning && !deleting && (cleanup.result || purge.result) ? (
         <>
-          <div className="hero">
-            <div>
-              <span className="k">
-                <ShieldCheck size={13} />{" "}
-                {t("Scan complete · caches + projects", "扫描完成 · 缓存 + 项目目录")}
-              </span>
-              <h2>
-                {formatBytes(selectedStats.total)}
-                <small>
-                  {t(" selected", " 已选")} ·{" "}
-                  {formatBytes(
+          <div className="space-sum" style={{ position: "sticky", top: 0, zIndex: 5 }}>
+            <div className="grow">
+              <div className="big">
+                {t("Selected ", "已选中 ")}
+                <em>{formatBytes(selectedStats.total)}</em>
+                {t(" ready to clean", " 可清理文件")}
+              </div>
+              <div className="sub">
+                {t(
+                  `${formatBytes(
                     entries
                       .filter((entry) => !entry.item.lock)
                       .reduce((sum, entry) => sum + entry.item.onDisk, 0),
-                  )}{" "}
-                  {t("available in total", "全部可清理")}
-                </small>
-              </h2>
-              <p>
-                {t(
-                  `${formatCount(selectedStats.count)} of ${formatCount(
+                  )} found in total · ${formatCount(selectedStats.count)} of ${formatCount(
                     entries.filter((entry) => !entry.item.lock).length,
-                  )} items selected${
-                    optionalSelected > 0
-                      ? ` · ${formatCount(optionalSelected)} optional (update installers / build artefacts / dev files)`
-                      : " · optional groups untouched"
-                  }`,
-                  `已选 ${formatCount(selectedStats.count)} / ${formatCount(
+                  )} items selected`,
+                  `共发现 ${formatBytes(
+                    entries
+                      .filter((entry) => !entry.item.lock)
+                      .reduce((sum, entry) => sum + entry.item.onDisk, 0),
+                  )} 可清理文件 · 已选 ${formatCount(selectedStats.count)} / ${formatCount(
                     entries.filter((entry) => !entry.item.lock).length,
-                  )} 项${
-                    optionalSelected > 0
-                      ? ` · 含 ${formatCount(optionalSelected)} 个可选类（升级包/项目产物/开发文件）`
-                      : " · 可选类未勾选（默认只清理日常项）"
-                  }`,
+                  )} 项`,
                 )}
-              </p>
+              </div>
             </div>
-            <div className="hero-actions">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  cleanup.clearSelection();
-                  purge.clearSelection();
-                }}
-                disabled={selectedStats.count === 0}
-              >
-                {t("Deselect all", "取消全选")}
-              </Button>
-              <Button
-                variant="primary"
-                icon={<Trash2 size={16} />}
-                disabled={selectedStats.count === 0}
-                onClick={() => setConfirming(true)}
-              >
-                {t(
-                  `Clean ${formatBytes(selectedStats.total)}`,
-                  `清理已选 ${formatBytes(selectedStats.total)}`,
-                )}
-              </Button>
-            </div>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                cleanup.clearSelection();
+                purge.clearSelection();
+              }}
+              disabled={selectedStats.count === 0}
+            >
+              {t("Deselect all", "取消全选")}
+            </Button>
+            <Button
+              variant="primary"
+              icon={<Trash2 size={16} />}
+              disabled={selectedStats.count === 0}
+              onClick={() => setConfirming(true)}
+            >
+              {t("Clean now", "立即清理")}
+            </Button>
           </div>
 
-          <div className="hint-strip">
-            {t(
-              "Daily groups are pre-selected. The dashed cards (update installers, project artefacts, developer files) are opt-in — tick them to join the same clean run.",
-              "默认只勾选日常清理项；虚线卡片（升级安装包 / 项目产物 / 开发文件）为可选，勾选后将与日常项合并成一次清理。",
-            )}
-          </div>
-
-          <div className="category-grid">
-            {CATEGORY_ORDER.filter((category) => groups.has(category)).map(
-              (category) => {
-                const group = groups.get(category)!;
-                const optional = OPTIONAL_CATEGORIES.includes(category);
-                return (
-                  <div className="category-slot" key={category}>
-                    {optional ? (
-                      <span className="opt-tag">
-                        {t("optional", "可选")}
-                      </span>
-                    ) : null}
-                    <CategoryCard
-                      category={category}
-                      total={group.total}
-                      count={group.count}
-                      selected={groupSelected(category)}
-                      focused={focus === category}
-                      disabled={groupDisabled(category)}
-                      onToggle={() => toggleGroup(category)}
-                      onInspect={() => setFocus(focus === category ? null : category)}
-                    />
-                  </div>
-                );
-              },
-            )}
-          </div>
-
-          <section className="cleanup-list-panel">
-            <SectionTitle
-              title={
-                focus
-                  ? categoryLabel(focus, lang, bin)
-                  : t("Everything found in this scan", "本次扫描的全部项目")
-              }
-              subtitle={t(
-                "Only checked items are touched. Protected items stay locked.",
-                "只会处理已勾选的项目，受保护项目始终保持锁定。",
-              )}
-              action={
-                focus ? (
-                  <Button variant="ghost" size="sm" onClick={() => setFocus(null)}>
-                    {t("Show all", "显示全部")}
-                  </Button>
-                ) : null
-              }
-            />
-            <div className="cleanup-rows">
-              {entries
-                .filter((entry) => !focus || entry.item.category === focus)
-                .map((entry) => (
-                  <ItemRow
-                    key={`${entry.item.path}-${entry.index}`}
-                    item={entry.item}
-                    checked={entry.source.selected.has(entry.index)}
-                    onToggle={() => entry.source.toggleItem(entry.index)}
-                  />
-                ))}
-            </div>
-          </section>
+          {(["daily", "optional"] as const).map((section) => {
+            const inSection = (category: Category) =>
+              section === "optional"
+                ? OPTIONAL_CATEGORIES.includes(category)
+                : !OPTIONAL_CATEGORIES.includes(category);
+            const cats = CATEGORY_ORDER.filter(
+              (category) => groups.has(category) && inSection(category),
+            );
+            if (cats.length === 0) return null;
+            const sectionCount = cats.reduce(
+              (sum, category) => sum + groups.get(category)!.count,
+              0,
+            );
+            const sectionTotal = cats.reduce(
+              (sum, category) => sum + groups.get(category)!.total,
+              0,
+            );
+            return (
+              <div key={section}>
+                <div className="space-sec">
+                  <h2>
+                    {section === "daily"
+                      ? t("Pre-selected for you", "已为你默认勾选")
+                      : t("Needs your tick", "需要你手动勾选")}
+                  </h2>
+                  <span className="tip">
+                    {section === "daily"
+                      ? t(
+                          `${formatCount(sectionCount)} items, safe to clean`,
+                          `共 ${formatCount(sectionCount)} 项，可以放心清理`,
+                        )
+                      : t(
+                          `${formatCount(sectionCount)} items, review before cleaning`,
+                          `共 ${formatCount(sectionCount)} 项，请确认后清理`,
+                        )}
+                  </span>
+                  <span className={`r ${section === "optional" ? "is-opt" : ""}`}>
+                    {section === "daily" ? t("selected", "已选") : t("optional", "可选")}{" "}
+                    <b>{formatBytes(sectionTotal)}</b>
+                  </span>
+                </div>
+                {cats.map((category) => {
+                  const group = groups.get(category)!;
+                  const open = (expanded ?? []).includes(category);
+                  const meta = CATEGORY_META[category];
+                  const Icon = meta.icon;
+                  const optional = OPTIONAL_CATEGORIES.includes(category);
+                  const items = entries
+                    .filter((entry) => entry.item.category === category)
+                    .sort((a, b) => b.item.onDisk - a.item.onDisk);
+                  return (
+                    <div key={category} className={`space-cat ${open ? "is-open" : ""}`}>
+                      <div
+                        className="space-cat-head"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => toggleExpanded(category)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            toggleExpanded(category);
+                          }
+                        }}
+                      >
+                        <Checkbox
+                          checked={groupSelected(category)}
+                          disabled={groupDisabled(category)}
+                          onChange={() => toggleGroup(category)}
+                          label={categoryLabel(category, lang, bin)}
+                        />
+                        <span className={`space-cat-icon tone-${meta.tone}`}>
+                          <Icon size={15} />
+                        </span>
+                        <span className="space-cat-name">
+                          {categoryLabel(category, lang, bin)}
+                        </span>
+                        <span className="space-cat-desc">
+                          {lang === "zh" ? meta.blurbZh : meta.blurbEn}
+                        </span>
+                        <span className="space-cat-n">
+                          {t(`${formatCount(group.count)} items`, `${formatCount(group.count)} 项`)}
+                        </span>
+                        <span className={`space-cat-size ${optional ? "is-opt" : ""}`}>
+                          {optional ? `${t("optional", "可选")} ` : ""}
+                          {formatBytes(group.total)}
+                        </span>
+                        <ChevronRight
+                          className="space-cat-chv"
+                          size={15}
+                          aria-hidden="true"
+                        />
+                      </div>
+                      {open ? (
+                        <div className="space-cat-items">
+                          {items.map((entry) => (
+                            <AccItem
+                              key={`${entry.item.path}-${entry.index}`}
+                              entry={entry}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </>
       ) : null}
 
