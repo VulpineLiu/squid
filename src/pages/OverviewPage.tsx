@@ -3,16 +3,16 @@ import {
   ArrowRight,
   Boxes,
   ChevronRight,
+  CircuitBoard,
   CircleGauge,
   Cpu,
   HardDrive,
-  Laptop,
   MemoryStick,
-  Microchip,
-  Monitor,
+  MonitorCog,
   ScanSearch,
   Sparkles,
   WandSparkles,
+  Waypoints,
 } from "lucide-react";
 import { useI18n } from "../i18n";
 import {
@@ -60,19 +60,53 @@ function machineRows(
   volume: Volume | null,
   t: (en: string, zh: string) => string,
 ) {
+  const hardware = bootstrap.hardwareInfo;
   const model = bootstrap.hardware.split(" · ")[0]?.trim() || bootstrap.hardware;
+  const installed = snapshot
+    ? Math.max(snapshot.memory.installed, snapshot.memory.total)
+    : 0;
+  const ramBrands = [
+    ...new Set(hardware.memory_sticks.map((stick) => stick.manufacturer).filter(Boolean)),
+  ].join(" / ");
+  const ramSpeed = hardware.memory_sticks.reduce(
+    (top, stick) => Math.max(top, stick.speed_mhz),
+    0,
+  );
+  const memory = [
+    installed ? formatMemoryBytes(installed) : "",
+    ramBrands,
+    ramSpeed ? `${ramSpeed} MT/s` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const disk = [
+    [hardware.disk_vendor, hardware.disk_model].filter(Boolean).join(" "),
+    hardware.disk_size_bytes ? formatBytes(hardware.disk_size_bytes, 0) : "",
+    hardware.disk_bus,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const gpu = [
+    hardware.gpu_model &&
+    hardware.gpu_model.toLowerCase().startsWith(hardware.gpu_vendor.toLowerCase())
+      ? hardware.gpu_model
+      : [hardware.gpu_vendor, hardware.gpu_model].filter(Boolean).join(" "),
+    hardware.gpu_vram_bytes ? formatBytes(hardware.gpu_vram_bytes, 0) : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const rows = [
     {
       key: "os",
-      icon: Monitor,
+      icon: MonitorCog,
       label: t("Operating system", "操作系统"),
       value: bootstrap.osVersion || bootstrap.osName,
     },
     {
       key: "model",
-      icon: Laptop,
+      icon: CircuitBoard,
       label: t("Computer", "本机型号"),
-      value: model,
+      value: hardware.board || model,
     },
     {
       key: "cpu",
@@ -86,25 +120,25 @@ function machineRows(
       key: "memory",
       icon: MemoryStick,
       label: t("Memory", "内存"),
-      value: snapshot
-        ? formatMemoryBytes(snapshot.memory.total)
-        : t("Reading memory…", "正在读取内存…"),
+      value: memory || t("Reading memory…", "正在读取内存…"),
     },
     {
       key: "disk",
       icon: HardDrive,
       label: t("Primary disk", "主硬盘"),
-      value: volume
-        ? `${volume.name || volume.mount_point} · ${formatBytes(volume.total, 0)} · ${volume.filesystem.toUpperCase()}`
-        : t("Reading disks…", "正在读取磁盘…"),
+      value:
+        disk ||
+        (volume
+          ? `${volume.name || volume.mount_point} · ${formatBytes(volume.total, 0)} · ${volume.filesystem.toUpperCase()}`
+          : t("Reading disks…", "正在读取磁盘…")),
     },
   ];
-  if (snapshot?.host.gpu) {
+  if (gpu || snapshot?.host.gpu) {
     rows.push({
       key: "gpu",
-      icon: Microchip,
+      icon: Waypoints,
       label: t("Graphics", "显卡"),
-      value: snapshot.host.gpu,
+      value: gpu || snapshot?.host.gpu || "",
     });
   }
   return rows;
@@ -122,12 +156,18 @@ export function OverviewPage({
   onNavigate: (page: PageId) => void;
 }) {
   const { t, lang } = useI18n();
-  const volume =
-    snapshot?.volumes.find((candidate) => candidate.is_root) ?? snapshot?.volumes[0] ?? null;
-  const used = volume ? volume.total - volume.free : 0;
-  const usedPercent = volume ? percent(used, volume.total) : 0;
+  const volumes = snapshot?.volumes ?? [];
+  const rootVolume = volumes.find((candidate) => candidate.is_root) ?? volumes[0] ?? null;
+  const used = rootVolume ? rootVolume.total - rootVolume.free : 0;
+  const usedPercent = rootVolume ? percent(used, rootVolume.total) : 0;
   const memoryPercent = snapshot
     ? percent(snapshot.memory.used, snapshot.memory.total)
+    : 0;
+  const memoryInstalled = snapshot
+    ? Math.max(snapshot.memory.installed, snapshot.memory.total)
+    : 0;
+  const memoryReserved = snapshot
+    ? Math.max(0, memoryInstalled - snapshot.memory.total)
     : 0;
   const found = cleanup.result
     ? cleanup.result.items
@@ -220,7 +260,7 @@ export function OverviewPage({
         <aside className="overview-machine">
           <span className="machine-title">{t("This machine", "本机配置")}</span>
           <div className="machine-list">
-            {machineRows(bootstrap, snapshot, volume, t).map((row) => {
+            {machineRows(bootstrap, snapshot, rootVolume, t).map((row) => {
               const Icon = row.icon;
               return (
                 <div className="machine-row" key={row.key}>
@@ -272,7 +312,7 @@ export function OverviewPage({
               <span>
                 {snapshot
                   ? `${formatMemoryBytes(snapshot.memory.used)} / ${formatMemoryBytes(
-                      snapshot.memory.total,
+                      memoryInstalled,
                     )}`
                   : t("Sampling…", "正在采样…")}
               </span>
@@ -281,7 +321,12 @@ export function OverviewPage({
           </div>
           <UsageBar used={memoryPercent} total={100} tone="violet" />
           <small>
-            {snapshot?.memory.compressed !== null &&
+            {memoryReserved > 0
+              ? t(
+                  `Hardware reserved (integrated graphics): ${formatMemoryBytes(memoryReserved)}`,
+                  `硬件保留（含核显）：${formatMemoryBytes(memoryReserved)}`,
+                )
+              : snapshot?.memory.compressed !== null &&
             snapshot?.memory.compressed !== undefined
               ? t(
                   `Compressed ${formatMemoryBytes(snapshot.memory.compressed)} · Wired ${formatMemoryBytes(

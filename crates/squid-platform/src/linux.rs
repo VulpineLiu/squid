@@ -224,6 +224,7 @@ impl Platform for Linux {
                     has_sibling_install: false,
                     publisher: desktop.icon.clone(),
                     installed_ms: None,
+                    display_icon: None,
                 });
             }
         }
@@ -259,6 +260,7 @@ impl Platform for Linux {
                         has_sibling_install: false,
                         publisher: None,
                         installed_ms: None,
+                        display_icon: None,
                     });
                 }
             }

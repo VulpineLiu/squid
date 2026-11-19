@@ -1,5 +1,6 @@
 import {
   ArrowUpRight,
+  DownloadCloud,
   FolderOpen,
   LockKeyhole,
   RotateCcw,
@@ -92,7 +93,7 @@ function ItemRow({
   checked: boolean;
   onToggle: () => void;
 }) {
-  const { lang, t } = useI18n();
+  const { lang, t, bin } = useI18n();
   const Icon = CATEGORY_META[item.category].icon;
   return (
     <div
@@ -113,7 +114,7 @@ function ItemRow({
       <span className="cleanup-row-copy">
         <span className="cleanup-row-title">
           <strong>{item.label}</strong>
-          <span className="row-category">{categoryLabel(item.category, lang)}</span>
+          <span className="row-category">{categoryLabel(item.category, lang, bin)}</span>
         </span>
         <span className="cleanup-row-path" title={item.displayPath}>
           {shortPath(item.displayPath, 90)}
@@ -171,6 +172,21 @@ export function CleanupInventory({
   }, [focus, result]);
   const removables = result?.items.filter((item) => !item.lock).length ?? 0;
 
+  // 升级安装包：selection may include stale update packages; the confirm
+  // dialog offers a one-click "delete everything else, keep these" escape.
+  const selectedUpdaters = useMemo(() => {
+    if (!result) return { indexes: [] as number[], total: 0 };
+    let total = 0;
+    const indexes: number[] = [];
+    result.items.forEach((item, index) => {
+      if (item.category === "update-installers" && workspace.selected.has(index)) {
+        indexes.push(index);
+        total += item.onDisk;
+      }
+    });
+    return { indexes, total };
+  }, [result, workspace.selected]);
+
   if (workspace.scanning) {
     return (
       <ProgressCard
@@ -196,8 +212,8 @@ export function CleanupInventory({
 
   if (!result) return null;
 
-  const confirm = async () => {
-    const summary = await workspace.clean(mode);
+  const confirm = async (indexes?: number[]) => {
+    const summary = await workspace.clean(mode, indexes);
     setConfirming(false);
     if (summary) {
       push(
@@ -289,7 +305,7 @@ export function CleanupInventory({
         <SectionTitle
           title={
             focus
-              ? categoryLabel(focus, lang)
+              ? categoryLabel(focus, lang, bin)
               : t("Everything found in this scan", "本次扫描的全部项目")
           }
           action={
@@ -396,6 +412,43 @@ export function CleanupInventory({
             <span>{t("Permanent", "永久")}</span>
           </button>
         </div>
+        {selectedUpdaters.indexes.length > 0 ? (
+          <div className="confirm-updater-banner">
+            <DownloadCloud size={18} />
+            <div>
+              <strong>
+                {t(
+                  `Includes ${formatCount(selectedUpdaters.indexes.length)} update installers (${formatBytes(selectedUpdaters.total)})`,
+                  `其中包含 ${formatCount(selectedUpdaters.indexes.length)} 个升级安装包（${formatBytes(selectedUpdaters.total)}）`,
+                )}
+              </strong>
+              <span>
+                {t(
+                  "Apps re-download them when needed. Delete them too?",
+                  "应用需要时会自动重新下载。要一并清理吗？",
+                )}
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={workspace.deleting}
+              onClick={() => {
+                const keep = [...workspace.selected].filter(
+                  (index) => !selectedUpdaters.indexes.includes(index),
+                );
+                if (keep.length === 0) {
+                  workspace.deselect(selectedUpdaters.indexes);
+                  setConfirming(false);
+                  return;
+                }
+                void confirm(keep);
+              }}
+            >
+              {t("Skip installers, clean rest", "跳过升级包，只删其余")}
+            </Button>
+          </div>
+        ) : null}
       </ConfirmDialog>
     </>
   );

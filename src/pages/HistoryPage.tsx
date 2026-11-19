@@ -91,8 +91,8 @@ export function HistoryPage() {
       <PageHeader
         title={t("Every change, on the record.", "每一次改动，都有记录。")}
         description={t(
-          "Review past cleanups and put files back from the Trash when you change your mind.",
-          "查看过去的清理记录，改变主意时还可以从废纸篓还原文件。",
+          `Review past cleanups and put files back from the ${bin} when you change your mind.`,
+          `查看过去的清理记录，改变主意时还可以从${bin}还原文件。`,
         )}
         actions={
           <Button
@@ -169,7 +169,7 @@ export function HistoryPage() {
                     <small>
                       {formatDate(session.started, lang)} ·{" "}
                       {session.mode === "trash"
-                        ? t("Moved to Trash", "已移入废纸篓")
+                        ? t(`Moved to ${bin}`, `已移入${bin}`)
                         : t("Permanently removed", "已永久删除")}
                     </small>
                   </span>
@@ -224,7 +224,7 @@ export function HistoryPage() {
                             <small>
                               {entry.category || entry.kind}
                               {entry.trash_path
-                                ? ` · ${t("in Trash", "位于废纸篓")}`
+                                ? ` · ${t(`in ${bin}`, `位于${bin}`)}`
                                 : ""}
                             </small>
                           </span>
@@ -265,8 +265,8 @@ export function HistoryPage() {
             : ""
         }
         note={t(
-          "Files still in the Trash are returned to their original folders. Anything already emptied is skipped.",
-          "仍在废纸篓中的文件会回到原位置；已被清空的项目会被跳过。",
+          `Files still in the ${bin} are returned to their original folders. Anything already emptied is skipped.`,
+          `仍在${bin}中的文件会回到原位置；已被清空的项目会被跳过。`,
         )}
         confirmLabel={t("Restore files", "还原文件")}
         cancelLabel={t("Cancel", "取消")}

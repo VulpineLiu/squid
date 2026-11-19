@@ -13,3 +13,6 @@ serde.workspace = true
 sysinfo.workspace = true
 libc.workspace = true
 chrono.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_SystemInformation"] }

@@ -151,7 +151,6 @@ export function ApplicationsPage({
   return (
     <div className="page apps-page">
       <PageHeader
-        eyebrow={t("Applications", "应用程序")}
         title={t("Uninstall completely.", "卸载，干净彻底。")}
         description={t(
           "Remove an app together with the caches, preferences and support files it leaves behind.",
@@ -314,7 +313,7 @@ export function ApplicationsPage({
                         <strong>{item.label}</strong>
                         <span title={item.displayPath}>{shortPath(item.displayPath, 44)}</span>
                         <small>
-                          {categoryLabel(item.category, lang)}
+                          {categoryLabel(item.category, lang, bin)}
                           {item.note ? ` · ${item.note}` : ""}
                           {item.lock ? ` · ${lockLabel(item.lock, t)}` : ""}
                         </small>
@@ -357,7 +356,6 @@ export function ApplicationsPage({
       {!workspace.scanned && !workspace.scanning ? (
         <EmptyState
           icon={<AppWindow size={29} />}
-          title={t("See what is installed", "查看已安装的应用")}
           action={
             <Button
               variant="primary"

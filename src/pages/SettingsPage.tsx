@@ -528,7 +528,7 @@ export function SettingsPage({
             <div>
               <strong>{t("Platform", "平台")}</strong>
               <code>
-                {bootstrap.osName} {bootstrap.osVersion} · {bootstrap.arch} ·{" "}
+                {bootstrap.osVersion || bootstrap.osName} · {bootstrap.arch} ·{" "}
                 {bootstrap.hardware}
               </code>
             </div>

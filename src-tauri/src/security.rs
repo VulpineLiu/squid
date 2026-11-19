@@ -888,7 +888,15 @@ pub async fn security_rollback_rules() -> Result<IntelStatus, String> {
 pub(crate) fn update_pack() -> Result<IntelStatus, String> {
     let manifest_url = crate::update::intel_manifest_url()
         .ok_or_else(|| "No rule-pack feed is configured for this build.".to_string())?;
-    let text = crate::update::fetch_text(&manifest_url)?;
+    let text = crate::update::fetch_text(&manifest_url).map_err(|error| {
+        if error.contains("404") {
+            "No rule pack has been published for this release yet. Squid looks for \
+             squid-intel.json next to squid-update.json on the releases branch."
+                .to_string()
+        } else {
+            error
+        }
+    })?;
     let signature = crate::update::intel_manifest_signature()?;
     let key = crate::update::intel_public_key()?;
     // Two answers, not one. A build that was given an intel key must verify

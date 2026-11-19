@@ -34,6 +34,9 @@ pub struct AppState {
     apps: Mutex<Vec<AppInfo>>,
     app_icons: Mutex<HashMap<String, Option<String>>>,
     sampler: Mutex<Sampler>,
+    /// Last light snapshot, so the widget window and the main window polling
+    /// a beat apart share one refresh instead of paying for two.
+    snapshot_cache: Mutex<Option<(Instant, squid_stats::SystemSnapshot)>>,
 }
 
 impl AppState {
@@ -354,6 +357,8 @@ pub struct BootstrapView {
     os_name: String,
     os_version: String,
     hardware: String,
+    /// Static component facts (board/RAM/disk/GPU) for the overview panel.
+    hardware_info: squid_platform::HardwareInfo,
     arch: String,
     device: String,
     language: String,
@@ -377,6 +382,7 @@ pub fn bootstrap() -> BootstrapView {
         os_name: engine.platform().display_name(),
         os_version: engine.platform().os_version(),
         hardware: engine.platform().hardware_model(),
+        hardware_info: squid_platform::hardware_info(),
         arch: std::env::consts::ARCH.into(),
         device: match engine.platform().device() {
             squid_platform::Device::Mac => "mac".into(),
@@ -825,10 +831,36 @@ pub async fn storage_largest_files(
 }
 
 #[tauri::command]
-pub fn system_snapshot(app: AppHandle) -> Result<SystemSnapshot, String> {
+pub fn system_snapshot(app: AppHandle, full: Option<bool>) -> Result<SystemSnapshot, String> {
+    // `full` costs a per-pid CPU/memory walk of every process on the machine
+    // (hundreds of syscalls) plus the top-12 sort — the 实时监控 page needs
+    // it; the desktop widget, overview tiles and every background poll pass
+    // false and ride the light refresh. Light answers are cached for two
+    // seconds so windows polling in step pay for one refresh, not several.
     let state = app.state::<AppState>();
+    let full = full.unwrap_or(false);
+    // Check and fill the cache under the sampler lock: two windows polling a
+    // beat apart then share one refresh only if the second can not slip in
+    // between the first cache miss and the sampler call.
     let mut sampler = AppState::lock(&state.sampler)?;
-    Ok(sampler.refresh())
+    if !full {
+        if let Ok(cache) = AppState::lock(&state.snapshot_cache) {
+            if let Some((at, snapshot)) = cache.as_ref() {
+                if at.elapsed() < Duration::from_secs(2) {
+                    return Ok(snapshot.clone());
+                }
+            }
+        }
+    }
+    let snapshot = if full {
+        sampler.refresh()
+    } else {
+        sampler.refresh_with(false)
+    };
+    if let Ok(mut cache) = AppState::lock(&state.snapshot_cache) {
+        *cache = Some((Instant::now(), snapshot.clone()));
+    }
+    Ok(snapshot)
 }
 
 #[tauri::command]

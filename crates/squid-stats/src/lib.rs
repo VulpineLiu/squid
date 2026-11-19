@@ -27,6 +27,8 @@ pub struct SystemSnapshot {
     pub memory: MemoryStats,
     pub network: NetRate,
     pub disk: DiskRate,
+    /// GPU busy percent 0–100 when the OS exposes it (None on headless/VDI).
+    pub gpu_usage: Option<f32>,
     pub uptime_secs: u64,
     pub processes: usize,
     pub top_processes: Vec<ProcessSample>,
@@ -58,6 +60,9 @@ pub struct MemoryStats {
     pub total: Bytes,
     pub used: Bytes,
     pub available: Bytes,
+    /// RAM the machine ships with. `total` is what the OS may use after
+    /// firmware/graphics carve-outs; `installed - total` is that carve-out.
+    pub installed: Bytes,
     pub swap_total: Bytes,
     pub swap_used: Bytes,
     /// macOS keeps wired/compressed pages out of `used`; expose them when known.
@@ -72,6 +77,11 @@ impl MemoryStats {
         } else {
             self.used.percent_of(self.total)
         }
+    }
+
+    /// Physical memory the firmware or the integrated GPU holds back from the OS.
+    pub fn hardware_reserved(&self) -> Bytes {
+        Bytes(self.installed.0.saturating_sub(self.total.0))
     }
 }
 
@@ -243,6 +253,15 @@ impl Sampler {
     }
 
     pub fn refresh(&mut self) -> SystemSnapshot {
+        self.refresh_with(true)
+    }
+
+    /// `want_processes=false` is the widget-grade light refresh: it skips the
+    /// per-pid CPU/memory walk (hundreds of Get-ProcessTimes calls on
+    /// Windows) and the top-process sort, keeping only a cheap pid sweep for
+    /// the process count. The always-on desktop widget pays this on every
+    /// beat; only 实时监控 asks for the full table.
+    pub fn refresh_with(&mut self, want_processes: bool) -> SystemSnapshot {
         let elapsed = self.last.elapsed().max(Duration::from_millis(80));
         self.last = Instant::now();
 
@@ -250,11 +269,19 @@ impl Sampler {
             .refresh_cpu_specifics(sysinfo::CpuRefreshKind::nothing().with_cpu_usage());
         self.system
             .refresh_memory_specifics(sysinfo::MemoryRefreshKind::nothing().with_ram().with_swap());
-        self.system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            true,
-            ProcessRefreshKind::nothing().with_cpu().with_memory(),
-        );
+        if want_processes {
+            self.system.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                true,
+                ProcessRefreshKind::nothing().with_cpu().with_memory(),
+            );
+        } else {
+            self.system.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                true,
+                ProcessRefreshKind::nothing(),
+            );
+        }
         self.networks.refresh(true);
         self.disks
             .refresh_specifics(true, DiskRefreshKind::nothing().with_io_usage());
@@ -264,7 +291,11 @@ impl Sampler {
         let memory = memory_stats(&self.system);
         let network = net_rates(&self.networks, seconds);
         let disk = disk_rates(&self.disks, seconds);
-        let top_processes = top_processes(&self.system, 12);
+        let top_processes = if want_processes {
+            top_processes(&self.system, 12)
+        } else {
+            Vec::new()
+        };
 
         let mut snapshot = SystemSnapshot {
             taken_at_ms: now_ms(),
@@ -272,6 +303,10 @@ impl Sampler {
             memory,
             network,
             disk,
+            // No cheap, dependency-free GPU busy counter exists across our
+            // targets (Windows needs PDH, macOS IOKit); the widget renders
+            // None as an idle ring, matching fnOS on headless machines.
+            gpu_usage: None,
             uptime_secs: System::uptime(),
             processes: self.system.processes().len(),
             top_processes,
@@ -430,24 +465,39 @@ pub struct AppUsage {
 }
 
 fn cpu_stats(system: &System) -> CpuStats {
-    let all = system.cpus();
-    let per_core: Vec<f32> = all
+    // sysinfo ≥ 0.34 keeps the aggregate out of `cpus()`: every entry is one
+    // logical core, and the machine-wide number lives in `global_cpu_usage()`.
+    let cores = system.cpus();
+    let per_core: Vec<f32> = cores
         .iter()
         .map(|cpu| cpu.cpu_usage().clamp(0.0, 100.0))
         .collect();
     let load = System::load_average();
-    let first = all.first();
-    let brand = first
+    let brand = cores
+        .first()
         .map(|cpu| cpu.brand().trim().to_string())
         .unwrap_or_else(|| std::env::consts::ARCH.to_string());
-    let base_frequency_ghz = first
+    let base_frequency_ghz = cores
+        .first()
         .map(|cpu| cpu.frequency() as f64 / 1_000.0)
         .unwrap_or(0.0);
-    // sysinfo keeps the aggregate independently of the per-core list. Reading
-    // `cpus()[0]` as the total also dropped one core from every count.
     let total = system.global_cpu_usage().clamp(0.0, 100.0);
-    let logical_cores = per_core.len().max(1);
-    let physical = detect_physical_cores().unwrap_or_else(|| logical_cores.div_ceil(2));
+    // sysinfo can miss a logical core on some Windows boards; the thread
+    // count is the number the OS itself schedules against.
+    let scheduled = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(0);
+    let logical_cores = per_core.len().max(scheduled).max(1);
+    let per_core = if per_core.len() < logical_cores && !per_core.is_empty() {
+        let mean = total;
+        let mut padded = per_core;
+        padded.resize(logical_cores, mean);
+        padded
+    } else {
+        per_core
+    };
+    let physical = System::physical_core_count().or_else(detect_physical_cores);
+    let physical = physical.unwrap_or_else(|| logical_cores.div_ceil(2));
     CpuStats {
         total,
         per_core,
@@ -519,8 +569,11 @@ fn sysctl_u64(name: &str) -> Option<u64> {
 }
 
 fn memory_stats(system: &System) -> MemoryStats {
+    let total = Bytes(system.total_memory());
+    let installed = installed_memory().max(total);
     let mut stats = MemoryStats {
-        total: Bytes(system.total_memory()),
+        installed,
+        total,
         used: Bytes(system.used_memory()),
         available: Bytes(system.available_memory()),
         swap_total: Bytes(system.total_swap()),
@@ -533,6 +586,55 @@ fn memory_stats(system: &System) -> MemoryStats {
         stats.wired = Some(extra.1);
     }
     stats
+}
+
+/// RAM the machine physically ships with. Windows reports this *including*
+/// what the firmware and the integrated GPU carve out of `total_memory()`;
+/// macOS reads the same number from sysctl. Unknown platforms fall back to
+/// the usable total so the installed−reserved split degrades to zero.
+fn installed_memory() -> Bytes {
+    #[cfg(target_os = "windows")]
+    {
+        let mut kb: u64 = 0;
+        // SAFETY: plain out-parameter call; the API only writes the u64.
+        let ok = unsafe {
+            windows_sys::Win32::System::SystemInformation::GetPhysicallyInstalledSystemMemory(
+                &mut kb,
+            )
+        };
+        if ok == 0 {
+            Bytes(0)
+        } else {
+            Bytes(kb.saturating_mul(1024))
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        sysctl_u64("hw.memsize").map(Bytes).unwrap_or_default()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(text) = std::fs::read_to_string("/proc/meminfo") {
+            for line in text.lines() {
+                if let Some(rest) = line.strip_prefix("MemTotal:") {
+                    if let Some(kb) = rest
+                        .trim()
+                        .trim_end_matches("kB")
+                        .trim()
+                        .parse::<u64>()
+                        .ok()
+                    {
+                        return Bytes(kb * 1024);
+                    }
+                }
+            }
+        }
+        Bytes(0)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Bytes(0)
+    }
 }
 
 /// `vm_stat` gives compressor/wired sizes that sysinfo folds away. Parsed
@@ -855,6 +957,24 @@ mod tests {
         assert!(snapshot.processes > 0);
         let apps = sampler.applications(5);
         assert!(!apps.is_empty());
+    }
+
+    /// The widget-grade light refresh: every meter the desktop panel draws
+    /// still moves, but the per-process table stays empty (that walk is the
+    /// expensive part of a refresh on Windows).
+    #[test]
+    fn the_light_refresh_keeps_the_meters_and_drops_the_table() {
+        let mut sampler = Sampler::new();
+        std::thread::sleep(Duration::from_millis(220));
+        let snapshot = sampler.refresh_with(false);
+        assert_eq!(snapshot.cpu.per_core.len(), snapshot.cpu.logical_cores);
+        assert!(snapshot.memory.total.as_u64() > 0);
+        assert!(snapshot.processes > 0);
+        assert!(snapshot.top_processes.is_empty());
+        // A light beat must not poison the full one: the next full refresh
+        // still walks processes and produces a ranking.
+        let full = sampler.refresh_with(true);
+        assert!(!full.top_processes.is_empty() || full.processes == 0);
     }
 
     #[test]

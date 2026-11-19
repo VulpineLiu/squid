@@ -36,6 +36,7 @@ const PSEUDO_FS: &[&str] = &[
     "rpc_pipefs",
     "nsfs",
     "autofs",
+    "nullfs",
     "msdos",
     "anon:osd",
     "SMB",
@@ -88,6 +89,16 @@ pub fn volumes_from_mounts(mounts: &[MountEntry]) -> Vec<Volume> {
             continue;
         }
         if text.starts_with("/System/Volumes/Data") && !out.is_empty() {
+            continue;
+        }
+        // Application wrappers (for example an app that mounts its bundle at a
+        // temporary path) are not disks a person can manage. Finder only shows
+        // real volumes at `/` and under `/Volumes`.
+        if cfg!(target_os = "macos")
+            && text != "/"
+            && !text.starts_with("/Volumes/")
+            && !text.starts_with("/System/Volumes/")
+        {
             continue;
         }
         if let Some((total, free)) = statvfs_for(&mount.mount_point) {
@@ -265,5 +276,20 @@ mod tests {
             fstype: "devfs".into(),
         }];
         assert!(volumes_from_mounts(&mounts).is_empty());
+    }
+
+    #[test]
+    fn app_wrapper_mounts_are_not_volumes() {
+        let mount_point = std::env::temp_dir();
+        let mounts = vec![MountEntry {
+            mount_point: mount_point.clone(),
+            device: "/Applications/X.app/Wrapper".into(),
+            fstype: "nullfs".into(),
+        }];
+        assert!(
+            volumes_from_mounts(&mounts).is_empty(),
+            "a nullfs app wrapper at {} must not look like a disk",
+            mount_point.display()
+        );
     }
 }

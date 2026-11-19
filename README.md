@@ -16,6 +16,8 @@ Squid 是面向 macOS 与 Windows 的本地系统维护工具。桌面端、CLI 
 - **Storage & monitor / 存储与监控** — Folder-level disk analysis, live CPU, memory, network, disk, battery, and process views.
 - **Security / 安全** — XProtect and Defender status, malware scanning with confirmed / suspicious / advisory findings, and reversible quarantine. No daemon, no kernel extension, no upload.
 - **Startup items / 启动项** — LaunchAgents, LaunchDaemons, login items, registry Run keys, startup folders, scheduled tasks and services; disable the ones you own.
+- **Desktop widget / 桌面小工具** — Pin the Real-time monitor to the desktop as a focus-free board, with every setting in a dropdown at the top of the widget.
+- **Permissions (Windows) / 权限管理** — Startup entries, shell context menus and popup-window blocking, with a background watcher.
 - **History & updates / 历史与更新** — Restorable Trash sessions and a size- and SHA256-verified update channel.
 
 The interface follows the system language by default and can be switched to Simplified Chinese or English in Settings.

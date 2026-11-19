@@ -16,7 +16,7 @@ export function CleanupPage({
 }) {
   const { t } = useI18n();
   return (
-    <div className="page">
+    <div className="page cleanup-page">
       <PageHeader
         title={t("Clutter, without the guesswork.", "清理垃圾，不靠猜。")}
         description={t(
@@ -50,7 +50,6 @@ export function CleanupPage({
       {!workspace.result && !workspace.scanning && !workspace.summary ? (
         <EmptyState
           icon={<Sparkles size={28} />}
-          title={t("Ready when you are", "随时可以开始")}
           action={
             <Button
               variant="primary"

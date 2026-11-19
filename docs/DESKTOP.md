@@ -49,25 +49,25 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 | Daily cleanup | Runs the normal cleanup rule set, groups results by category, supports per-item and per-category selection, Trash or permanent deletion, then offers undo through History |
 | Uninstall apps | Reads installed apps, builds an app-specific removal plan, shows leftover paths and warnings, then uninstalls selected items |
 | Deep Clean | Searches chosen project roots for regenerable build artefacts with Git and file-age protections |
+| Permissions (Windows) | Startup entries from Run keys, startup folders and scheduled tasks; shell context-menu handlers; popup-window rules and the popup watcher |
 | Security | XProtect / Defender status, scan coverage, findings by confidence, quarantine and restore, recent security activity |
 | Startup items | LaunchAgents, LaunchDaemons, login items, registry Run keys, startup folders, scheduled tasks and services; disable and re-enable the ones the current user owns |
 | Storage | Measures a chosen folder, exposes the largest children, drills down, and finds the largest files |
-| Real-time monitor | Two tabs. **Performance**: live CPU, memory, network, disk, battery, volume and process data. **Processes**: the whole process table with signature and startup-item columns, and process termination after confirmation |
+| Real-time monitor | Two tabs. **Performance**: live CPU, memory, network, disk, battery, volume and process data, plus the desktop-widget switch. **Processes**: the whole process table with signature and startup-item columns, and process termination after confirmation |
+| Desktop widget | A borderless desktop-layer monitor opened from Real-time monitor, with status rings, network and disk curves, storage bars, and all settings in a dropdown at the top of the widget |
 | History | Lists cleanup sessions, shows the ledger, restores files that are still in Trash/Recycle Bin, and opens the bin |
 | Settings | Chinese/English language selection that defaults to the system language, launch at login, the security section (scan schedule, notifications, auto-quarantine, rule-pack updates, scan exclusions), deletion mode, history retention, protected paths, local file locations, and software updates |
 
-`⌘1`–`⌘0` on macOS and `Ctrl+1`–`Ctrl+0` on Windows switch screens, in sidebar
-order: `1` overview, `2` daily cleanup, `3` uninstall apps, `4` deep clean,
-`5` storage, `6` real-time monitor, `7` security, `8` startup items,
-`9` history, `0` settings.
-
-In 0.1.6 `⌘7`/`⌘8` moved from History/Settings to Security/Startup items;
-History and Settings are now `⌘9` and `⌘0`.
+`⌘1`–`⌘8` on macOS and `Ctrl+1`–`Ctrl+9` on Windows switch screens, in sidebar
+order. On Windows: `1` overview, `2` daily cleanup, `3` uninstall apps,
+`4` deep clean, `5` permissions, `6` storage, `7` real-time monitor,
+`8` security, `9` startup items. macOS omits the Windows-only Permissions
+screen, so `5`–`8` shift up by one.
 
 The sidebar groups these into **Maintenance** (overview, daily cleanup,
-uninstall apps, deep clean), **Protection** (security, startup items) and
-**Insights** (storage, real-time monitor), with History and Settings pinned at
-the bottom.
+uninstall apps, deep clean, and Permissions on Windows), **Protection**
+(security, startup items) and **Insights** (storage, real-time monitor), with
+History and Settings pinned at the bottom.
 
 The two new screens reuse the interface vocabulary the older screens already
 had rather than introducing a second one: `.panel` for a card, `.status-chip` for
@@ -107,11 +107,52 @@ this page only reads what they report.
 
 Squid keeps running after its main window is closed. The tray menu can reopen
 the window, start a malware scan, and jump directly to Security, Startup items,
-Daily cleanup, Uninstall apps or Deep Clean. One disabled row states the current
-protection status — the count of unhandled confirmed findings, "not scanned yet"
-before the first scan, and "scanning…" while one is running.
+Daily cleanup, Uninstall apps, Deep Clean or the desktop widget. One disabled row
+states the current protection status — the count of unhandled confirmed findings,
+"not scanned yet" before the first scan, and "scanning…" while one is running.
 The tray follows the active interface language. Use **Quit Squid** in the same
 menu to stop the background process.
+
+The tray mark is a transparent monochrome asset. macOS receives it with
+`.icon_as_template(true)`, so the system draws it in the correct menu-bar colour
+for light and dark appearances instead of pasting a coloured square onto the
+bar. Windows and Linux keep the same silhouette in gray.
+
+## Permissions (Windows)
+
+The Permissions screen is a Windows-only destination and is hidden from the
+macOS sidebar, where the Startup items screen already covers LaunchAgents,
+LaunchDaemons and login items with the same safety rules. On Windows it lists:
+
+- startup entries from `Run` keys, startup folders and scheduled tasks;
+- shell context-menu handlers grouped by file, folder, desktop, drive and
+  all-object surfaces;
+- popup windows with rules to block or allow them and a background watcher.
+
+Every enable/disable action goes through the backend's inventory; the page never
+submits a raw registry or filesystem path.
+
+## Desktop widget
+
+The desktop widget is switched on from Real-time monitor and is a separate Tauri
+webview window labelled `widget`, not a WidgetKit extension. It shares the live
+sampler with the Real-time monitor but polls at its own 2/5/10-second cadence and
+pauses while hidden.
+
+- The gear at the top of the widget opens a dropdown containing every setting:
+  panel switches, opacity, refresh rate, dock corner and fold memory.
+- Up to four cards: status rings (CPU, memory, and GPU when the OS exposes a
+  busy counter), network throughput, disk I/O, and storage volumes.
+- The window is borderless, transparent and resizable only by its content. It
+  docks to a chosen corner and remembers a manual drag position.
+- On macOS it uses `BelowNormal` window level, appears on every Space, and is
+  non-focusable with `accept_first_mouse`, so it sits with the desktop and never
+  takes keyboard focus from the app you are using.
+- On Windows it is parked with `SetWindowPos(HWND_BOTTOM, SWP_NOACTIVATE)` for
+  the same desktop-layer behaviour.
+- Opacity is capped to 90–100% so text stays readable over busy wallpapers.
+  The master switch and the tray item share one state; settings persist in
+  `widget.json` beside `manage.json`.
 
 **Settings → Startup** registers the app for the current user only. macOS
 uses a user LaunchAgent, Windows uses the current-user Run key, and Linux uses

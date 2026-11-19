@@ -134,6 +134,7 @@ impl Strings {
                 C::ProjectArtifacts => "构建产物",
                 C::LanguagePacks => "多余语言包",
                 C::Leftovers => "卸载残留",
+                C::UpdateInstallers => "升级安装包",
                 C::Trash => self.bin(),
             },
         })

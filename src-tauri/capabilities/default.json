@@ -1,11 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default permissions for the Squid main window.",
-  "windows": ["main"],
+  "description": "Default permissions for the Squid main and widget windows.",
+  "windows": ["main", "widget"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-size",
+    "core:window:allow-set-focus",
+    "core:window:allow-is-visible",
     "dialog:default",
     "opener:default",
     "notification:default"

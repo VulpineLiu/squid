@@ -1,11 +1,13 @@
 mod app;
 mod autostart;
+mod manage;
 pub mod notifications;
 mod permissions;
 mod process;
 pub mod security;
 mod startup;
 mod update;
+mod widget;
 
 use security::ScanTarget;
 use squid_core::{Locale, Settings};
@@ -23,6 +25,8 @@ pub(crate) fn show_main_window(app: &AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+        // The page stops sampling while parked in the tray; wake it up.
+        let _ = app.emit("squid://visible", true);
     }
 }
 
@@ -104,6 +108,14 @@ fn tray_menu(app: &AppHandle, locale: Locale) -> tauri::Result<Menu<tauri::Wry>>
     )?;
     let first_separator = PredefinedMenuItem::separator(app)?;
     let last_separator = PredefinedMenuItem::separator(app)?;
+    // Flips the widget master switch; state is shown on the Real-time monitor.
+    let widget_toggle = MenuItem::with_id(
+        app,
+        "widget",
+        tray_text(locale, "Show / hide desktop widget", "显示/隐藏桌面小工具"),
+        true,
+        None::<&str>,
+    )?;
     Menu::with_items(
         app,
         &[
@@ -115,6 +127,7 @@ fn tray_menu(app: &AppHandle, locale: Locale) -> tauri::Result<Menu<tauri::Wry>>
             &cleanup,
             &apps,
             &purge,
+            &widget_toggle,
             &last_separator,
             &quit,
         ],
@@ -164,13 +177,13 @@ fn tray_tooltip(app: &AppHandle, locale: Locale) -> String {
 fn create_tray(app: &AppHandle, locale: Locale) -> tauri::Result<()> {
     let menu = tray_menu(app, locale)?;
     let tooltip = tray_tooltip(app, locale);
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
+    // A transparent monochrome mark: macOS uses it as a template image so the
+    // system tints it for light/dark menu bars; other platforms keep the gray.
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))?;
 
     TrayIconBuilder::with_id("squid-tray")
         .icon(icon)
+        .icon_as_template(cfg!(target_os = "macos"))
         .tooltip(tooltip)
         .menu(&menu)
         .show_menu_on_left_click(true)
@@ -181,6 +194,11 @@ fn create_tray(app: &AppHandle, locale: Locale) -> tauri::Result<()> {
             "cleanup" => navigate_to(app, "cleanup"),
             "applications" => navigate_to(app, "applications"),
             "purge" => navigate_to(app, "purge"),
+            "widget" => {
+                if let Err(error) = widget::toggle_from_tray(app) {
+                    eprintln!("widget toggle failed: {error}");
+                }
+            }
             "quit" => app.exit(0),
             _ => {}
         })
@@ -208,14 +226,22 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                // A hidden window must not keep sampling the whole machine;
+                // the page pauses its polling on this signal.
+                let _ = window.emit("squid://visible", false);
             }
         })
         .manage(app::AppState::default())
         .manage(update::UpdateState::default())
         .manage(security::SecurityState::default())
+        .manage(manage::ManageState::default())
+        .manage(widget::WidgetState::default())
         .invoke_handler(tauri::generate_handler![
             app::bootstrap,
             app::cancel_job,
@@ -242,6 +268,18 @@ pub fn run() {
             app::open_trash,
             permissions::permission_status,
             permissions::open_full_disk_access_settings,
+            manage::manage_scan,
+            manage::managed_startup_set_enabled,
+            manage::extension_set_registered,
+            manage::popup_list,
+            manage::popup_close,
+            manage::popup_add_rule,
+            manage::popup_rule_update,
+            manage::popup_rule_remove,
+            manage::popup_watcher_set,
+            widget::widget_get,
+            widget::widget_set,
+            widget::widget_hide,
             update::update_check,
             update::update_status,
             update::update_download,
@@ -273,6 +311,8 @@ pub fn run() {
             create_tray(app.handle(), Locale::detect(&settings))?;
             update::spawn_startup_check(app.handle());
             security::spawn_scheduler(app.handle(), &settings);
+            manage::spawn_watcher(app.handle().clone());
+            widget::spawn_startup(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())

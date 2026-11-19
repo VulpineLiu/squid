@@ -16,6 +16,7 @@ pub mod clean;
 pub mod delete;
 pub mod purge;
 pub mod uninstall;
+pub mod updates;
 
 use globset::GlobMatcher;
 use squid_core::settings::Settings;

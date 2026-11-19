@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   Code2,
+  DownloadCloud,
   FileWarning,
   Globe2,
   Languages,
@@ -120,11 +121,25 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     icon: Puzzle,
     tone: "warning",
   },
+  "update-installers": {
+    en: "Update installers",
+    zh: "升级安装包",
+    blurbEn: "Installer packages apps keep after updating",
+    blurbZh: "应用升级后留下的安装包，需要时会自动重新下载",
+    icon: DownloadCloud,
+    tone: "success",
+  },
 };
 
 export const CATEGORY_ORDER = Object.keys(CATEGORY_META) as Category[];
 
-export function categoryLabel(category: Category, language: "zh" | "en"): string {
+export function categoryLabel(
+  category: Category,
+  language: "zh" | "en",
+  binName?: string,
+): string {
+  // The bin category borrows the OS word for it: 回收站 on Windows, 废纸篓 on macOS.
+  if (category === "trash" && binName) return binName;
   return language === "zh" ? CATEGORY_META[category].zh : CATEGORY_META[category].en;
 }
 
@@ -279,6 +294,7 @@ export function Select<T extends string | number>({
   label,
   disabled = false,
   align = "end",
+  placement = "down",
 }: {
   value: T;
   options: { value: T; label: string }[];
@@ -286,6 +302,7 @@ export function Select<T extends string | number>({
   label: string;
   disabled?: boolean;
   align?: "start" | "end";
+  placement?: "down" | "up";
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -355,7 +372,7 @@ export function Select<T extends string | number>({
       </button>
       {open ? (
         <ul
-          className={`select-menu is-${align}`}
+          className={`select-menu is-${align} is-${placement}`}
           role="listbox"
           aria-label={label}
         >
@@ -687,14 +704,18 @@ export function EmptyState({
   action,
 }: {
   icon: ReactNode;
-  title: string;
+  title?: string;
   description?: string;
   action?: ReactNode;
 }) {
   return (
     <div className="empty-state">
       <div className="empty-icon">{icon}</div>
-      <h2>{title}</h2>
+      {title ? (
+        <h2>{title}</h2>
+      ) : (
+        <span className="empty-title-spacer" aria-hidden="true" />
+      )}
       {description ? <p>{description}</p> : null}
       {action}
     </div>
@@ -740,7 +761,7 @@ export function CategoryCard({
   onInspect: () => void;
   focused?: boolean;
 }) {
-  const { lang, t } = useI18n();
+  const { lang, t, bin } = useI18n();
   const meta = CATEGORY_META[category];
   const Icon = meta.icon;
   return (
@@ -758,11 +779,11 @@ export function CategoryCard({
           checked={selected}
           disabled={disabled}
           onChange={onToggle}
-          label={categoryLabel(category, lang)}
+          label={categoryLabel(category, lang, bin)}
         />
       </div>
       <div className="category-copy">
-        <strong>{categoryLabel(category, lang)}</strong>
+        <strong>{categoryLabel(category, lang, bin)}</strong>
         <span>{lang === "zh" ? meta.blurbZh : meta.blurbEn}</span>
       </div>
       <div className="category-card-foot">

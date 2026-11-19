@@ -53,6 +53,37 @@ toolchain instead of `cargo-xwin`. The installer is per-user and installs to:
 The executable inside is `squid-desktop.exe`, matching both the NSIS installer
 and the update handoff script.
 
+### 360/电脑管家 environments: ship 一键安装.bat (mandatory)
+
+On the developer machine (and other boxes running 腾讯电脑管家/360), the
+endpoint protector blocks **unsigned installers started from a non-system
+drive** from unpacking into `%TEMP%`: double-clicking
+`release/<ver>/Squid-Setup-*.exe` on D: dies with
+`NSIS Error - Error writing temporary file` — or worse, a silent `/S` run
+exits 0 without installing anything. The same installer run from `C:\Users\<u>\
+AppData\Local\Temp` works, verified live.
+
+Therefore every release directory must contain `一键安装.bat` next to the
+setup exe: it copies the installer into `%TEMP%` (C:) and launches it from
+there. The README's 提示 section documents this as remedy #1. When assembling
+a new release, create the batch (ASCII encoding, version-pinned filename) and
+test it once — the wizard window must appear with no NSIS dialog.
+
+
+### Over-the-top install (custom NSIS template)
+
+`bundle.windows.nsis.template` points at `src-tauri/nsis/installer.nsi`, a copy
+of the `@tauri-apps/cli` default template with one change: the "detected an
+older version — uninstall or reinstall?" page calls `Abort` unless a legacy WiX
+install is found, so upgrades overwrite the previous install in place (inheriting
+`$INSTDIR` from the registry) instead of prompting. User settings live under
+`%APPDATA%\squid` and are never touched by install or uninstall, so they carry
+across upgrades automatically.
+
+Because it is a full template copy, re-sync it whenever `@tauri-apps/cli` (and
+thus the bundled `installer.nsi`) is upgraded: re-copy the new template and
+re-apply the `Abort` block in `Function PageReinstall`.
+
 ## Signing key
 
 Create the Ed25519 key once, outside the repository:

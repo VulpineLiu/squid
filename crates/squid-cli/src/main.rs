@@ -1200,11 +1200,15 @@ fn cmd_status(args: StatusArgs, json: bool) -> Result<i32> {
         "memory",
         format!(
             "{} / {} ({}%) · swap {} / {}",
-            snapshot.memory.used.human(),
-            snapshot.memory.total.human(),
+            snapshot.memory.used.human_binary(),
+            snapshot
+                .memory
+                .installed
+                .max(snapshot.memory.total)
+                .human_binary(),
             snapshot.memory.percent_used(),
-            snapshot.memory.swap_used.human(),
-            snapshot.memory.swap_total.human()
+            snapshot.memory.swap_used.human_binary(),
+            snapshot.memory.swap_total.human_binary()
         ),
     );
     kv(

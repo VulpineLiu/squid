@@ -3,13 +3,14 @@ import {
   BatteryCharging,
   Cpu,
   HardDrive,
+  MonitorSmartphone,
   Network,
   Power,
   RefreshCw,
   ShieldAlert,
   Timer,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
 import {
@@ -21,7 +22,7 @@ import {
   messageFrom,
   percent,
 } from "../lib/format";
-import type { ProcessSample, SystemSnapshot } from "../types";
+import type { ProcessSample, SystemSnapshot, WidgetPrefs } from "../types";
 import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
 import { ProcessTable } from "../components/ProcessTable";
 import {
@@ -32,6 +33,7 @@ import {
   MetricBar,
   PageHeader,
   SectionTitle,
+  Toggle,
   UsageBar,
   useToast,
 } from "../components/ui";
@@ -63,6 +65,45 @@ export function SystemPage({
   const [tab, setTab] = useState<"performance" | "processes">(
     initialProcessFilter ? "processes" : "performance",
   );
+  const [widget, setWidget] = useState<WidgetPrefs | null>(null);
+  const [widgetBusy, setWidgetBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let stop: (() => void) | null = null;
+    void api
+      .widgetGet()
+      .then((view) => !cancelled && setWidget(view.prefs))
+      .catch(() => undefined);
+    void api
+      .onWidgetSettings((next) => !cancelled && setWidget(next))
+      .then((unlisten) => {
+        if (cancelled) unlisten();
+        else stop = unlisten;
+      });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, []);
+
+  const toggleWidget = async (enabled: boolean) => {
+    setWidgetBusy(true);
+    try {
+      const next = await api.widgetSet({ enabled });
+      setWidget(next);
+      push(
+        enabled
+          ? t("Desktop widget is now on.", "桌面实时监控已显示。")
+          : t("Desktop widget is now hidden.", "桌面实时监控已隐藏。"),
+        "success",
+      );
+    } catch (reason) {
+      push(messageFrom(reason), "danger");
+    } finally {
+      setWidgetBusy(false);
+    }
+  };
 
   const stop = async () => {
     if (!victim) return;
@@ -137,7 +178,35 @@ export function SystemPage({
       ) : null}
 
       <div className="system-performance" hidden={tab !== "performance"}>
-      <div className="system-gauges">
+        <section className={`system-widget-bar ${widget?.enabled ? "is-on" : ""}`}>
+          <span className="system-widget-icon">
+            <MonitorSmartphone size={18} />
+          </span>
+          <div className="system-widget-copy">
+            <strong>{t("Desktop live monitor", "桌面实时监控")}</strong>
+            <span>
+              {t(
+                "Keep these live stats on your desktop. Open the settings from the top of the widget.",
+                "把实时数据固定在桌面；设置可在小工具顶部下拉打开。",
+              )}
+            </span>
+          </div>
+          {widget ? (
+            <div className="system-widget-switch">
+              <span>{widget.enabled ? t("On desktop", "已显示") : t("Hidden", "已隐藏")}</span>
+              <Toggle
+                checked={widget.enabled}
+                disabled={widgetBusy}
+                onChange={(next) => void toggleWidget(next)}
+                label={t("Desktop live monitor", "桌面实时监控")}
+              />
+            </div>
+          ) : (
+            <span className="system-widget-loading">{t("Reading…", "读取中…")}</span>
+          )}
+        </section>
+
+        <div className="system-gauges">
         <section className="system-gauge-card">
           <div className="system-gauge-head">
             <span className="metric-icon tone-primary">
@@ -194,7 +263,7 @@ export function SystemPage({
               <span>
                 {snapshot
                   ? `${formatMemoryBytes(snapshot.memory.used)} / ${formatMemoryBytes(
-                      snapshot.memory.total,
+                      Math.max(snapshot.memory.installed, snapshot.memory.total),
                     )}`
                   : t("Reading memory…", "正在读取内存…")}
               </span>
@@ -218,6 +287,19 @@ export function SystemPage({
               <span>{t("Used", "已用")}</span>
               <strong>{formatMemoryBytes(snapshot?.memory.used ?? 0)}</strong>
             </div>
+            {(snapshot?.memory.installed ?? 0) > (snapshot?.memory.total ?? 0) ? (
+              <div>
+                <span>{t("Reserved (GPU)", "硬件保留（含核显）")}</span>
+                <strong>
+                  {formatMemoryBytes(
+                    Math.max(
+                      0,
+                      (snapshot?.memory.installed ?? 0) - (snapshot?.memory.total ?? 0),
+                    ),
+                  )}
+                </strong>
+              </div>
+            ) : null}
             <div>
               <span>{t("Swap", "交换")}</span>
               <strong>
@@ -393,7 +475,10 @@ export function SystemPage({
             <div>
               <strong>{snapshot?.host.hostname || t("This computer", "这台电脑")}</strong>
               <span>
-                {[snapshot?.host.os_name, snapshot?.host.os_version, snapshot?.host.arch]
+                {[
+                  snapshot?.host.os_version || snapshot?.host.os_name,
+                  snapshot?.host.arch,
+                ]
                   .filter(Boolean)
                   .join(" · ")}
               </span>

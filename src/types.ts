@@ -4,6 +4,7 @@ export type PageId =
   | "cleanup"
   | "applications"
   | "purge"
+  | "permissions"
   | "storage"
   | "system"
   | "security"
@@ -21,7 +22,8 @@ export type Category =
   | "project-artifacts"
   | "trash"
   | "language-packs"
-  | "leftovers";
+  | "leftovers"
+  | "update-installers";
 export type ItemKind = "path" | "contents" | "file";
 export type LockReason =
   | "app-running"
@@ -95,12 +97,33 @@ export interface PermissionStatus {
   fullDiskAccess: "granted" | "denied" | "unknown" | "not-required";
 }
 
+export interface MemoryStick {
+  manufacturer: string;
+  size_bytes: number;
+  speed_mhz: number;
+}
+
+/** Static component facts, snake_case straight from squid-platform. */
+export interface HardwareInfo {
+  board: string;
+  cpu_model: string;
+  memory_sticks: MemoryStick[];
+  disk_vendor: string;
+  disk_model: string;
+  disk_bus: string;
+  disk_size_bytes: number;
+  gpu_vendor: string;
+  gpu_model: string;
+  gpu_vram_bytes: number;
+}
+
 export interface Bootstrap {
   version: string;
   platform: "macos" | "windows" | "linux" | "unknown";
   osName: string;
   osVersion: string;
   hardware: string;
+  hardwareInfo: HardwareInfo;
   arch: string;
   device: "mac" | "pc" | "machine";
   language: Language;
@@ -124,6 +147,9 @@ export interface AppInfo {
   has_sibling_install: boolean;
   publisher: string | null;
   installed_ms: number | null;
+  display_icon: string | null;
+  /** data-URL PNG icon (apps_scan only; null when extraction failed). */
+  icon?: string | null;
 }
 
 export interface AppsResult {
@@ -181,10 +207,12 @@ export interface SystemSnapshot {
     brand: string;
     base_frequency_ghz: number;
   };
+  gpu_usage: number | null;
   memory: {
     total: number;
     used: number;
     available: number;
+    installed: number;
     swap_total: number;
     swap_used: number;
     compressed: number | null;
@@ -539,4 +567,107 @@ export interface ProcessDetail {
   startup: StartupItem | null;
   parent: ProcessRow | null;
   stopNote: string | null;
+}
+
+/* --------------------------------------------------------------- permissions */
+
+export interface ManagedStartupItem {
+  id: string;
+  name: string;
+  displayName: string;
+  /** data-URL PNG of the binary's icon; null on platforms without extraction. */
+  icon: string | null;
+  command: string;
+  source: string;
+  sourceLabel: string;
+  scope: string;
+  enabled: boolean;
+}
+
+export interface ShellExtension {
+  id: string;
+  name: string;
+  handler: string;
+  extensionPoint: string;
+  scope: string;
+  friendlyName: string | null;
+  module: string | null;
+  /** publisher (CompanyName) of the owning dll — 电脑管家's 创建者 column. */
+  publisher: string | null;
+  /** data-URL PNG of the owning module's icon; null without extraction. */
+  icon: string | null;
+  registered: boolean;
+}
+
+export interface PopupWindowItem {
+  hwnd: number;
+  title: string;
+  process: string;
+  exe: string | null;
+  /** data-URL PNG of the owning process's icon; null without extraction. */
+  icon: string | null;
+}
+
+export interface PopupRuleItem {
+  exe: string;
+  title: string;
+  matcher: string;
+  enabled: boolean;
+  closed: number;
+  /** data-URL PNG of the rule's exe, filled by manage_scan. */
+  icon?: string | null;
+}
+
+export interface ManageView {
+  watcherEnabled: boolean;
+  intervalMs: number;
+  rules: PopupRuleItem[];
+  windows: PopupWindowItem[];
+  startup: ManagedStartupItem[];
+  extensions: ShellExtension[];
+  startupCount: number;
+  startupEnabledCount: number;
+}
+
+export interface PopupClosedEvent {
+  process: string;
+  title: string;
+  ruleIndex: number;
+}
+
+/* ------------------------------------------------------------ desktop widget */
+
+export type WidgetCorner = "top-right" | "top-left" | "bottom-right" | "bottom-left";
+
+export interface WidgetPrefs {
+  enabled: boolean;
+  panelRun: boolean;
+  panelCpu: boolean;
+  panelNetwork: boolean;
+  panelDisk: boolean;
+  panelStorage: boolean;
+  /** 90–100 percent window opacity. */
+  opacity: number;
+  intervalMs: number;
+  corner: WidgetCorner;
+  rememberCollapsed: boolean;
+  collapsed: boolean;
+  position: [number, number] | null;
+}
+
+export interface WidgetPatch {
+  enabled?: boolean;
+  panelRun?: boolean;
+  panelCpu?: boolean;
+  panelNetwork?: boolean;
+  panelDisk?: boolean;
+  panelStorage?: boolean;
+  opacity?: number;
+  intervalMs?: number;
+  corner?: WidgetCorner;
+  rememberCollapsed?: boolean;
+  collapsed?: boolean;
+  position?: [number, number] | null;
+  keepPosition?: boolean;
+  redock?: boolean;
 }

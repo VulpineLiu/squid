@@ -1404,6 +1404,7 @@ fn draw_stats(frame: &mut Frame, area: Rect, app: &App) {
         100.0,
     );
     let mem_ratio = snapshot.memory.percent_used() as f64 / 100.0;
+    let mem_installed = snapshot.memory.installed.max(snapshot.memory.total);
     meter(
         frame,
         top[1],
@@ -1411,8 +1412,8 @@ fn draw_stats(frame: &mut Frame, area: Rect, app: &App) {
         mem_ratio,
         &format!(
             "{}/{}",
-            snapshot.memory.used.human(),
-            snapshot.memory.total.human()
+            snapshot.memory.used.human_binary(),
+            mem_installed.human_binary()
         ),
         &memory,
         100.0,
@@ -2052,6 +2053,7 @@ mod tests {
                 has_sibling_install: false,
                 publisher: None,
                 installed_ms: None,
+                display_icon: None,
             },
             // Sorted the way `build_plan` sorts: biggest first, so the bundle
             // is *not* the first item here.

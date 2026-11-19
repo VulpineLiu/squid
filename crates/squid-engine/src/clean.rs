@@ -48,7 +48,9 @@ pub fn scan(
     cancel: &CancelToken,
 ) -> squid_core::Result<ScanReport> {
     let prepared = prepared_rules(engine, options);
-    if prepared.is_empty() {
+    let updates_wanted =
+        options.categories.is_empty() || options.categories.contains(&Category::UpdateInstallers);
+    if prepared.is_empty() && !updates_wanted {
         return Err(SquidError::NothingToDo);
     }
     progress.phase("match", "locating cleanup candidates");
@@ -145,6 +147,28 @@ pub fn scan(
             }
             Err(err) if err.is_noteworthy() => progress.warning(err.to_string()),
             Err(_) => {}
+        }
+    }
+
+    // Update installers (升级安装包): rule-driven known apps + heuristic
+    // sweep of AppData staging folders. The walk is bounded, so it is always
+    // on unless the caller filtered categories down to something else.
+    let updates_wanted =
+        options.categories.is_empty() || options.categories.contains(&Category::UpdateInstallers);
+    if updates_wanted {
+        progress.phase("update-installers", "collecting stale update packages");
+        for item in crate::updates::collect(engine, cancel) {
+            if seen.contains_key(&item.path) {
+                continue;
+            }
+            let mut item = item;
+            if engine.is_whitelisted(&item.path) {
+                item = item.locked(LockReason::Whitelisted);
+            } else if let Some(reason) = engine.block_reason(&item) {
+                item = item.locked(LockReason::Protected).with_note(reason);
+            }
+            seen.insert(item.path.clone(), report.items.len());
+            report.items.push(item);
         }
     }
 

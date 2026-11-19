@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAppsWorkspace } from "./hooks/useAppsWorkspace";
+import { usePermissionsWorkspace } from "./hooks/usePermissionsWorkspace";
 import { useScanWorkspace } from "./hooks/useScanWorkspace";
 import { useSecurityWorkspace } from "./hooks/useSecurityWorkspace";
 import { useStartupWorkspace } from "./hooks/useStartupWorkspace";
@@ -38,6 +39,7 @@ import { ApplicationsPage } from "./pages/ApplicationsPage";
 import { CleanupPage } from "./pages/CleanupPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { OverviewPage } from "./pages/OverviewPage";
+import { PermissionsPage } from "./pages/PermissionsPage";
 import { PurgePage } from "./pages/PurgePage";
 import { SecurityPage } from "./pages/SecurityPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -83,6 +85,12 @@ const NAV_GROUPS: {
         labelZh: "深度清理",
         icon: WandSparkles,
       },
+      {
+        id: "permissions",
+        labelEn: "Permissions",
+        labelZh: "权限管理",
+        icon: ShieldCheck,
+      },
     ],
   },
   {
@@ -113,11 +121,18 @@ const NAV_GROUPS: {
   },
 ];
 
+// Permissions manages Windows Run keys, shell extensions and popup rules; the
+// macOS equivalent is the Startup page, which reads LaunchAgents and login items.
+function navItemVisible(id: PageId, platform: string | undefined): boolean {
+  return id !== "permissions" || platform === "windows";
+}
+
 const PAGE_TITLES: Record<PageId, [string, string]> = {
   overview: ["Overview", "概览"],
   cleanup: ["Daily cleanup", "日常清理"],
   applications: ["Uninstall apps", "应用卸载"],
   purge: ["Deep Clean", "深度清理"],
+  permissions: ["Permissions", "权限管理"],
   storage: ["Storage", "存储空间"],
   system: ["Real-time monitor", "实时监控"],
   security: ["Security", "安全"],
@@ -177,11 +192,16 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [autoCheck, setAutoCheck] = useState(true);
   const [setupOpen, setSetupOpen] = useState(false);
+  // The 托盘驻留 case: a hidden main window must stop sampling the machine.
+  const [windowVisible, setWindowVisible] = useState(true);
   const cleanup = useScanWorkspace("cleanup");
   const purge = useScanWorkspace("purge");
   const apps = useAppsWorkspace();
-  const systemActive = page === "overview" || page === "system";
-  const system = useSystemSnapshot(systemActive);
+  const permissions = usePermissionsWorkspace(page === "permissions");
+  const systemActive = (page === "overview" || page === "system") && windowVisible;
+  // Only the 实时监控 top-process table needs the expensive per-pid walk;
+  // the overview tiles ride the light refresh.
+  const system = useSystemSnapshot(systemActive, 1800, page === "system");
   const update = useUpdateFlow(bootstrap?.updateFeedUrl ?? "", autoCheck);
   // One security state for the whole window: the overview strip, the sidebar
   // badge and the security page all read this, so they cannot disagree.
@@ -219,6 +239,23 @@ export default function App() {
       });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void api
+      .onWindowVisible((next) => {
+        if (!cancelled) setWindowVisible(next);
+      })
+      .then((stop) => {
+        if (cancelled) stop();
+        else unlisten = stop;
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 
@@ -284,18 +321,20 @@ export default function App() {
   }, [security]);
 
   useEffect(() => {
-    const order: PageId[] = [
+    const order: PageId[] = ([
       "overview",
       "cleanup",
       "applications",
       "purge",
+      "permissions",
       "storage",
       "system",
       "security",
       "startup",
-      "history",
-      "settings",
-    ];
+    ] as PageId[]).filter(
+      (id) => id !== "permissions" || bootstrap?.platform === "windows",
+    );
+    // Ctrl/Cmd+1..9 follow the sidebar.
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
       const index = Number(event.key) - 1;
@@ -305,7 +344,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [bootstrap?.platform]);
 
   const changeLanguage = useCallback(
     async (nextLanguage: Language) => {
@@ -354,7 +393,7 @@ export default function App() {
       : null;
 
   return (
-    <I18nProvider lang={lang} setLang={setLang}>
+    <I18nProvider lang={lang} setLang={setLang} binNoun={bootstrap.binNoun}>
       <AppChrome
         bootstrap={bootstrap}
         page={page}
@@ -388,6 +427,7 @@ export default function App() {
             onHistory={() => setPage("history")}
           />
         ) : null}
+        {page === "permissions" ? <PermissionsPage workspace={permissions} /> : null}
         {page === "storage" ? <StoragePage bootstrap={bootstrap} /> : null}
         {page === "security" ? (
           <SecurityPage security={security} onOpenStartup={() => setPage("startup")} />
@@ -492,7 +532,9 @@ function AppChrome({
               <span className="nav-group-label">
                 {lang === "zh" ? group.labelZh : group.labelEn}
               </span>
-              {group.items.map((item) => {
+              {group.items
+                .filter((item) => navItemVisible(item.id, bootstrap.platform))
+                .map((item) => {
                 const Icon = item.icon;
                 return (
                   <button

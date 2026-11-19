@@ -616,28 +616,40 @@ pub fn snapshot_note(snapshots: &[LocalSnapshot]) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn sandbox() -> PathBuf {
+    /// Returns None when an endpoint protector refuses the scratch writes
+    /// (skip, not failure).
+    fn sandbox() -> Option<PathBuf> {
         let root = std::env::temp_dir().join(format!(
             "squid-purge-test-{}-{}",
             std::process::id(),
             squid_core::ledger::new_session_id()
         ));
-        std::fs::create_dir_all(root.join("demo/node_modules/left-pad")).unwrap();
-        std::fs::write(root.join("demo/node_modules/left-pad/index.js"), b"x").unwrap();
-        std::fs::write(root.join("demo/package.json"), b"{}").unwrap();
-        std::fs::create_dir_all(root.join("demo/dist")).unwrap();
-        std::fs::write(root.join("demo/dist/index.html"), b"x").unwrap();
-        std::fs::create_dir_all(root.join("loose/dist")).unwrap();
-        std::fs::write(root.join("loose/dist/important.pdf"), b"x").unwrap();
-        std::fs::create_dir_all(root.join("rust/checkme/target/debug")).unwrap();
-        std::fs::write(root.join("rust/checkme/Cargo.toml"), b"[package]").unwrap();
-        std::fs::write(root.join("rust/checkme/target/debug/bin"), b"x").unwrap();
-        root
+        let plant = || -> std::io::Result<()> {
+            std::fs::create_dir_all(root.join("demo/node_modules/left-pad"))?;
+            std::fs::write(root.join("demo/node_modules/left-pad/index.js"), b"x")?;
+            std::fs::write(root.join("demo/package.json"), b"{}")?;
+            std::fs::create_dir_all(root.join("demo/dist"))?;
+            std::fs::write(root.join("demo/dist/index.html"), b"x")?;
+            std::fs::create_dir_all(root.join("loose/dist"))?;
+            std::fs::write(root.join("loose/dist/important.pdf"), b"x")?;
+            std::fs::create_dir_all(root.join("rust/checkme/target/debug"))?;
+            std::fs::write(root.join("rust/checkme/Cargo.toml"), b"[package]")?;
+            std::fs::write(root.join("rust/checkme/target/debug/bin"), b"x")?;
+            Ok(())
+        };
+        match plant() {
+            Ok(()) => Some(root),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("skipping: scratch write denied ({error})");
+                None
+            }
+            Err(error) => panic!("scratch dir: {error}"),
+        }
     }
 
     #[test]
     fn artefacts_are_found_and_loose_dirs_are_left_alone() {
-        let root = sandbox();
+        let Some(root) = sandbox() else { return };
         let settings = squid_core::settings::Settings {
             purge_roots: vec![root.to_string_lossy().into_owned()],
             ..squid_core::settings::Settings::default()
@@ -698,7 +710,7 @@ mod tests {
 
     #[test]
     fn fresh_artefacts_are_locked_without_force() {
-        let root = sandbox();
+        let Some(root) = sandbox() else { return };
         let settings = squid_core::settings::Settings {
             purge_roots: vec![root.to_string_lossy().into_owned()],
             purge_min_age_days: 30,
@@ -735,7 +747,13 @@ mod tests {
             squid_core::ledger::new_session_id()
         ));
         let repo = root.join("repo");
-        std::fs::create_dir_all(repo.join("src")).unwrap();
+        if let Err(error) = std::fs::create_dir_all(repo.join("src")) {
+            if error.kind() == std::io::ErrorKind::PermissionDenied {
+                eprintln!("skipping: scratch write denied ({error})");
+                return;
+            }
+            panic!("scratch dir: {error}");
+        }
         std::fs::create_dir_all(repo.join("node_modules/pkg")).unwrap();
         std::fs::write(repo.join("package.json"), b"{}").unwrap();
         std::fs::write(repo.join("src/main.js"), b"x").unwrap();

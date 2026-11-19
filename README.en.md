@@ -30,6 +30,8 @@ The desktop app supports macOS 12+ and Windows 10/11 x64. The CLI and TUI share 
 | Real-time monitor | Samples CPU, memory, network, disk, battery, volumes, and high-usage processes every two seconds. The Processes tab lists every process with its signature and startup entry, and ends them after confirmation |
 | Security | Reports XProtect or Defender status, scans for malware by hash, YARA rule and heuristic, grades findings confirmed / suspicious / advisory, and quarantines them reversibly |
 | Startup items | LaunchAgents, LaunchDaemons, login items, registry Run keys, startup folders, scheduled tasks and services; the ones the current user owns can be disabled and re-enabled |
+| Permissions (Windows) | Registry Run keys, startup folders and scheduled tasks, shell context-menu handlers, popup-window rules and a background watcher |
+| Desktop widget | A borderless board pinned from Real-time monitor, with CPU / memory / GPU rings, network and disk curves, and storage bars; all settings open from the top of the widget |
 | History and undo | Every real deletion is recorded in a local ledger; items still in Trash or the Recycle Bin can be restored |
 | System updates | Checks, verifies, downloads, and installs new versions from the release channel |
 
@@ -39,14 +41,16 @@ Language settings offer only Simplified Chinese and English, with the current sy
 
 ### Sidebar
 
-- **Maintenance**: Overview, Daily cleanup, Uninstall apps, Deep Clean
+- **Maintenance**: Overview, Daily cleanup, Uninstall apps, Deep Clean, Permissions (Windows only)
 - **Protection**: Security, Startup items
 - **Insights**: Storage, Real-time monitor
 - **Bottom**: History, Settings
 
-Use `⌘1`–`⌘0` on macOS or `Ctrl+1`–`Ctrl+0` on Windows to switch pages, in the
-sidebar order above. Since 0.1.6, `7` and `8` open Security and Startup items;
-History and Settings moved to `9` and `0`.
+Use `⌘1`–`⌘8` on macOS or `Ctrl+1`–`Ctrl+9` on Windows to switch pages, in the
+sidebar order. Windows maps `1`–`9` to Overview, Daily cleanup, Uninstall apps,
+Deep Clean, Permissions, Storage, Real-time monitor, Security and Startup items.
+macOS hides the Windows-only Permissions screen, so the later pages shift up by
+one.
 
 ### Menu bar / tray
 
@@ -59,9 +63,32 @@ Closing the main window only hides it; Squid keeps running. The tray menu offers
 - Daily cleanup
 - Uninstall apps
 - Deep Clean
+- Show / hide desktop widget
 - Quit Squid
 
+The tray mark is transparent and monochrome: macOS receives it as a template
+image, so the system tints it correctly for light and dark menu bars; Windows and
+Linux show the same silhouette in gray.
+
 The tray follows the active interface language. Reopening the app, double-clicking the app icon, or triggering the single-instance handler restores and focuses the main window. Only **Quit Squid** ends the process.
+
+### Desktop widget
+
+The desktop widget is switched on from Real-time monitor. It is a separate
+borderless Tauri window, not a WidgetKit extension. It shares the Real-time
+monitor sampler, refreshes at 2 / 5 / 10 seconds, and pauses while hidden.
+
+- Every setting lives in the widget: click the gear at its top to open panel
+  switches, refresh rate, dock corner, fold memory and opacity.
+- Up to four cards: status (CPU, memory and GPU when the OS exposes it), network,
+  disk I/O and storage volumes.
+- On macOS it uses `BelowNormal` window level, appears on every Space, and is
+  non-focusable with `accept_first_mouse`, so it stays beside the desktop without
+  taking keyboard focus from the current app.
+- On Windows it sits on the desktop layer through
+  `SetWindowPos(HWND_BOTTOM, SWP_NOACTIVATE)`.
+- The master switch is shared with the tray item; opacity is capped at 90–100%
+  and settings persist in `widget.json`.
 
 ### Software updates
 

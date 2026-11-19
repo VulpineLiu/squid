@@ -35,9 +35,10 @@ export interface ScanWorkspace {
   cancel: () => Promise<void>;
   toggleItem: (index: number) => void;
   toggleCategory: (category: Category) => void;
+  deselect: (indexes: number[]) => void;
   selectAll: () => void;
   clearSelection: () => void;
-  clean: (mode: DeleteMode) => Promise<DeleteResult | null>;
+  clean: (mode: DeleteMode, indexes?: number[]) => Promise<DeleteResult | null>;
   clearError: () => void;
   reset: () => void;
 }
@@ -149,6 +150,16 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
 
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
+  const deselect = useCallback((indexes: number[]) => {
+    if (indexes.length === 0) return;
+    const drop = new Set(indexes);
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const index of drop) next.delete(index);
+      return next;
+    });
+  }, []);
+
   const selectedTotal = useMemo(() => {
     if (!result) return 0;
     let total = 0;
@@ -159,8 +170,10 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
   const selectedCount = selected.size;
 
   const clean = useCallback(
-    async (mode: DeleteMode) => {
-      if (!result || selected.size === 0 || deleting) return null;
+    async (mode: DeleteMode, indexes?: number[]) => {
+      if (!result || deleting) return null;
+      const targets = indexes ?? [...selected];
+      if (targets.length === 0) return null;
       const id = jobId();
       activeJob.current = id;
       setCurrentJob(id);
@@ -171,8 +184,8 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
       try {
         const next =
           kind === "cleanup"
-            ? await api.cleanupDelete(id, result.scanId, [...selected], mode)
-            : await api.purgeDelete(id, result.scanId, [...selected], mode);
+            ? await api.cleanupDelete(id, result.scanId, targets, mode)
+            : await api.purgeDelete(id, result.scanId, targets, mode);
         if (activeJob.current !== id) return null;
         setResult(null);
         setSelected(new Set());
@@ -217,6 +230,7 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
     cancel,
     toggleItem,
     toggleCategory,
+    deselect,
     selectAll,
     clearSelection,
     clean,

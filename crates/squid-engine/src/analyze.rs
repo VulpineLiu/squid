@@ -367,8 +367,9 @@ mod tests {
     /// One folder per call. A session id is a second stamp plus sixteen bits of
     /// clock hash, which two fixtures created in the same microsecond have been
     /// known to share — and then one test measured the other's half-deleted
-    /// tree and wondered why the biggest folder came second.
-    fn fixture(who: &str) -> PathBuf {
+    /// tree and wondered why the biggest folder came second. Returns None when
+    /// an endpoint protector refuses the scratch writes (skip, not failure).
+    fn fixture(who: &str) -> Option<PathBuf> {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
             "squid-analyze-{}-{}-{}-{}",
@@ -377,17 +378,25 @@ mod tests {
             SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             squid_core::ledger::new_session_id()
         ));
-        std::fs::create_dir_all(root.join("big")).unwrap();
-        std::fs::write(root.join("big/blob.bin"), vec![9u8; 400_000]).unwrap();
-        std::fs::create_dir_all(root.join("small")).unwrap();
-        std::fs::write(root.join("small/tiny.txt"), b"hi").unwrap();
-        std::fs::write(root.join("loose.bin"), vec![3u8; 90_000]).unwrap();
-        root
+        if let Err(error) = std::fs::create_dir_all(root.join("big")) {
+            if error.kind() == std::io::ErrorKind::PermissionDenied {
+                eprintln!("skipping: scratch write denied ({error})");
+                return None;
+            }
+            panic!("scratch dir: {error}");
+        }
+        std::fs::write(root.join("big/blob.bin"), vec![9u8; 400_000]).ok()?;
+        std::fs::create_dir_all(root.join("small")).ok()?;
+        std::fs::write(root.join("small/tiny.txt"), b"hi").ok()?;
+        std::fs::write(root.join("loose.bin"), vec![3u8; 90_000]).ok()?;
+        Some(root)
     }
 
     #[test]
     fn the_biggest_folder_comes_first() {
-        let root = fixture("the_biggest_folder_comes_first");
+        let Some(root) = fixture("the_biggest_folder_comes_first") else {
+            return;
+        };
         let progress = Progress::new();
         let cancel = CancelToken::new();
         let node = explore(&root, 2, 4, &cancel, &progress).expect("explore");
@@ -400,7 +409,9 @@ mod tests {
 
     #[test]
     fn largest_files_are_sorted_and_capped() {
-        let root = fixture("largest_files_are_sorted_and_capped");
+        let Some(root) = fixture("largest_files_are_sorted_and_capped") else {
+            return;
+        };
         let progress = Progress::new();
         let cancel = CancelToken::new();
         let files = largest_files(&root, 10, Bytes(1_024), &cancel, &progress).expect("files");
@@ -412,7 +423,9 @@ mod tests {
 
     #[test]
     fn the_folded_remainder_keeps_the_totals_honest() {
-        let root = fixture("the_folded_remainder_keeps_the_totals_honest");
+        let Some(root) = fixture("the_folded_remainder_keeps_the_totals_honest") else {
+            return;
+        };
         let progress = Progress::new();
         let cancel = CancelToken::new();
         let node = explore(&root, 1, 1, &cancel, &progress).expect("explore");

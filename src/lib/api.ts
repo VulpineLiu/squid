@@ -9,9 +9,12 @@ import type {
   JobProgress,
   LargestFile,
   IntelStatus,
+  ManageView,
   PageId,
   PermissionStatus,
   PlanResult,
+  PopupClosedEvent,
+  PopupWindowItem,
   ScanResult,
   SettingsView,
   SecurityAction,
@@ -28,6 +31,8 @@ import type {
   UpdateCheckResult,
   UpdateProgress,
   UpdateStatus,
+  WidgetPatch,
+  WidgetPrefs,
 } from "../types";
 
 export interface SettingsPatch {
@@ -76,7 +81,7 @@ export const api = {
     invoke<StorageNode>("storage_explore", { jobId, path, depth, top }),
   storageLargestFiles: (jobId: string, path: string, limit = 40) =>
     invoke<LargestFile[]>("storage_largest_files", { jobId, path, limit }),
-  systemSnapshot: () => invoke<SystemSnapshot>("system_snapshot"),
+  systemSnapshot: (full = false) => invoke<SystemSnapshot>("system_snapshot", { full }),
   stopProcess: (process: SystemSnapshot["top_processes"][number]) =>
     invoke<void>("stop_process", { process }),
   historyList: (limit = 60) => invoke<HistorySession[]>("history_list", { limit }),
@@ -90,6 +95,23 @@ export const api = {
   openTrash: () => invoke<void>("open_trash"),
   permissionStatus: () => invoke<PermissionStatus>("permission_status"),
   openFullDiskAccessSettings: () => invoke<void>("open_full_disk_access_settings"),
+  manageScan: () => invoke<ManageView>("manage_scan"),
+  managedStartupSetEnabled: (id: string, enabled: boolean) =>
+    invoke<number>("managed_startup_set_enabled", { id, enabled }),
+  extensionSetRegistered: (id: string, registered: boolean) =>
+    invoke<void>("extension_set_registered", { id, registered }),
+  popupList: () => invoke<PopupWindowItem[]>("popup_list"),
+  popupClose: (hwnd: number) => invoke<void>("popup_close", { hwnd }),
+  popupAddRule: (hwnd: number, matcher: string) =>
+    invoke<void>("popup_add_rule", { hwnd, matcher }),
+  popupRuleUpdate: (index: number, enabled?: boolean, resetCount?: boolean) =>
+    invoke<void>("popup_rule_update", { index, enabled, resetCount }),
+  popupRuleRemove: (index: number) => invoke<void>("popup_rule_remove", { index }),
+  popupWatcherSet: (enabled: boolean) => invoke<void>("popup_watcher_set", { enabled }),
+  widgetGet: () =>
+    invoke<{ prefs: WidgetPrefs; language: "zh" | "en" }>("widget_get"),
+  widgetSet: (patch: WidgetPatch) => invoke<WidgetPrefs>("widget_set", { patch }),
+  widgetHide: () => invoke<void>("widget_hide"),
   updateCheck: () => invoke<UpdateCheckResult>("update_check"),
   updateStatus: () => invoke<UpdateStatus | null>("update_status"),
   updateDownload: () => invoke<UpdateStatus>("update_download"),
@@ -133,8 +155,14 @@ export const api = {
     listen<UpdateStatus | null>("update://status", (event) => handler(event.payload)),
   onNavigate: (handler: (page: PageId) => void) =>
     listen<PageId>("squid://navigate", (event) => handler(event.payload)),
+  onWindowVisible: (handler: (visible: boolean) => void) =>
+    listen<boolean>("squid://visible", (event) => handler(event.payload)),
   onSecurityScan: (handler: (scan: SecurityScan) => void) =>
     listen<SecurityScan>("squid://security", (event) => handler(event.payload)),
+  onPopupClosed: (handler: (event: PopupClosedEvent) => void) =>
+    listen<PopupClosedEvent>("popup://closed", (event) => handler(event.payload)),
+  onWidgetSettings: (handler: (prefs: WidgetPrefs) => void) =>
+    listen<WidgetPrefs>("widget://settings", (event) => handler(event.payload)),
 };
 
 /// Progress events for one job, whatever kind of job it is. Security scans share
