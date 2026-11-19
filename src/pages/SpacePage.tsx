@@ -63,6 +63,156 @@ type Entry = {
 
 const AGE_CHOICES = [3, 7, 30];
 
+/* 清理点 names: one cluster per producing rule (电脑管家's "Windows系统日志
+ * 文件" granularity). Unknown ids fall back to the prettified rule id. */
+const RULE_NAMES: Record<string, [string, string]> = {
+  "windows-temp": ["Temp files", "系统临时文件"],
+  "recent-items": ["Recent items", "最近使用记录"],
+  "windows-update-downloads": ["Windows Update downloads", "Windows 更新下载缓存"],
+  "bits-transfer-cache": ["Delivery Optimization cache", "传递优化缓存"],
+  prefetch: ["Prefetch files", "预读取文件 Prefetch"],
+  "edge-caches": ["Microsoft Edge caches", "Edge 浏览器缓存"],
+  "chrome-caches": ["Chrome caches", "Chrome 浏览器缓存"],
+  "firefox-cache": ["Firefox cache", "Firefox 浏览器缓存"],
+  "inet-cache": ["IE/legacy browser cache", "IE 遗留浏览器缓存"],
+  "icon-thumbnail-cache": ["Icon & thumbnail caches", "缩略图与图标缓存"],
+  "discord-cache": ["Discord cache", "Discord 缓存"],
+  "slack-cache": ["Slack cache", "Slack 缓存"],
+  "vscode-cache": ["VS Code caches", "VS Code 缓存"],
+  "vscode-logs": ["VS Code logs", "VS Code 日志"],
+  "user-error-reporting": ["User error reports", "用户错误报告"],
+  "system-error-reporting": ["Windows error reports", "Windows 错误报告"],
+  "crash-dumps": ["Crash dumps", "崩溃转储文件"],
+  "kernel-dumps": ["Kernel memory dumps", "内存转储文件"],
+  "connected-devices-platform": ["Connected Devices logs", "已连接设备平台日志"],
+  "onedrive-logs": ["OneDrive logs", "OneDrive 日志"],
+  "windows-setup-logs": ["Windows setup logs", "Windows 安装日志"],
+  "npm-cache": ["npm cache", "npm 缓存"],
+  "pip-cache": ["pip cache", "pip 缓存"],
+  "cargo-cache": ["cargo registry cache", "cargo 缓存"],
+  "go-build-cache": ["Go build cache", "Go 构建缓存"],
+  "nuget-cache": ["NuGet cache", "NuGet 缓存"],
+  "gradle-cache": ["Gradle cache", "Gradle 缓存"],
+  "windows-old": ["Previous Windows install", "Windows.old 旧系统"],
+  "package-cache": ["Package cache", "系统包缓存"],
+  "nvidia-installer-archives": ["NVIDIA installer archives", "NVIDIA 安装程序缓存"],
+  "orphan-leftovers": ["Leftovers of uninstalled apps", "已卸载应用残留"],
+  "update-installers-known": ["Known app update packages", "已知应用的升级包"],
+  "update-installers-scan": ["Other update packages", "其他升级安装包"],
+  "purge-artifacts": ["Build artefacts", "项目构建产物"],
+};
+
+function ruleName(ruleId: string, lang: "zh" | "en"): string {
+  const pair = RULE_NAMES[ruleId];
+  if (pair) return lang === "zh" ? pair[1] : pair[0];
+  if (!ruleId) return lang === "zh" ? "其他项目" : "Other items";
+  return ruleId.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/* Flat rule id → a normalised cluster key. Update installers cluster per
+ * app ("<app> · <file>" labels) so the list matches how people think. */
+function clusterKey(item: CleanupItem): string {
+  if (item.ruleId.startsWith("update-installers")) {
+    return `update:${item.label.split(" · ")[0] ?? item.label}`;
+  }
+  return item.ruleId;
+}
+
+// Categories whose items are raw directories with one meaning each; they
+// keep the flat list. Rule-driven categories group into 清理点 clusters.
+const FLAT_CATEGORIES: Category[] = ["project-artifacts", "developer", "trash"];
+
+/* Cluster label for update installers: items carry "<app> · <file>" labels. */
+function clusterLabel(item: CleanupItem, lang: "zh" | "en"): string {
+  if (item.ruleId.startsWith("update-installers")) {
+    const app = item.label.split(" · ")[0] ?? item.label;
+    return lang === "zh" ? `${app} 升级包` : `${app} installers`;
+  }
+  return ruleName(item.ruleId, lang);
+}
+
+type Cluster = {
+  key: string;
+  label: string;
+  entries: Entry[];
+  total: number;
+  removable: number;
+  selected: number;
+};
+
+/* A 清理点: one rule's worth of hits, aggregated like 电脑管家's sub-items.
+ * Tick = whole cluster; hover = 忽略 / 查看路径; body = expand to paths. */
+function ClusterRow({
+  cluster,
+  open,
+  onOpen,
+  onTick,
+  onIgnore,
+  lang,
+}: {
+  cluster: Cluster;
+  open: boolean;
+  onOpen: () => void;
+  onTick: (on: boolean) => void;
+  onIgnore: () => void;
+  lang: "zh" | "en";
+}) {
+  const { t } = useI18n();
+  const allOn = cluster.removable > 0 && cluster.selected >= cluster.removable;
+  return (
+    <>
+      <div className="space-rule" onClick={onOpen}>
+        <Checkbox
+          checked={allOn}
+          disabled={cluster.removable === 0}
+          onChange={() => onTick(!allOn)}
+          label={cluster.label}
+        />
+        <span className="space-rule-name">{cluster.label}</span>
+        <span className="space-rule-cnt">
+          {t(
+            `${formatCount(cluster.entries.length)} location(s)`,
+            `${formatCount(cluster.entries.length)} 个位置`,
+          )}
+        </span>
+        <span className="space-rule-acts">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onIgnore();
+            }}
+          >
+            {t("Ignore", "忽略")}
+          </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpen();
+            }}
+          >
+            {t("Paths", "查看路径")}
+          </button>
+        </span>
+        <span className="space-rule-size">{formatBytes(cluster.total)}</span>
+        <ChevronRight
+          className={`space-rule-chv ${open ? "is-open" : ""}`}
+          size={13}
+          aria-hidden="true"
+        />
+      </div>
+      {open ? (
+        <div className="space-rule-paths">
+          {cluster.entries.map((entry) => (
+            <AccItem key={`${entry.item.path}-${entry.index}`} entry={entry} />
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 /* One candidate inside an expanded category. The whole row reveals the path
  * in Explorer (电脑管家 habit: 点击定位); only the tick box changes the
  * selection, so browsing never mis-toggles. */
@@ -266,6 +416,94 @@ export function SpacePage({
       if (source.result?.items.some((item) => item.category === category)) {
         source.setCategorySelection(category, !allOn);
       }
+    }
+  };
+
+  // 受安全策略保护 items are the engine's own refusals — the user can fix
+  // "app running" or "needs admin" rows, but never a protected path, so
+  // those fold into a one-line footnote with a reveal switch per category.
+  const [showProtected, setShowProtected] = useState<Partial<Record<Category, boolean>>>({});
+  const visibleEntries = useMemo(
+    () =>
+      entries.filter(
+        (entry) =>
+          entry.item.lock !== "protected" || showProtected[entry.item.category],
+      ),
+    [entries, showProtected],
+  );
+  const hiddenProtected = useMemo(() => {
+    const map = new Map<Category, number>();
+    for (const entry of entries) {
+      if (entry.item.lock === "protected" && !showProtected[entry.item.category]) {
+        map.set(entry.item.category, (map.get(entry.item.category) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [entries, showProtected]);
+
+  // 清理点 clusters for one category: same producing rule (update packages
+  // cluster per app). Empty rule ids collapse into one "other" cluster.
+  const clustersFor = (items: Entry[]): Cluster[] => {
+    const map = new Map<string, Cluster>();
+    for (const entry of items) {
+      const key = clusterKey(entry.item);
+      const cluster = map.get(key) ?? {
+        key,
+        label: clusterLabel(entry.item, lang),
+        entries: [],
+        total: 0,
+        removable: 0,
+        selected: 0,
+      };
+      cluster.entries.push(entry);
+      cluster.total += entry.item.onDisk;
+      if (!entry.item.lock) cluster.removable += 1;
+      if (entry.source.selected.has(entry.index)) cluster.selected += 1;
+      map.set(key, cluster);
+    }
+    return [...map.values()]
+      .map((cluster) => ({
+        ...cluster,
+        entries: [...cluster.entries].sort((a, b) => b.item.onDisk - a.item.onDisk),
+      }))
+      .sort((a, b) => b.total - a.total);
+  };
+
+  // Open clusters inside expanded categories, keyed "category|ruleId".
+  const [openClusters, setOpenClusters] = useState<Set<string>>(new Set());
+  const toggleCluster = (key: string) =>
+    setOpenClusters((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  // 忽略 = protect every path in the cluster through the whitelist — the
+  // visible, reversible twin of 电脑管家's opaque "全部忽略".
+  const ignoreCluster = async (cluster: Cluster) => {
+    const unique = new Map<string, string>();
+    for (const entry of cluster.entries) {
+      unique.set(entry.item.path, entry.item.displayPath);
+    }
+    try {
+      for (const path of unique.keys()) await api.whitelistAdd(path);
+      const label =
+        unique.size === 1
+          ? [...unique.values()][0]
+          : t(
+              `${formatCount(unique.size)} paths of ${cluster.label}`,
+              `${cluster.label} 的 ${formatCount(unique.size)} 个路径`,
+            );
+      push(
+        t(`${label} moved to the protection list`, `已将 ${label} 加入保护名单`),
+        "success",
+      );
+    } catch (reason) {
+      push(
+        t(`Ignore failed: ${String(reason)}`, `忽略失败：${String(reason)}`),
+        "danger",
+      );
     }
   };
 
@@ -584,14 +822,11 @@ export function SpacePage({
               (category) => groups.has(category) && inSection(category),
             );
             if (cats.length === 0) return null;
-            const sectionCount = cats.reduce(
-              (sum, category) => sum + groups.get(category)!.count,
-              0,
-            );
-            const sectionTotal = cats.reduce(
-              (sum, category) => sum + groups.get(category)!.total,
-              0,
-            );
+            const inSectionEntry = (entry: Entry) => inSection(entry.item.category);
+            const sectionCount = visibleEntries.filter(inSectionEntry).length;
+            const sectionTotal = visibleEntries
+              .filter(inSectionEntry)
+              .reduce((sum, entry) => sum + entry.item.onDisk, 0);
             return (
               <div key={section}>
                 <div className="space-sec">
@@ -622,9 +857,12 @@ export function SpacePage({
                   const meta = CATEGORY_META[category];
                   const Icon = meta.icon;
                   const optional = OPTIONAL_CATEGORIES.includes(category);
-                  const items = entries
-                    .filter((entry) => entry.item.category === category)
-                    .sort((a, b) => b.item.onDisk - a.item.onDisk);
+                  const shown = visibleEntries.filter(
+                    (entry) => entry.item.category === category,
+                  );
+                  const flat = FLAT_CATEGORIES.includes(category);
+                  const clusters = flat ? [] : clustersFor(shown);
+                  const hidden = hiddenProtected.get(category) ?? 0;
                   return (
                     <div key={category} className={`space-cat ${open ? "is-open" : ""}`}>
                       <div
@@ -655,11 +893,21 @@ export function SpacePage({
                           {lang === "zh" ? meta.blurbZh : meta.blurbEn}
                         </span>
                         <span className="space-cat-n">
-                          {t(`${formatCount(group.count)} items`, `${formatCount(group.count)} 项`)}
+                          {flat
+                            ? t(
+                                `${formatCount(shown.length)} items`,
+                                `${formatCount(shown.length)} 项`,
+                              )
+                            : t(
+                                `${formatCount(clusters.length)} clean-up spots`,
+                                `${formatCount(clusters.length)} 个清理点`,
+                              )}
                         </span>
                         <span className={`space-cat-size ${optional ? "is-opt" : ""}`}>
                           {optional ? `${t("optional", "可选")} ` : ""}
-                          {formatBytes(group.total)}
+                          {formatBytes(
+                            shown.reduce((sum, entry) => sum + entry.item.onDisk, 0),
+                          )}
                         </span>
                         <ChevronRight
                           className="space-cat-chv"
@@ -669,12 +917,57 @@ export function SpacePage({
                       </div>
                       {open ? (
                         <div className="space-cat-items">
-                          {items.map((entry) => (
-                            <AccItem
-                              key={`${entry.item.path}-${entry.index}`}
-                              entry={entry}
-                            />
-                          ))}
+                          {flat
+                            ? shown.map((entry) => (
+                                <AccItem
+                                  key={`${entry.item.path}-${entry.index}`}
+                                  entry={entry}
+                                />
+                              ))
+                            : clusters.map((cluster) => {
+                                const key = `${category}|${cluster.key}`;
+                                return (
+                                  <ClusterRow
+                                    key={key}
+                                    cluster={cluster}
+                                    open={openClusters.has(key)}
+                                    lang={lang}
+                                    onOpen={() => toggleCluster(key)}
+                                    onTick={(on) => {
+                                      const bySource = new Map<ScanWorkspace, number[]>();
+                                      for (const entry of cluster.entries) {
+                                        if (entry.item.lock) continue;
+                                        const list = bySource.get(entry.source) ?? [];
+                                        list.push(entry.index);
+                                        bySource.set(entry.source, list);
+                                      }
+                                      for (const [source, list] of bySource) {
+                                        source.setIndexes(list, on);
+                                      }
+                                    }}
+                                    onIgnore={() => void ignoreCluster(cluster)}
+                                  />
+                                );
+                              })}
+                          {hidden > 0 && !showProtected[category] ? (
+                            <div className="space-hidden">
+                              {t(
+                                `${formatCount(hidden)} items in protected system locations are hidden (they cannot be removed).`,
+                                `已自动隐藏 ${formatCount(hidden)} 个受安全策略保护、无法删除的项目。`,
+                              )}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setShowProtected((current) => ({
+                                    ...current,
+                                    [category]: true,
+                                  }))
+                                }
+                              >
+                                {t("Show anyway", "仍然显示")}
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>

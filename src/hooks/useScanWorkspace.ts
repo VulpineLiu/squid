@@ -51,6 +51,7 @@ export interface ScanWorkspace {
   toggleItem: (index: number) => void;
   toggleCategory: (category: Category) => void;
   setCategorySelection: (category: Category, on: boolean) => void;
+  setIndexes: (indexes: number[], on: boolean) => void;
   deselect: (indexes: number[]) => void;
   selectAll: () => void;
   clearSelection: () => void;
@@ -191,6 +192,21 @@ export function useScanWorkspace(
     [result],
   );
 
+  // Bulk tick/un-tick an explicit index set — the 空间清理 accordion uses
+  // this for whole 清理点 (rule clusters), which the category helpers
+  // cannot express because a cluster is smaller than a category.
+  const setIndexes = useCallback((indexes: number[], on: boolean) => {
+    if (indexes.length === 0) return;
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const index of indexes) {
+        if (on) next.add(index);
+        else next.delete(index);
+      }
+      return next;
+    });
+  }, []);
+
   const deselect = useCallback((indexes: number[]) => {
     if (indexes.length === 0) return;
     const drop = new Set(indexes);
@@ -272,6 +288,7 @@ export function useScanWorkspace(
     toggleItem,
     toggleCategory,
     setCategorySelection,
+    setIndexes,
     deselect,
     selectAll,
     clearSelection,

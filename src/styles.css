@@ -5675,6 +5675,119 @@ select:focus-visible,
   color: #c0a06a;
 }
 
+/* 清理点 rows: one rule's aggregated hits; body expands to concrete paths. */
+.space-rule {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 16px 10px 44px;
+  border-top: 1px solid #f6efe2;
+  cursor: pointer;
+}
+
+.space-rule:first-child {
+  border-top: 0;
+}
+
+.space-rule:hover {
+  background: rgba(253, 244, 228, 0.75);
+}
+
+.space-rule-name {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: #42505e;
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-rule-cnt {
+  flex: 0 0 auto;
+  color: #aab4c0;
+  font-size: var(--nex-text-3xs);
+}
+
+.space-rule-acts {
+  display: none;
+  position: absolute;
+  right: 118px;
+  gap: 12px;
+}
+
+.space-rule:hover .space-rule-acts {
+  display: flex;
+}
+
+.space-rule-acts button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #3f6bbd;
+  font-size: var(--nex-text-3xs);
+  cursor: pointer;
+}
+
+.space-rule-acts button:hover {
+  text-decoration: underline;
+}
+
+.space-rule-size {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: #5a6776;
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.space-rule-chv {
+  flex: 0 0 auto;
+  color: #b7bfca;
+  transition: transform 0.15s ease;
+}
+
+.space-rule-chv.is-open {
+  transform: rotate(90deg);
+}
+
+.space-rule-paths {
+  background: rgba(255, 253, 246, 0.85);
+}
+
+.space-rule-paths .space-item {
+  padding-left: 74px;
+  border-top-color: #f8f2e6;
+}
+
+/* Folded 受安全策略保护 rows: one quiet line with a reveal switch. */
+.space-hidden {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 9px 44px;
+  border-top: 1px dashed #efe3cc;
+  background: rgba(255, 254, 251, 0.9);
+  color: #b3a688;
+  font-size: var(--nex-text-3xs);
+}
+
+.space-hidden button {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #3f6bbd;
+  font-size: var(--nex-text-3xs);
+  cursor: pointer;
+}
+
+.space-hidden button:hover {
+  text-decoration: underline;
+}
+
 .confirm-updater-actions {
   display: flex;
   flex-direction: column;
