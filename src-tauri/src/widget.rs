@@ -16,28 +16,25 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub const WIDGET_LABEL: &str = "widget";
 
-/// Desktop residency (Windows). Two stacked tricks:
-///
-/// 1. *Adoption*: re-parent the widget into `Progman`, the shell's desktop
-///    window. Win+D ("Show desktop") minimises top-level application windows
-///    only, and a child of Progman is not one — the widget survives it
-///    (Wallpaper Engine / Rainmeter use the same technique). Inside Progman
-///    we ask for the top of the child stack: still under every ordinary app
-///    window, now above the desktop icons.
-/// 2. *Fallback*: if adoption is unavailable, park the window at
-///    `HWND_BOTTOM` with no-activate flags so it at least lives on the
-///    desktop layer (above wallpaper and icons, below app windows).
+/// Desktop residency (Windows). The widget is a borderless top-level window
+/// parked at `HWND_BOTTOM`: above the wallpaper and icons, below every
+/// ordinary app window. Pulsar dodges Win+D by living *inside* the taskbar
+/// (SetParent into Shell_TrayWnd — the bar is immune to Show Desktop, and a
+/// watchdog re-attaches when the parent drifts). The WebView2 widget cannot
+/// be re-parented into the desktop tree like Pulsar's raw window: on this
+/// machine the shell ejects it again within seconds, and every crossing
+/// strands or hides the web content. So we keep Pulsar's *watchdog* idea
+/// instead of its parent trick: the shell hides top-level windows on Win+D
+/// by minimising or DWM-cloaking them, and a 1.5 s heartbeat puts any
+/// shell-hidden-but-wanted widget back (unminimise → show uncloaks → re-park
+/// on the desktop layer → one repaint). Ways the app hid the panel itself
+/// (master switch off, all panels off, folded away via hide) are respected.
 #[cfg(windows)]
 mod desktop_layer {
     use std::ffi::c_void;
-    use std::ptr;
 
     #[link(name = "user32")]
     extern "system" {
-        fn FindWindowW(class: *const u16, window: *const u16) -> *mut c_void;
-        fn SetParent(child: *mut c_void, new_parent: *mut c_void) -> *mut c_void;
-        fn GetParent(child: *mut c_void) -> *mut c_void;
-        fn IsWindow(handle: *mut c_void) -> i32;
         fn SetWindowPos(
             hwnd: *mut c_void,
             insert_after: *mut c_void,
@@ -47,51 +44,23 @@ mod desktop_layer {
             cy: i32,
             flags: u32,
         ) -> i32;
+        fn IsIconic(hwnd: *mut c_void) -> i32;
+        fn IsWindowVisible(hwnd: *mut c_void) -> i32;
+    }
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmGetWindowAttribute(
+            hwnd: *mut c_void,
+            attribute: u32,
+            value: *mut i32,
+            size: u32,
+        ) -> i32;
     }
     const HWND_BOTTOM: *mut c_void = 1usize as *mut c_void;
-    const HWND_TOP: *mut c_void = ptr::null_mut();
-    const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOACTIVATE: u32 = 0x0010;
-    // L"Progman"
-    const PROGMAN: &[u16] = &[80, 114, 111, 103, 109, 97, 110, 0];
-
-    fn progman() -> *mut c_void {
-        // SAFETY: FindWindowW reads only the null-terminated literal above.
-        unsafe { FindWindowW(PROGMAN.as_ptr(), ptr::null()) }
-    }
-
-    /// Move `hwnd` under Progman (top of its child stack, no focus steal).
-    /// Idempotent; returns false when there is no desktop to adopt into.
-    pub fn adopt(hwnd: *mut c_void) -> bool {
-        let parent = progman();
-        if parent.is_null() || hwnd.is_null() || unsafe { IsWindow(hwnd) } == 0 {
-            return false;
-        }
-        if unsafe { GetParent(hwnd) } != parent {
-            // SAFETY: both handles are live (IsWindow checked above).
-            unsafe { SetParent(hwnd, parent) };
-        }
-        // SAFETY: NOMOVE|NOSIZE|NOACTIVATE only re-stacks the child order.
-        unsafe {
-            SetWindowPos(
-                hwnd,
-                HWND_TOP,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            );
-        }
-        true
-    }
-
-    /// Whether `hwnd` currently lives under Progman (watchdog probe).
-    pub fn adopted(hwnd: *mut c_void) -> bool {
-        let parent = progman();
-        !parent.is_null() && unsafe { GetParent(hwnd) } == parent
-    }
+    const DWMWA_CLOAKED: u32 = 14;
 
     pub fn lower(hwnd: *mut c_void) {
         // SAFETY: hwnd comes from Tauri's own window handle; SetWindowPos with
@@ -108,11 +77,38 @@ mod desktop_layer {
             );
         }
     }
+
+    /// Whether the shell (Win+D / 显示桌面) currently has this window put
+    /// away while we want it shown: minimised, DWM-cloaked, or plain hidden.
+    /// `minimised_or_cloaked` refines the answer for callers that only want
+    /// to force a repaint when the shell *actively* took the window down
+    /// (a window still hidden mid-startup just needs showing, not reloading).
+    pub fn shell_hidden(hwnd: *mut c_void, minimised_or_cloaked: &mut bool) -> bool {
+        // SAFETY: plain queries on a live handle.
+        *minimised_or_cloaked = unsafe { IsIconic(hwnd) != 0 };
+        if *minimised_or_cloaked {
+            return true;
+        }
+        let mut cloaked = 0i32;
+        unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED,
+                &mut cloaked,
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
+        if cloaked != 0 {
+            *minimised_or_cloaked = true;
+            return true;
+        }
+        unsafe { IsWindowVisible(hwnd) == 0 }
+    }
 }
 
-/// Keep the widget on the desktop: adopt into Progman where possible (Win+D
-/// proof), otherwise park at the bottom of the z-order. macOS/Linux keep the
-/// plain floating behaviour (the widget story is Windows-first).
+/// Park the widget at the bottom of the window stack (desktop layer).
+/// macOS/Linux keep plain floating behaviour for now (no equivalent need:
+/// the widget story is Windows-first).
 pub fn lower_window(app: &AppHandle) {
     #[cfg(windows)]
     {
@@ -120,10 +116,7 @@ pub fn lower_window(app: &AppHandle) {
             return;
         };
         if let Ok(hwnd) = window.hwnd() {
-            let hwnd = hwnd.0.cast();
-            if !desktop_layer::adopt(hwnd) {
-                desktop_layer::lower(hwnd);
-            }
+            desktop_layer::lower(hwnd.0.cast());
         }
     }
     #[cfg(not(windows))]
@@ -132,24 +125,48 @@ pub fn lower_window(app: &AppHandle) {
     }
 }
 
-/// explorer.exe can recreate its desktop window while Squid runs; the shell
-/// may also re-stack Progman's children. A slow heartbeat re-adopts a widget
-/// that fell out, so 常驻 stays true without user action.
+/// Win+D proof, Pulsar-style heartbeat: if the shell put the wanted widget
+/// away, bring it back within a beat and repaint it once (the transparent
+/// webview can stay blank after a cloak round-trip).
 #[cfg(windows)]
 pub fn spawn_desktop_watch(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(1_500));
+        let Some(state) = app.try_state::<WidgetState>() else {
+            continue;
+        };
+        let prefs = state.current();
+        // A panel the user switched off (master switch, or every panel off —
+        // sync_window hides the empty shell then) is never resurrected; the
+        // watchdog only ever counters the shell's doing.
+        let wanted = prefs.enabled
+            && (prefs.panel_run
+                || prefs.panel_cpu
+                || prefs.panel_network
+                || prefs.panel_disk
+                || prefs.panel_storage);
+        if !wanted {
+            continue;
+        }
         let Some(window) = app.get_webview_window(WIDGET_LABEL) else {
             continue;
         };
-        if !window.is_visible().unwrap_or(false) {
+        let Ok(hwnd) = window.hwnd() else { continue };
+        let raw: *mut std::ffi::c_void = hwnd.0.cast();
+        let mut took_down = false;
+        if !desktop_layer::shell_hidden(raw, &mut took_down) {
             continue;
         }
-        let Ok(hwnd) = window.hwnd() else { continue };
-        let hwnd: *mut std::ffi::c_void = hwnd.0.cast();
-        if !desktop_layer::adopted(hwnd) && !desktop_layer::adopt(hwnd) {
-            desktop_layer::lower(hwnd);
+        let _ = window.unminimize();
+        let _ = window.show();
+        desktop_layer::lower(raw);
+        // When the shell actively took the window down, Show() clears the
+        // cloak but the composed page can come back blank; one cheap reload
+        // makes it honest again. A plain hidden window (mid-startup) just
+        // needed showing.
+        if took_down {
+            let _ = window.eval("location.reload()");
         }
     });
 }
