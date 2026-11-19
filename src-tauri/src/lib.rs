@@ -151,6 +151,7 @@ pub fn run() {
             update::spawn_startup_check(app.handle());
             manage::spawn_watcher(app.handle().clone());
             widget::spawn_startup(app.handle());
+            widget::spawn_desktop_watch(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
