@@ -5466,6 +5466,9 @@ select:focus-visible,
   top: -8px;
   right: 8px;
   z-index: 2;
+  /* Sits over the card corner where the checkbox lives: it is a label,
+     never a click target, so the tick underneath stays hittable. */
+  pointer-events: none;
   border-radius: 99px;
   padding: 2px 9px;
   background: #3f6bbd;

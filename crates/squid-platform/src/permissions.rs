@@ -439,6 +439,7 @@ mod windows {
     /// Resolve `display_name` (and the software icon) for every scanned
     /// entry, once per binary.
     fn decorate_display_names(entries: &mut [StartupEntry]) {
+        let vendors = vendor_icon_map();
         let mut cache: std::collections::HashMap<String, SoftwareInfo> = Default::default();
         for entry in entries {
             let Some(exe) = exe_from_command(&entry.command) else {
@@ -453,16 +454,191 @@ mod windows {
                 probed
             };
             let (description, product, icon) = cache
-                .entry(exe)
+                .entry(probed.clone())
                 .or_insert_with(|| {
                     let (description, product, _company) = version_strings(&probed);
-                    (description, product, exe_icon_png(&probed, 0))
+                    (description, product, software_icon(&probed, &vendors))
                 })
                 .clone();
             entry.display_name =
                 friendly_program_name(&entry.name, description.as_deref(), product.as_deref());
             entry.icon = icon;
         }
+    }
+
+    /// Whether a PE/ICO file ships *real* icon resources. Service stubs such
+    /// as `qmbsrv.exe` or Edge's `elevation_service.exe` embed none, and
+    /// `ExtractAssociatedIconW` then silently returns the generic Windows
+    /// app tile — the cause of whole columns of 权限管理 rows looking alike.
+    fn has_icon_resources(path: &str) -> bool {
+        use windows_sys::Win32::UI::Shell::ExtractIconExW;
+        let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: NUL-terminated buffer; null handle arrays only ask for the
+        // count of icons the module carries.
+        (unsafe {
+            ExtractIconExW(
+                wide.as_ptr(),
+                -1,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                0,
+            )
+        }) > 0
+    }
+
+    /// `App Paths` is the canonical "where does this tool really live" answer:
+    /// `SpaceAgent.exe` registers the product binary even when the row points
+    /// at a stripped-down service stub. Returns an (icon path, index) pair
+    /// that differs from `except` and exists on disk.
+    fn app_paths_icon_spec(exe_name: &str, except: &str) -> Option<(String, u16)> {
+        const APP_PATHS: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths";
+        const APP_PATHS_WOW: &str =
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths";
+        let candidates = [
+            (HKEY_LOCAL_MACHINE, APP_PATHS),
+            (HKEY_LOCAL_MACHINE, APP_PATHS_WOW),
+            (HKEY_CURRENT_USER, APP_PATHS),
+        ];
+        for (hive, base) in candidates {
+            let Ok(root) = RegKey::predef(hive).open_subkey_with_flags(base, KEY_READ) else {
+                continue;
+            };
+            let Ok(app) = root.open_subkey_with_flags(exe_name, KEY_READ) else {
+                continue;
+            };
+            let default: String = app.get_value("").unwrap_or_default();
+            let icon: String = app
+                .open_subkey_with_flags("DefaultIcon", KEY_READ)
+                .and_then(|key| key.get_value(""))
+                .unwrap_or_default();
+            let spec = if icon.trim().is_empty() {
+                &default
+            } else {
+                &icon
+            };
+            let (path, index) = parse_display_icon(spec)?;
+            if path.eq_ignore_ascii_case(except.trim_matches('"')) {
+                continue;
+            }
+            if Path::new(&path).exists() {
+                return Some((path, index));
+            }
+        }
+        None
+    }
+
+    /// A sibling in the same folder that does ship an icon: vendors park
+    /// `Workspace.ico` next to the stub (H3C) or the full binary sits one
+    /// directory entry away (Edge). `.ico` files win; otherwise the largest
+    /// `.exe` with real icon resources — the main product binary.
+    fn sibling_icon_spec(dir: &Path) -> Option<(String, u16)> {
+        let Ok(read_dir) = std::fs::read_dir(dir) else {
+            return None;
+        };
+        let mut files: Vec<PathBuf> = read_dir.filter_map(Result::ok).map(|f| f.path()).collect();
+        files.sort();
+        for path in &files {
+            let is_ico = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("ico"));
+            if is_ico {
+                return Some((path.to_string_lossy().into_owned(), 0));
+            }
+        }
+        let mut best: Option<(u64, String)> = None;
+        for path in &files {
+            let is_exe = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+            if !is_exe || !has_icon_resources(&path.to_string_lossy()) {
+                continue;
+            }
+            let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            if best.as_ref().map_or(true, |(known, _)| size > *known) {
+                best = Some((size, path.to_string_lossy().into_owned()));
+            }
+        }
+        best.map(|(_, path)| (path, 0))
+    }
+
+    /// Directory → `DisplayIcon` from the uninstall registry — the authoritative
+    /// "this folder belongs to product X, and X's icon is here" table. Edge,
+    /// 电脑管家 and SpaceAgent all register one whose parent is exactly the
+    /// folder holding their icon-less service stubs. Built once per scan.
+    fn vendor_icon_map() -> std::collections::HashMap<String, (String, u16)> {
+        const UNINSTALLS: [&str; 3] = [
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        ];
+        let mut map: std::collections::HashMap<String, (String, u16)> = Default::default();
+        for hive in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+            for base in UNINSTALLS {
+                let Ok(root) = RegKey::predef(hive).open_subkey_with_flags(base, KEY_READ) else {
+                    continue;
+                };
+                for name in root.enum_keys().filter_map(Result::ok) {
+                    let Ok(app) = root.open_subkey_with_flags(&name, KEY_READ) else {
+                        continue;
+                    };
+                    let Some(spec): Option<String> = app.get_value("DisplayIcon").ok() else {
+                        continue;
+                    };
+                    let Some((path, index)) = parse_display_icon(&spec) else {
+                        continue;
+                    };
+                    let Some(dir) = Path::new(&path).parent() else {
+                        continue;
+                    };
+                    let dir = dir
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .trim_end_matches('\\')
+                        .to_string();
+                    if !dir.is_empty() && !map.contains_key(&dir) && Path::new(&path).exists() {
+                        map.insert(dir, (path, index));
+                    }
+                }
+            }
+        }
+        map
+    }
+
+    /// Startup-list icon with the vendor fallbacks the generic extraction
+    /// lacks: real resources first, then App Paths, then the uninstall
+    /// registry's DisplayIcon for the same folder, then a sibling file.
+    /// `None` (a neutral placeholder in the UI) beats a misleading tile.
+    fn software_icon(
+        path: &str,
+        vendors: &std::collections::HashMap<String, (String, u16)>,
+    ) -> Option<Vec<u8>> {
+        if has_icon_resources(path) {
+            return exe_icon_png(path, 0);
+        }
+        let file = Path::new(path);
+        let name = file.file_name()?.to_string_lossy().to_string();
+        if let Some((spec, index)) = app_paths_icon_spec(&name, path) {
+            if let Some(icon) = exe_icon_png(&spec, index) {
+                return Some(icon);
+            }
+        }
+        let dir_key = file
+            .parent()
+            .map(|dir| dir.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if let Some((spec, index)) = vendors.get(dir_key.trim_end_matches('\\')) {
+            if let Some(icon) = exe_icon_png(spec, *index) {
+                return Some(icon);
+            }
+        }
+        if let Some((spec, index)) = file.parent().and_then(sibling_icon_spec) {
+            if let Some(icon) = exe_icon_png(&spec, index) {
+                return Some(icon);
+            }
+        }
+        None
     }
 
     /// ImagePath entries sometimes carry `"` around paths with spaces even

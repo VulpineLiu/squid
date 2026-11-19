@@ -134,7 +134,11 @@ export function SpacePage({
       });
     }
     return all.sort((a, b) => b.item.onDisk - a.item.onDisk);
-  }, [cleanup.result, purge.result]);
+    // Each Entry carries the workspace object (and with it the `selected`
+    // Set), so a click must rebuild this list; without the sets in the deps
+    // every derived card tick, hero number, and row checkbox stays frozen on
+    // the scan-time snapshot — the cards look dead even though state changed.
+  }, [cleanup.result, purge.result, cleanup.selected, purge.selected]);
 
   const groups = useMemo(() => {
     const map = new Map<
@@ -155,7 +159,10 @@ export function SpacePage({
       map.set(entry.item.category, group);
     }
     return map;
-  }, [entries]);
+    // The selection sets are read through `entry.source`, so they must also
+    // sit in the dependency list — otherwise toggling a card updates state
+    // but the memo (and every card tick derived from it) stays frozen.
+  }, [entries, cleanup.selected, purge.selected]);
 
   const selectedStats = useMemo(() => {
     let count = 0;
@@ -167,7 +174,7 @@ export function SpacePage({
       }
     }
     return { count, total };
-  }, [entries]);
+  }, [entries, cleanup.selected, purge.selected]);
 
   const optionalSelected = useMemo(() => {
     let count = 0;
@@ -181,7 +188,7 @@ export function SpacePage({
       }
     }
     return count;
-  }, [entries]);
+  }, [entries, cleanup.selected, purge.selected]);
 
   // 升级安装包 keep the confirm-dialog escape: count them inside the current
   // selection so the banner can offer "skip installers, clean the rest".
@@ -199,7 +206,7 @@ export function SpacePage({
       }
     }
     return { count, total };
-  }, [entries]);
+  }, [entries, cleanup.selected, purge.selected]);
 
   const toggleGroup = (category: Category) => {
     const allOn = groupSelected(category);
