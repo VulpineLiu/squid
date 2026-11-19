@@ -130,7 +130,7 @@ export function SystemPage({
   return (
     <div className="page system-page">
       <PageHeader
-        title={t("The pulse of your machine.", "掌握设备的每一次呼吸。")}
+        title={t("The pulse of your machine", "掌握设备的每一次呼吸")}
         description={t(
           "Live processor, memory, disk and network activity, sampled locally every couple of seconds.",
           "实时查看处理器、内存、磁盘与网络活动，数据每两秒在本地刷新。",

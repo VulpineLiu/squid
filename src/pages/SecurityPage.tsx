@@ -150,8 +150,8 @@ export function SecurityPage({
       <PageHeader
         title={
           scan
-            ? t("The last scan, and what to do about it.", "上次扫描的结果，以及下一步。")
-            : t("Nothing has been scanned yet.", "还没有扫描过这台电脑。")
+            ? t("The last scan, and what to do about it", "上次扫描的结果，以及下一步")
+            : t("Nothing has been scanned yet", "还没有扫描过这台电脑")
         }
         description={t(
           "Scans run when you ask. Real-time protection stays with the system.",

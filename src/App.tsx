@@ -34,7 +34,7 @@ import type {
 } from "./types";
 import { useToast } from "./components/ui";
 import { SetupPanel } from "./components/SetupPanel";
-import appIconUrl from "../src-tauri/icons/128x128.png";
+import brandMarkUrl from "../src-tauri/icons/brand-mark.svg";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
 import { CleanupPage } from "./pages/CleanupPage";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -145,7 +145,7 @@ function BrandMark({ small = false }: { small?: boolean }) {
   return (
     <img
       className={`brand-mark ${small ? "is-small" : ""}`}
-      src={appIconUrl}
+      src={brandMarkUrl}
       alt=""
       aria-hidden="true"
     />

@@ -228,7 +228,7 @@ export function StartupPage({
   return (
     <div className="page is-stacked">
       <PageHeader
-        title={t("What your machine starts by itself.", "你的电脑自己会启动什么。")}
+        title={t("What your machine starts by itself", "你的电脑自己会启动什么")}
         description={t(
           "Grouped by the app that installed each entry. A risk label means worth a look.",
           "按安装该条目的应用分组。风险标记只代表值得检查。",

@@ -98,7 +98,7 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
   return (
     <div className="page storage-page">
       <PageHeader
-        title={t("See space clearly.", "看清每一寸空间。")}
+        title={t("See space clearly", "看清每一寸空间")}
         description={t(
           "Drill into folders, find the heavyweight files, and open anything in Finder.",
           "逐层查看文件夹，找到占用最大的文件，并直接在访达中打开。",

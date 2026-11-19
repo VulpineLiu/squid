@@ -184,7 +184,7 @@ export function OverviewPage({
     <div className="page overview-page">
       <PageHeader
         eyebrow={`${greeting(lang)} · ${bootstrap.osName}`}
-        title={t("Your computer, at its best.", "让电脑始终保持在最佳状态。")}
+        title={t("Your computer, at its best", "让电脑始终保持在最佳状态")}
         description={t(
           "One safe scan tidies clutter, space and everyday performance.",
           "一次安全扫描，整理垃圾、空间与日常性能。",
@@ -215,10 +215,10 @@ export function OverviewPage({
           <h2>
             {cleanup.result
               ? t(
-                  `${formatBytes(found)} found safely.`,
-                  `安全发现 ${formatBytes(found)} 可清理空间。`,
+                  `${formatBytes(found)} found safely`,
+                  `安全发现 ${formatBytes(found)} 可清理空间`,
                 )
-              : t("A lighter, faster machine.", "更轻盈，更顺畅。")}
+              : t("A lighter, faster machine", "更轻盈，更顺畅")}
           </h2>
           <p>
             {cleanup.result

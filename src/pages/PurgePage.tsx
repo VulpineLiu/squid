@@ -41,7 +41,7 @@ export function PurgePage({
   return (
     <div className="page">
       <PageHeader
-        title={t("Find the space normal cleaning misses.", "找到普通清理遗漏的空间。")}
+        title={t("Find the space normal cleaning misses", "找到普通清理遗漏的空间")}
         description={t(
           "Search projects for rebuildable build folders and dependency caches. Git history and source files are never selected.",
           "在项目中查找可重建的构建目录与依赖缓存。Git 历史和源文件绝不会被选中。",

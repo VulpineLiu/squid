@@ -87,7 +87,7 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
       <div className="page">
         <PageHeader
           eyebrow={t("Permissions", "权限管理")}
-          title={t("Startup, context menus and popups.", "开机启动、右键菜单与弹窗拦截。")}
+          title={t("Startup, context menus and popups", "开机启动、右键菜单与弹窗拦截")}
           description={t(
             "Everything the shell runs before you ask it to.",
             "管理系统在你开口之前就自己运行的东西。",
@@ -149,7 +149,7 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
     <div className="page permissions-page">
       <PageHeader
         eyebrow={t("Permissions", "权限管理")}
-        title={t("Startup, context menus and popups.", "开机启动、右键菜单与弹窗拦截。")}
+        title={t("Startup, context menus and popups", "开机启动、右键菜单与弹窗拦截")}
         description={t(
           "Everything the shell runs before you ask it to.",
           "管理系统在你开口之前就自己运行的东西。",
