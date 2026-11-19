@@ -3,6 +3,7 @@ import { api, subscribeJobProgress } from "../lib/api";
 import { isCancelled, messageFrom } from "../lib/format";
 import type {
   Category,
+  CleanupItem,
   DeleteMode,
   DeleteResult,
   JobProgress,
@@ -14,6 +15,20 @@ function jobId(): string {
 }
 
 export type ScanKind = "cleanup" | "purge";
+
+/** Seed the checkbox state of a fresh result: unlocked items the policy
+ * keeps win; without a policy the rule metadata (`item.selected`) speaks. */
+export function seedSelection(
+  items: CleanupItem[],
+  defaultFor?: (item: CleanupItem) => boolean,
+): Set<number> {
+  const picked = new Set<number>();
+  items.forEach((item, index) => {
+    if (item.lock) return;
+    if (defaultFor ? defaultFor(item) : item.selected) picked.add(index);
+  });
+  return picked;
+}
 
 export interface ScanWorkspace {
   kind: ScanKind;
@@ -44,7 +59,16 @@ export interface ScanWorkspace {
   reset: () => void;
 }
 
-export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
+export function useScanWorkspace(
+  kind: ScanKind,
+  /** Overrides the rule metadata's per-item default when a scan lands
+   * (空间清理 uses this to pre-check every daily group and leave opt-in
+   * groups untouched). Read through a ref, so a fresh closure per render is
+   * fine without restarting the hook. */
+  selectionPolicy?: (item: CleanupItem) => boolean,
+): ScanWorkspace {
+  const policyRef = useRef(selectionPolicy);
+  policyRef.current = selectionPolicy;
   const [result, setResult] = useState<ScanResult | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState<JobProgress | null>(null);
@@ -82,14 +106,7 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
               );
         if (activeJob.current !== id) return;
         setResult(next);
-        setSelected(
-          new Set(
-            next.items
-              .map((item, index) => ({ item, index }))
-              .filter(({ item }) => item.selected && !item.lock)
-              .map(({ index }) => index),
-          ),
-        );
+        setSelected(seedSelection(next.items, policyRef.current));
       } catch (reason) {
         if (!isCancelled(reason)) setError(messageFrom(reason));
       } finally {

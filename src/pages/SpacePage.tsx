@@ -36,6 +36,7 @@ import {
   ProgressCard,
   SectionTitle,
   Toggle,
+  categoryLabel,
   useToast,
 } from "../components/ui";
 
@@ -73,6 +74,7 @@ export function SpacePage({
   const [minAge, setMinAge] = useState(bootstrap.settings.purgeMinAgeDays || 7);
   const [force, setForce] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [focus, setFocus] = useState<Category | null>(null);
   const [mode, setMode] = useState<DeleteMode>(deleteMode);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<DeleteResult | null>(null);
@@ -102,23 +104,8 @@ export function SpacePage({
     }
   }, [cleanup, deleting, force, minAge, purge, roots, scanning]);
 
-  // The optional groups start untouched on every fresh result: the hooks'
-  // default selection comes from rule metadata, and this page overrides the
-  // three opt-in categories back to "unchecked" once React has committed.
-  useEffect(() => {
-    if (!cleanup.result) return;
-    for (const category of OPTIONAL_CATEGORIES) {
-      cleanup.setCategorySelection(category, false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cleanup.result]);
-  useEffect(() => {
-    if (!purge.result) return;
-    for (const category of OPTIONAL_CATEGORIES) {
-      purge.setCategorySelection(category, false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [purge.result]);
+  // Default checking is seeded at scan time by the workspaces' selection
+  // policy (App.tsx spaceDefaults): daily groups on, opt-in groups off.
 
   const browse = async () => {
     const chosen = await open({
@@ -152,16 +139,18 @@ export function SpacePage({
   const groups = useMemo(() => {
     const map = new Map<
       Category,
-      { total: number; count: number; selected: number }
+      { total: number; count: number; selected: number; removable: number }
     >();
     for (const entry of entries) {
       const group = map.get(entry.item.category) ?? {
         total: 0,
         count: 0,
         selected: 0,
+        removable: 0,
       };
       group.total += entry.item.onDisk;
       group.count += 1;
+      if (!entry.item.lock) group.removable += 1;
       if (entry.source.selected.has(entry.index)) group.selected += 1;
       map.set(entry.item.category, group);
     }
@@ -213,26 +202,25 @@ export function SpacePage({
   }, [entries]);
 
   const toggleGroup = (category: Category) => {
+    const allOn = groupSelected(category);
     for (const source of [cleanup, purge]) {
       if (source.result?.items.some((item) => item.category === category)) {
-        const anyOn = source.result.items.some(
-          (item, index) =>
-            item.category === category &&
-            !item.lock &&
-            source.selected.has(index),
-        );
-        source.setCategorySelection(category, !anyOn);
+        source.setCategorySelection(category, !allOn);
       }
     }
   };
 
-  const groupSelected = (category: string) => {
-    const group = groups.get(category as Category);
-    return Boolean(group && group.count > 0 && group.selected === group.count);
+  // A group is "on" when every removable item in it is checked; it may only
+  // switch itself off when nothing can be removed at all (every row locked)
+  // — an empty selection is a state to click back from, never a disability.
+  const groupSelected = (category: Category) => {
+    const group = groups.get(category);
+    if (!group || group.removable === 0) return false;
+    return group.selected >= group.removable;
   };
-  const groupDisabled = (category: string) => {
-    const group = groups.get(category as Category);
-    return !group || group.count === 0 || group.selected === 0;
+  const groupDisabled = (category: Category) => {
+    const group = groups.get(category);
+    return !group || group.removable === 0;
   };
 
   // One delete button, possibly two engines: run whichever halves have a
@@ -566,10 +554,10 @@ export function SpacePage({
                       total={group.total}
                       count={group.count}
                       selected={groupSelected(category)}
-                      focused={false}
+                      focused={focus === category}
                       disabled={groupDisabled(category)}
                       onToggle={() => toggleGroup(category)}
-                      onInspect={() => undefined}
+                      onInspect={() => setFocus(focus === category ? null : category)}
                     />
                   </div>
                 );
@@ -579,21 +567,34 @@ export function SpacePage({
 
           <section className="cleanup-list-panel">
             <SectionTitle
-              title={t("Everything found in this scan", "本次扫描的全部项目")}
+              title={
+                focus
+                  ? categoryLabel(focus, lang, bin)
+                  : t("Everything found in this scan", "本次扫描的全部项目")
+              }
               subtitle={t(
                 "Only checked items are touched. Protected items stay locked.",
                 "只会处理已勾选的项目，受保护项目始终保持锁定。",
               )}
+              action={
+                focus ? (
+                  <Button variant="ghost" size="sm" onClick={() => setFocus(null)}>
+                    {t("Show all", "显示全部")}
+                  </Button>
+                ) : null
+              }
             />
             <div className="cleanup-rows">
-              {entries.map((entry) => (
-                <ItemRow
-                  key={`${entry.item.path}-${entry.index}`}
-                  item={entry.item}
-                  checked={entry.source.selected.has(entry.index)}
-                  onToggle={() => entry.source.toggleItem(entry.index)}
-                />
-              ))}
+              {entries
+                .filter((entry) => !focus || entry.item.category === focus)
+                .map((entry) => (
+                  <ItemRow
+                    key={`${entry.item.path}-${entry.index}`}
+                    item={entry.item}
+                    checked={entry.source.selected.has(entry.index)}
+                    onToggle={() => entry.source.toggleItem(entry.index)}
+                  />
+                ))}
             </div>
           </section>
         </>

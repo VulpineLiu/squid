@@ -167,6 +167,17 @@ function BootstrapError({ message }: { message: string }) {
   );
 }
 
+const SPACE_OPTIONAL_CATEGORIES = [
+  "update-installers",
+  "project-artifacts",
+  "developer",
+];
+
+/** 空间清理 defaults: daily groups pre-checked, opt-in groups untouched. */
+function spaceDefaults(item: { category: string }): boolean {
+  return !SPACE_OPTIONAL_CATEGORIES.includes(item.category);
+}
+
 export default function App() {
   const { push } = useToast();
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
@@ -178,8 +189,9 @@ export default function App() {
   const [setupOpen, setSetupOpen] = useState(false);
   // The 托盘驻留 case: a hidden main window must stop sampling the machine.
   const [windowVisible, setWindowVisible] = useState(true);
-  const cleanup = useScanWorkspace("cleanup");
-  const purge = useScanWorkspace("purge");
+  // 空间清理 defaults: daily groups pre-checked, opt-in groups untouched.
+  const cleanup = useScanWorkspace("cleanup", spaceDefaults);
+  const purge = useScanWorkspace("purge", spaceDefaults);
   const apps = useAppsWorkspace();
   const permissions = usePermissionsWorkspace(page === "permissions");
   const systemActive = (page === "overview" || page === "system") && windowVisible;
