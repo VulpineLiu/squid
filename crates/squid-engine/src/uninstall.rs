@@ -248,9 +248,9 @@ fn measure(
         .iter()
         .map(|item| (item.path.clone(), item.kind))
         .collect();
-    let sizes = squid_core::fs::measure_all(&targets, cancel, |index, _info| {
+    let sizes = squid_core::fs::measure_all(&targets, cancel, |index, completed, _info| {
         progress.tick(
-            index as u64 + 1,
+            completed as u64,
             Some(targets.len() as u64),
             targets.get(index).map(|(path, _)| path.clone()),
         );

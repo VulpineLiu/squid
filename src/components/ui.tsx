@@ -274,11 +274,18 @@ export function ProgressCard({
   title,
   onCancel,
   compact = false,
+  liveLine,
+  capAt99 = false,
 }: {
   progress: JobProgress | null;
   title: string;
   onCancel?: () => void;
   compact?: boolean;
+  /** "已统计 128,431 文件 · 38.2 GB" streamed side-band (A①). */
+  liveLine?: string | null;
+  /** Scans hold the bar at 99% until the final number lands — a full bar
+   * that is still working reads as a lie (Mole's cap discipline). */
+  capAt99?: boolean;
 }) {
   const { t, lang } = useI18n();
   const phase = useMemo(() => {
@@ -301,7 +308,9 @@ export function ProgressCard({
   const denominator = progress?.total ?? 0;
   const done = progress?.done ?? 0;
   const ratio =
-    denominator > 0 ? Math.min(100, Math.max(0, (done / denominator) * 100)) : null;
+    denominator > 0
+      ? Math.min(capAt99 ? 99 : 100, Math.max(0, (done / denominator) * 100))
+      : null;
   const detail = progress?.detail || progress?.subject || "";
 
   return (
@@ -330,6 +339,11 @@ export function ProgressCard({
         >
           <span style={{ width: ratio === null ? undefined : `${ratio}%` }} />
         </div>
+        {liveLine ? (
+          <div className="progress-live" role="status">
+            {liveLine}
+          </div>
+        ) : null}
         <div className="progress-detail" title={detail}>
           {detail || t("Working safely in the background…", "正在后台安全处理…")}
         </div>

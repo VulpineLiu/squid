@@ -266,21 +266,104 @@ mod windows {
         list: &str,
         value_name: &str,
         enabled: bool,
-    ) -> Result<(), String> {
+    ) -> std::io::Result<()> {
         let hive = RegKey::predef(if machine {
             HKEY_LOCAL_MACHINE
         } else {
             HKEY_CURRENT_USER
         });
-        let (key, _) = hive
-            .create_subkey(format!(r"{base}\Explorer\StartupApproved\{list}"))
-            .map_err(registry_error)?;
+        // Minimal rights only: several security suites (and locked-down
+        // profiles) deny KEY_ALL_ACCESS-style opens on the startup trees even
+        // for the key's own owner, which used to make every toggle fail.
+        let (key, _) = hive.create_subkey_with_flags(
+            format!(r"{base}\Explorer\StartupApproved\{list}"),
+            KEY_READ | KEY_WRITE,
+        )?;
         let marker = winreg::RegValue {
             bytes: approved_marker(enabled),
             vtype: RegType::REG_BINARY,
         };
         key.set_raw_value(value_name, &marker)
-            .map_err(registry_error)
+    }
+
+    /// Task Manager's marker rendered for `reg.exe` (12 bytes, hex).
+    fn approved_marker_hex(enabled: bool) -> String {
+        let mut hex = String::from(if enabled { "02" } else { "03" });
+        hex.push_str(&"0".repeat(22));
+        hex
+    }
+
+    /// Flip an approval marker, escalating through a one-shot UAC prompt when
+    /// the direct write is denied (machine-scope keys, protected hives). The
+    /// result is verified against the registry itself, so a cancelled prompt
+    /// reports failure instead of a silently dead switch.
+    fn flip_approved(
+        machine: bool,
+        base: &str,
+        list: &str,
+        value_name: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        if let Err(why) = write_approved(machine, base, list, value_name, enabled) {
+            if why.kind() != std::io::ErrorKind::PermissionDenied {
+                return Err(registry_error(why));
+            }
+            let hive_label = if machine { "HKLM" } else { "HKCU" };
+            run_elevated(
+                "reg.exe",
+                &[
+                    "add".to_string(),
+                    format!(r"{hive_label}\{base}\Explorer\StartupApproved\{list}"),
+                    "/v".to_string(),
+                    value_name.to_string(),
+                    "/t".to_string(),
+                    "REG_BINARY".to_string(),
+                    "/d".to_string(),
+                    approved_marker_hex(enabled),
+                    "/f".to_string(),
+                ],
+            )?;
+            let hive = RegKey::predef(if machine {
+                HKEY_LOCAL_MACHINE
+            } else {
+                HKEY_CURRENT_USER
+            });
+            if approved_enabled(&hive, base, list, value_name) != enabled {
+                return Err("提权写入后状态仍未改变".to_string());
+            }
+        }
+        Ok(())
+    }
+
+    /// Single-quote one argument for a PowerShell -ArgumentList list.
+    fn quote_ps(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "''"))
+    }
+
+    /// Run `program args…` elevated through `Start-Process -Verb RunAs`.
+    /// PowerShell's own exit code reports a cancelled or refused prompt.
+    fn run_elevated(program: &str, args: &[String]) -> Result<(), String> {
+        use std::os::windows::process::CommandExt;
+        let arglist = args
+            .iter()
+            .map(|arg| quote_ps(arg))
+            .collect::<Vec<_>>()
+            .join(",");
+        let script = format!(
+            "$ErrorActionPreference='Stop'; Start-Process -FilePath {} -ArgumentList {} -Verb RunAs -WindowStyle Hidden -Wait",
+            quote_ps(program),
+            arglist
+        );
+        let status = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .creation_flags(0x0800_0000)
+            .status()
+            .map_err(|error| format!("无法启动提权助手：{error}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err("管理员授权被取消，未做修改".to_string())
+        }
     }
 
     fn display_name(command: &str) -> String {
@@ -1455,7 +1538,7 @@ mod windows {
                 } else {
                     name.to_string()
                 };
-                write_approved(machine, &base, list, &marker, enabled)
+                flip_approved(machine, &base, list, &marker, enabled)
             }
             "folder" => {
                 let file = Path::new(rest)
@@ -1463,7 +1546,7 @@ mod windows {
                     .map(|n| n.to_string_lossy().to_string())
                     .ok_or_else(|| "启动文件夹项目路径无效".to_string())?;
                 let machine = rest.contains("ProgramData");
-                write_approved(machine, CURRENT_VERSION, "StartupFolder", &file, enabled)
+                flip_approved(machine, CURRENT_VERSION, "StartupFolder", &file, enabled)
             }
             "task" => {
                 use std::os::windows::process::CommandExt;
@@ -1478,23 +1561,79 @@ mod windows {
                     .output()
                     .map_err(|error| format!("无法调用 schtasks：{error}"))?;
                 if output.status.success() {
-                    Ok(())
-                } else {
-                    Err(format!(
+                    return Ok(());
+                }
+                let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+                // schtasks reports "task not ready", missing tasks, etc. —
+                // only a plain access denial justifies a UAC round-trip.
+                let denied = stderr.contains("access is denied")
+                    || stderr.contains("access denied")
+                    || stderr.contains("拒绝访问");
+                if !denied {
+                    return Err(format!(
                         "计划任务修改失败：{}",
                         String::from_utf8_lossy(&output.stderr).trim()
-                    ))
+                    ));
                 }
+                run_elevated(
+                    "schtasks.exe",
+                    &[
+                        "/Change".to_string(),
+                        "/TN".to_string(),
+                        rest.to_string(),
+                        if enabled { "/Enable" } else { "/Disable" }.to_string(),
+                    ],
+                )?;
+                Ok(())
             }
             "svc" => {
                 // 开 = Automatic(2)，关 = Manual(3)：保留按需启动能力，
                 // 与管家的“禁止开机自启”语义一致；HKLM 写入需要管理员。
-                let key = RegKey::predef(HKEY_LOCAL_MACHINE)
-                    .open_subkey_with_flags(format!(r"{SERVICES_KEY}\{rest}"), KEY_READ | KEY_WRITE)
-                    .map_err(registry_error)?;
-                key.set_value("Start", &(if enabled { 2u32 } else { 3u32 }))
-                    .map_err(registry_error)?;
-                let _ = service_control(rest, if enabled { "auto" } else { "demand" });
+                let start = if enabled { 2u32 } else { 3u32 };
+                let key_path = format!(r"{SERVICES_KEY}\{rest}");
+                let direct = (|| -> std::io::Result<()> {
+                    let key = RegKey::predef(HKEY_LOCAL_MACHINE)
+                        .open_subkey_with_flags(&key_path, KEY_READ | KEY_WRITE)?;
+                    key.set_value("Start", &start)
+                })();
+                if let Err(why) = direct {
+                    if why.kind() != std::io::ErrorKind::PermissionDenied {
+                        return Err(registry_error(why));
+                    }
+                    run_elevated(
+                        "reg.exe",
+                        &[
+                            "add".to_string(),
+                            format!(r"HKLM\{key_path}"),
+                            "/v".to_string(),
+                            "Start".to_string(),
+                            "/t".to_string(),
+                            "REG_DWORD".to_string(),
+                            "/d".to_string(),
+                            start.to_string(),
+                            "/f".to_string(),
+                        ],
+                    )?;
+                    let live = RegKey::predef(HKEY_LOCAL_MACHINE)
+                        .open_subkey_with_flags(&key_path, KEY_READ)
+                        .map(|key| key.get_value::<u32, _>("Start").ok())
+                        .ok()
+                        .flatten();
+                    if live != Some(start) {
+                        return Err("提权写入后服务状态仍未改变".to_string());
+                    }
+                }
+                if service_control(rest, if enabled { "auto" } else { "demand" }).is_err() {
+                    let _ = run_elevated(
+                        "sc.exe",
+                        &[
+                            "config".to_string(),
+                            rest.to_string(),
+                            "start=".to_string(),
+                            if enabled { "auto" } else { "demand" }.to_string(),
+                        ],
+                    );
+                }
                 Ok(())
             }
             _ => Err("未知的启动项来源".to_string()),
@@ -1913,9 +2052,56 @@ mod windows {
     #[cfg(test)]
     mod tests {
         use super::{
-            clean_module_path, exe_from_command, friendly_program_name, has_cjk,
-            is_placeholder_label, module_folder_name, parse_csv_line, task_settings_enabled,
+            approved_enabled, clean_module_path, exe_from_command, friendly_program_name, has_cjk,
+            is_placeholder_label, module_folder_name, parse_csv_line, split_run_path,
+            task_settings_enabled, write_approved, CURRENT_VERSION,
         };
+        use winreg::RegKey;
+
+        #[test]
+        fn toggle_round_trips_through_the_approved_marker() {
+            // The exact pair the UI toggle relies on: write_approved stores a
+            // marker, the rescan reads it back. If these ever drift, every
+            // startup switch silently snaps back — the "button is dead" bug.
+            let list = format!("squidTest{}", std::process::id());
+            let hive = RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+            let key_path = format!(r"{CURRENT_VERSION}\Explorer\StartupApproved\{list}");
+            for name in ["squid-off", "squid-on"] {
+                let want = name.ends_with("on");
+                if let Err(why) = write_approved(false, CURRENT_VERSION, &list, name, want) {
+                    // Sandboxed CI runners deny registry writes; the marker
+                    // round-trip cannot be proven here, so say so instead of
+                    // failing a correct build.
+                    eprintln!("skipping marker round-trip: registry write denied ({why})");
+                    return;
+                }
+                assert_eq!(
+                    approved_enabled(&hive, CURRENT_VERSION, &list, name),
+                    want,
+                    "{name} must read back as written"
+                );
+            }
+            let _ = hive.delete_subkey_all(&key_path);
+        }
+
+        #[test]
+        fn run_path_split_round_trips_hive_and_list() {
+            // set_startup_enabled re-derives (machine, base, list) from the
+            // id scan produced; a mismatch writes the marker to the wrong key
+            // and the rescan then shows the old state.
+            let wow_run = r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run".to_string();
+            let (machine, base, list, prefix32) = split_run_path("HKLM", &wow_run);
+            assert!(machine);
+            assert_eq!(list, "Run");
+            assert!(prefix32);
+            assert!(base.contains("WOW6432Node"));
+            let (machine, base, list, prefix32) =
+                split_run_path("HKCU", &format!(r"{CURRENT_VERSION}\RunOnce"));
+            assert!(!machine);
+            assert_eq!(list, "RunOnce");
+            assert!(!prefix32);
+            assert_eq!(base, CURRENT_VERSION);
+        }
 
         #[test]
         fn command_paths_survive_quotes_and_arguments() {

@@ -10,11 +10,13 @@ import {
   ArrowUpRight,
   ChevronRight,
   DownloadCloud,
+  FileText,
   FolderOpen,
   ScanSearch,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   useCallback,
   useEffect,
@@ -24,13 +26,20 @@ import {
 } from "react";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
-import { formatBytes, formatCount, shortPath } from "../lib/format";
+import {
+  ageLabel,
+  countLabel,
+  formatBytes,
+  formatCount,
+  shortPath,
+} from "../lib/format";
 import type {
   Bootstrap,
   Category,
   CleanupItem,
   DeleteMode,
   DeleteResult,
+  PreflightResult,
 } from "../types";
 import type { ScanWorkspace } from "../hooks/useScanWorkspace";
 import {
@@ -100,6 +109,7 @@ const RULE_NAMES: Record<string, [string, string]> = {
   "update-installers-known": ["Known app update packages", "已知应用的升级包"],
   "update-installers-scan": ["Other update packages", "其他升级安装包"],
   "purge-artifacts": ["Build artefacts", "项目构建产物"],
+  "user-assets": ["Your own files (locked)", "您的个人文件（受保护）"],
 };
 
 function ruleName(ruleId: string, lang: "zh" | "en"): string {
@@ -140,6 +150,134 @@ type Cluster = {
   selected: number;
 };
 
+/* A⑦: skipped items on the result page are grouped by *why* they were
+ * skipped, each group with the concrete next step — Mole's ledger reads as
+ * "here is what to do about it", not as a wall of paths. */
+type SkipGroup = {
+  key: string;
+  title: [string, string];
+  hint: [string, string];
+  action?: "rescan";
+};
+
+function skipGroupOf(reason: string): SkipGroup {
+  const lower = reason.toLowerCase();
+  if (lower.includes("running") || lower.includes("占用")) {
+    return {
+      key: "running",
+      title: ["应用正在运行", "应用正在运行"],
+      hint: ["退出这些应用后重新扫描，即可再次选中。", "退出这些应用后重新扫描，即可再次选中。"],
+      action: "rescan",
+    };
+  }
+  if (lower.includes("admin") || lower.includes("管理员")) {
+    return {
+      key: "admin",
+      title: ["需要管理员权限", "需要管理员权限"],
+      hint: [
+        "以管理员身份重新启动 Squid 后再清理这批项目。",
+        "以管理员身份重新启动 Squid 后再清理这批项目。",
+      ],
+      action: "rescan",
+    };
+  }
+  if (lower.includes("已不存在") || lower.includes("no longer") || lower.includes("missing")) {
+    return {
+      key: "gone",
+      title: ["扫描后已消失", "扫描后已消失"],
+      hint: ["这些路径在清理开始前就不在了，无需处理。", "这些路径在清理开始前就不在了，无需处理。"],
+    };
+  }
+  if (lower.includes("whitelist")) {
+    return {
+      key: "whitelist",
+      title: ["命中白名单", "命中白名单"],
+      hint: [
+        "在 设置 → 白名单 中移除对应规则后才会被清理。",
+        "在 设置 → 白名单 中移除对应规则后才会被清理。",
+      ],
+    };
+  }
+  return {
+    key: "protected",
+    title: ["受安全策略保护", "受安全策略保护"],
+    hint: [
+      "这些目录看似缓存，实际可能存有您自己的文件，Squid 不会删除。",
+      "这些目录看似缓存，实际可能存有您自己的文件，Squid 不会删除。",
+    ],
+  };
+}
+
+/* A③: a cluster is "dormant" when its newest member stopped changing more
+ * than 90 days ago — size plus dormancy is what makes a deletion call easy. */
+const DORMANT_SECS = 90 * 24 * 3600;
+
+function clusterDormancy(cluster: { entries: Entry[] }): number | null {
+  let oldest: number | null = null;
+  for (const entry of cluster.entries) {
+    const secs = entry.item.lastWriteSecs;
+    if (secs == null) continue;
+    if (oldest === null || secs > oldest) oldest = secs;
+  }
+  return oldest;
+}
+
+/* B3 evidence tokens → human lines. Unknown tokens render verbatim, so a
+ * future engine token still shows up instead of vanishing. */
+function evidenceLines(
+  tokens: string[],
+  t: (en: string, zh: string) => string,
+): { ok: boolean; text: string }[] {
+  const lines: { ok: boolean; text: string }[] = [];
+  for (const token of tokens) {
+    if (token.startsWith("lock:")) {
+      lines.push({
+        ok: true,
+        text: t(
+          `${token.slice(5)} present — the tree rebuilds with one command`,
+          `存在 ${token.slice(5)}，一条命令即可完整重建`,
+        ),
+      });
+    } else if (token.startsWith("record:")) {
+      lines.push({
+        ok: true,
+        text: t(
+          `${token.slice(7)} present — install record intact`,
+          `存在 ${token.slice(7)} 安装记录`,
+        ),
+      });
+    } else if (token === "record-missing") {
+      lines.push({
+        ok: true,
+        text: t("No install record found — skipped the hand-edit check", "缺少安装记录，未做手改检查"),
+      });
+    } else if (token.startsWith("modified:")) {
+      const count = Number(token.slice(9)) || 0;
+      lines.push(
+        count === 0
+          ? { ok: true, text: t("No file is newer than the install record (nobody hand-edited it)", "无文件晚于安装记录（没有被手工修改）") }
+          : { ok: false, text: t(`${count} files are newer than the install record — possible local patches`, `${count} 个文件晚于安装记录，可能被手工修改过`) },
+      );
+    } else if (token === "git:ignored") {
+      lines.push({ ok: true, text: t("Marked .gitignore by the project", "已被项目 .gitignore 忽略") });
+    } else if (token === "git:untracked") {
+      lines.push({ ok: true, text: t("Not tracked by git", "未被 Git 跟踪") });
+    } else if (token === "git:tracked") {
+      lines.push({ ok: false, text: t("Tracked by git — deleted only with --all", "被 Git 跟踪，需强制模式才删") });
+    } else if (token === "git:none") {
+      lines.push({ ok: true, text: t("No git repository around it", "附近没有 Git 仓库") });
+    } else if (token.startsWith("age:")) {
+      lines.push({
+        ok: true,
+        text: t(`Last change ${token.slice(4)} days ago`, `最后修改于 ${token.slice(4)} 天前`),
+      });
+    } else {
+      lines.push({ ok: true, text: token });
+    }
+  }
+  return lines;
+}
+
 /* A 清理点: one rule's worth of hits, aggregated like 电脑管家's sub-items.
  * Tick = whole cluster; hover = 忽略 / 查看路径; body = expand to paths. */
 function ClusterRow({
@@ -159,6 +297,7 @@ function ClusterRow({
 }) {
   const { t } = useI18n();
   const allOn = cluster.removable > 0 && cluster.selected >= cluster.removable;
+  const dormancy = clusterDormancy(cluster);
   return (
     <>
       <div className="space-rule" onClick={onOpen}>
@@ -169,6 +308,14 @@ function ClusterRow({
           label={cluster.label}
         />
         <span className="space-rule-name">{cluster.label}</span>
+        {dormancy !== null && dormancy >= DORMANT_SECS ? (
+          <span className="space-rule-dormant">
+            {t(
+              `${ageLabel(dormancy, "en").replace(" untouched", "")} dormant`,
+              ageLabel(dormancy, "zh").replace("未修改", "未使用"),
+            )}
+          </span>
+        ) : null}
         <span className="space-rule-cnt">
           {t(
             `${formatCount(cluster.entries.length)} location(s)`,
@@ -217,33 +364,79 @@ function ClusterRow({
  * in Explorer (电脑管家 habit: 点击定位); only the tick box changes the
  * selection, so browsing never mis-toggles. */
 function AccItem({ entry }: { entry: Entry }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { item, source, index } = entry;
   const checked = source.selected.has(index);
+  const [showEvidence, setShowEvidence] = useState(false);
+  const evidence = item.evidence ?? [];
   return (
-    <div
-      className={`space-item ${item.lock ? "is-locked" : ""}`}
-      onClick={() => void api.revealPath(item.path).catch(() => undefined)}
-      title={t("Open the location in Explorer", "在资源管理器中打开所在位置")}
-    >
-      <Checkbox
-        checked={checked}
-        disabled={Boolean(item.lock)}
-        onChange={() => source.toggleItem(index)}
-        label={item.label}
-      />
-      <span className="space-item-name">{item.label}</span>
-      <span className="space-item-path" title={item.displayPath}>
-        {shortPath(item.displayPath, 96)}
-      </span>
-      {item.lock || item.note ? (
-        <span className={`space-item-meta ${item.lock ? "is-locked" : ""}`}>
-          {item.lock ? lockLabel(item.lock, t) : item.note}
+    <>
+      <div
+        className={`space-item ${item.lock ? "is-locked" : ""}`}
+        onClick={() => void api.revealPath(item.path).catch(() => undefined)}
+        title={t("Open the location in Explorer", "在资源管理器中打开所在位置")}
+      >
+        <Checkbox
+          checked={checked}
+          disabled={Boolean(item.lock)}
+          onChange={() => source.toggleItem(index)}
+          label={item.label}
+        />
+        <span className="space-item-name">{item.label}</span>
+        <span className="space-item-path" title={item.displayPath}>
+          {shortPath(item.displayPath, 96)}
         </span>
+        {item.lock ? (
+          <span className="space-item-meta is-locked">{lockLabel(item.lock, t)}</span>
+        ) : null}
+        {item.lastWriteSecs != null ? (
+          <span
+            className={`space-item-meta ${item.lastWriteSecs >= DORMANT_SECS ? "is-dormant" : ""}`}
+            title={t(
+              "Newest last-write inside, from the scan walk",
+              "扫描时记录的内部最新写入时间",
+            )}
+          >
+            {ageLabel(item.lastWriteSecs, lang)}
+          </span>
+        ) : null}
+        {evidence.length > 0 ? (
+          <button
+            type="button"
+            className={`space-item-evidence ${
+              evidence.some((token) => token.startsWith("modified:") && Number(token.slice(9)) > 0)
+                ? "is-warn"
+                : ""
+            }`}
+            onClick={(event) => {
+              event.stopPropagation();
+              setShowEvidence((current) => !current);
+            }}
+          >
+            {showEvidence
+              ? t("Hide evidence", "收起依据")
+              : t("Why safe · evidence", "可删依据")}
+          </button>
+        ) : null}
+        {!item.lock && item.note ? (
+          <span className="space-item-meta">{item.note}</span>
+        ) : null}
+        <span className="space-item-size">{formatBytes(item.onDisk)}</span>
+        <ArrowUpRight className="space-item-go" size={14} />
+      </div>
+      {showEvidence ? (
+        <div className="space-evidence">
+          <strong>{t("Why Squid judges this folder", "Squid 对该目录的判定依据")}</strong>
+          <ul>
+            {evidenceLines(evidence, t).map((line) => (
+              <li key={line.text} className={line.ok ? "is-ok" : "is-warn"}>
+                {line.text}
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
-      <span className="space-item-size">{formatBytes(item.onDisk)}</span>
-      <ArrowUpRight className="space-item-go" size={14} />
-    </div>
+    </>
   );
 }
 
@@ -289,6 +482,10 @@ export function SpacePage({
     if (scanning || deleting || inFlight.current) return;
     inFlight.current = true;
     setResult(null);
+    // A fresh scan supersedes any armed inline confirm: the old selection
+    // (and its preflight verdict) no longer describes what is on screen.
+    setInlineConfirm(false);
+    setPreflight(null);
     const rootList = roots
       .split(/\r?\n/)
       .map((root) => root.trim())
@@ -570,6 +767,8 @@ export function SpacePage({
     } finally {
       setBusy(false);
       setConfirming(false);
+      setInlineConfirm(false);
+      setPreflight(null);
     }
     setResult(merged);
     push(
@@ -582,11 +781,149 @@ export function SpacePage({
   };
 
   const progress = cleanup.progress ?? purge.progress;
+  // A①: running "已统计 N 文件 · X GB" counters streamed by the engines.
+  const liveStats = cleanup.stats ?? purge.stats;
+  // A②: category skeletons filled live while the scan is still measuring.
+  const liveBuckets = useMemo(() => {
+    const merged: Partial<Record<Category, { total: number; count: number }>> = {};
+    for (const source of [cleanup, purge]) {
+      for (const [category, bucket] of Object.entries(source.buckets)) {
+        const known = merged[category as Category];
+        merged[category as Category] = known
+          ? { total: known.total + bucket.total, count: known.count + bucket.count }
+          : { ...bucket };
+      }
+    }
+    return merged;
+  }, [cleanup.buckets, purge.buckets]);
   const stage = cleanup.scanning
     ? t("Scanning caches and junk", "第一步 · 扫描缓存与垃圾")
     : purge.scanning
       ? t("Scanning project folders", "第二步 · 扫描项目目录")
       : t("Collecting results", "正在汇总结果");
+
+  // A④ + B1: low-risk runs confirm inline on the sticky bar; anything with
+  // update installers, many items, or preflight surprises opens the modal.
+  const [inlineConfirm, setInlineConfirm] = useState(false);
+  const [preflight, setPreflight] = useState<PreflightResult | null>(null);
+  const [preflightBusy, setPreflightBusy] = useState(false);
+
+  // Mole's inline strip: Esc backs out of the armed confirm.
+  useEffect(() => {
+    if (!inlineConfirm) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setInlineConfirm(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [inlineConfirm]);
+
+  const selectedPlans = () => {
+    const plans: Array<{ source: ScanWorkspace; indexes: number[] }> = [];
+    for (const source of [cleanup, purge]) {
+      const indexes = [...source.selected].filter((index) => {
+        const item = source.result?.items[index];
+        return item && !item.lock;
+      });
+      if (indexes.length > 0) plans.push({ source, indexes });
+    }
+    return plans;
+  };
+
+  const runPreflight = async () => {
+    const plans = selectedPlans();
+    if (plans.length === 0) return null;
+    setPreflightBusy(true);
+    const blocked: PreflightResult["blocked"] = [];
+    let checked = 0;
+    try {
+      for (const plan of plans) {
+        const scanId = plan.source.result?.scanId;
+        if (!scanId) continue;
+        try {
+          const verdict = await api.cleanupPreflight(scanId, plan.indexes);
+          checked += verdict.checked;
+          blocked.push(...verdict.blocked);
+        } catch {
+          // A failed re-check must never block the run; delete re-guards anyway.
+        }
+      }
+    } finally {
+      setPreflightBusy(false);
+    }
+    const verdict = { checked, blocked };
+    setPreflight(verdict);
+    return verdict;
+  };
+
+  const startClean = async () => {
+    const verdict = await runPreflight();
+    const risky =
+      selectedUpdaters.count > 0 ||
+      selectedStats.count > 40 ||
+      (verdict?.blocked.length ?? 0) > 0;
+    if (risky) {
+      setConfirming(true);
+    } else {
+      setInlineConfirm(true);
+    }
+  };
+
+  // B5: export the current selection as a reviewable Markdown list.
+  const exportList = async () => {
+    const lines: string[] = [
+      `# squid-clean-list · ${new Date().toLocaleString()} · ${t(
+        `${formatCount(selectedStats.count)} items ${formatBytes(selectedStats.total)}`,
+        `已选 ${formatCount(selectedStats.count)} 项 ${formatBytes(selectedStats.total)}`,
+      )}`,
+      "",
+    ];
+    for (const source of [cleanup, purge]) {
+      for (const index of [...source.selected].sort((a, b) => a - b)) {
+        const item = source.result?.items[index];
+        if (!item || item.lock) continue;
+        const evidence =
+          item.evidence && item.evidence.length > 0
+            ? ` · ${item.evidence.join(" · ")}`
+            : "";
+        lines.push(
+          `- [${categoryLabel(item.category, lang, bin)}] ${item.displayPath} — ${formatBytes(
+            item.onDisk,
+          )}${item.note ? ` · ${item.note}` : ""}${evidence}`,
+        );
+      }
+    }
+    lines.push("");
+    const locked = entries.filter((entry) => entry.item.lock === "protected");
+    if (locked.length > 0) {
+      lines.push(
+        t("## Protected (not deleted)", "## 受保护项（未列入删除）"),
+        ...locked
+          .slice(0, 20)
+          .map(
+            (entry) =>
+              `- ${entry.item.displayPath} — ${formatBytes(entry.item.onDisk)} · ${
+                entry.item.note ?? lockLabel(entry.item.lock, t)
+              }`,
+          ),
+      );
+    }
+    const chosen = await save({
+      title: t("Export clean list", "导出清理清单"),
+      defaultPath: "squid-clean-list.md",
+      filters: [{ name: "Markdown", extensions: ["md", "txt"] }],
+    });
+    if (!chosen) return;
+    try {
+      await api.writeTextFile(chosen, lines.join("\n"));
+      push(t("List exported", "清单已导出"), "success");
+    } catch (reason) {
+      push(
+        t(`Export failed: ${String(reason)}`, `导出失败：${String(reason)}`),
+        "danger",
+      );
+    }
+  };
 
   const error = cleanup.error ?? purge.error;
 
@@ -626,6 +963,57 @@ export function SpacePage({
             </Button>
           </div>
         </div>
+        {result.skipped && result.skipped.length > 0 ? (
+          <div className="result-skipped">
+            <div className="result-skipped-head">
+              {t(
+                `${result.skipped.length} item(s) were skipped`,
+                `有 ${result.skipped.length} 项本次未处理`,
+              )}
+            </div>
+            {Object.entries(
+              result.skipped.reduce<Record<string, typeof result.skipped>>(
+                (groups, row) => {
+                  const key = skipGroupOf(row.reason).key;
+                  (groups[key] ??= []).push(row);
+                  return groups;
+                },
+                {},
+              ),
+            ).map(([key, rows]) => {
+              const group = skipGroupOf(rows[0].reason);
+              return (
+                <div className="result-skip-group" key={key}>
+                  <div className="result-skip-title">
+                    <strong>{t(group.title[0], group.title[1])}</strong>
+                    <span>{rows.length}</span>
+                  </div>
+                  <ul>
+                    {rows.slice(0, 5).map((row) => (
+                      <li key={row.path} title={row.reason}>
+                        <code>{row.path}</code>
+                        <small>{row.reason}</small>
+                      </li>
+                    ))}
+                    {rows.length > 5 ? (
+                      <li className="more">
+                        {t(`… ${rows.length - 5} more`, `… 另有 ${rows.length - 5} 项`)}
+                      </li>
+                    ) : null}
+                  </ul>
+                  <div className="result-skip-foot">
+                    <small>{t(group.hint[0], group.hint[1])}</small>
+                    {group.action === "rescan" ? (
+                      <Button variant="ghost" size="sm" onClick={() => void runScan()}>
+                        {t("Scan again", "再扫一次")}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -722,8 +1110,31 @@ export function SpacePage({
           <ProgressCard
             progress={progress}
             title={stage}
+            capAt99
+            liveLine={liveStats ? countLabel(liveStats.files, liveStats.bytes, lang) : null}
             onCancel={() => void (cleanup.scanning ? cleanup.cancel() : purge.cancel())}
           />
+          {Object.keys(liveBuckets).length > 0 ? (
+            <div className="space-live-cats">
+              {CATEGORY_ORDER.filter((category) => liveBuckets[category]).map((category) => {
+                const bucket = liveBuckets[category]!;
+                const meta = CATEGORY_META[category];
+                const Icon = meta.icon;
+                return (
+                  <div key={category} className="space-live-cat">
+                    <span className={`space-cat-icon tone-${meta.tone}`}>
+                      <Icon size={14} />
+                    </span>
+                    <span className="space-live-cat-name">{categoryLabel(category, lang, bin)}</span>
+                    <span className="space-live-cat-cnt">
+                      {t(`${formatCount(bucket.count)} items`, `${formatCount(bucket.count)} 项`)}
+                    </span>
+                    <b>{formatBytes(bucket.total)}</b>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -795,22 +1206,82 @@ export function SpacePage({
             </div>
             <Button
               variant="ghost"
+              icon={<FileText size={14} />}
+              onClick={() => void exportList()}
+              disabled={selectedStats.count === 0}
+            >
+              {t("Export list", "导出清单")}
+            </Button>
+            <Button
+              variant="ghost"
               onClick={() => {
                 cleanup.clearSelection();
                 purge.clearSelection();
+                setInlineConfirm(false);
               }}
-              disabled={selectedStats.count === 0}
+              disabled={selectedStats.count === 0 || inlineConfirm}
             >
               {t("Deselect all", "取消全选")}
             </Button>
-            <Button
-              variant="primary"
-              icon={<Trash2 size={16} />}
-              disabled={selectedStats.count === 0}
-              onClick={() => setConfirming(true)}
-            >
-              {t("Clean now", "立即清理")}
-            </Button>
+            {inlineConfirm ? (
+              <div className="space-inline-confirm">
+                <ShieldCheck size={16} />
+                <span>
+                  <b>
+                    {mode === "trash"
+                      ? t(
+                          `Move to ${bin}: ${formatCount(selectedStats.count)} items · ${formatBytes(selectedStats.total)}`,
+                          `将移入${bin}：${formatCount(selectedStats.count)} 项 · ${formatBytes(selectedStats.total)}`,
+                        )
+                      : t(
+                          `Delete ${formatCount(selectedStats.count)} items · ${formatBytes(selectedStats.total)}`,
+                          `将永久删除 ${formatCount(selectedStats.count)} 项 · ${formatBytes(selectedStats.total)}`,
+                        )}
+                  </b>
+                  {preflight && preflight.blocked.length > 0 ? (
+                    <small>
+                      {t(
+                        `${preflight.blocked.length} items changed since the scan and were dropped from this run`,
+                        `其中 ${preflight.blocked.length} 项在扫描后情况变化，本次已自动移出`,
+                      )}
+                    </small>
+                  ) : (
+                    <small>
+                      {t(
+                        "Esc cancels · every path was re-checked just now",
+                        "按 Esc 取消 · 刚才已逐路径复核",
+                      )}
+                    </small>
+                  )}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setInlineConfirm(false)}
+                  disabled={busy}
+                >
+                  {t("Cancel", "取消")}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={busy || preflightBusy}
+                  icon={<Trash2 size={14} />}
+                  onClick={() => void cleanSelected()}
+                >
+                  {t("Confirm clean", "确认清理")}
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="primary"
+                icon={<Trash2 size={16} />}
+                disabled={selectedStats.count === 0 || preflightBusy}
+                onClick={() => void startClean()}
+              >
+                {t("Clean now", "立即清理")}
+              </Button>
+            )}
           </div>
 
           {(["daily", "optional"] as const).map((section) => {
@@ -1064,6 +1535,39 @@ export function SpacePage({
               </Button>
             </div>
           </div>
+        ) : null}
+        {preflight && preflight.checked > 0 ? (
+          <details className="confirm-preflight">
+            <summary>
+              <ShieldCheck size={14} />
+              {preflight.blocked.length > 0
+                ? t(
+                    `Re-checked ${preflight.checked} paths just now — ${preflight.blocked.length} changed and were dropped`,
+                    `刚刚逐路径复核过 ${preflight.checked} 项 — ${preflight.blocked.length} 项情况有变，已移出本次`,
+                  )
+                : t(
+                    `Re-checked ${preflight.checked} paths just now — all still safe to remove`,
+                    `刚刚逐路径复核过 ${preflight.checked} 项 — 全部仍可安全删除`,
+                  )}
+            </summary>
+            {preflight.blocked.length > 0 ? (
+              <ul>
+                {preflight.blocked.slice(0, 8).map((row) => (
+                  <li key={row.path}>
+                    <code>{row.path}</code>
+                    <small>{row.reason}</small>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>
+                {t(
+                  "Locks, whitelist, running apps and vanished paths were all re-verified at the click of this button.",
+                  "锁、白名单、运行中的应用与已消失的路径，都在点击瞬间重新核验过。",
+                )}
+              </p>
+            )}
+          </details>
         ) : null}
       </ConfirmDialog>
     </div>

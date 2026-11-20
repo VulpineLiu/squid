@@ -594,7 +594,7 @@ fn with_progress<T>(
                             ),
                         );
                     }
-                    Event::Bucket { .. } | Event::Done(_) => {}
+                    Event::Bucket { .. } | Event::Metered { .. } | Event::Done(_) => {}
                 }
             }
             if stop_now {

@@ -35,6 +35,10 @@ export interface ScanWorkspace {
   result: ScanResult | null;
   selected: Set<number>;
   progress: JobProgress | null;
+  /** Live measurement counters streamed during a scan (A①). */
+  stats: { files: number; bytes: number } | null;
+  /** Per-category totals streamed in as each bucket finishes (A②). */
+  buckets: Partial<Record<Category, { total: number; count: number }>>;
   scanning: boolean;
   deleting: boolean;
   error: string | null;
@@ -73,6 +77,10 @@ export function useScanWorkspace(
   const [result, setResult] = useState<ScanResult | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState<JobProgress | null>(null);
+  const [stats, setStats] = useState<{ files: number; bytes: number } | null>(null);
+  const [buckets, setBuckets] = useState<
+    Partial<Record<Category, { total: number; count: number }>>
+  >({});
   const [scanning, setScanning] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +102,28 @@ export function useScanWorkspace(
       setError(null);
       setSummary(null);
       setProgress(null);
-      const stop = await subscribeJobProgress(id, setProgress);
+      setStats(null);
+      setBuckets({});
+      // Streamed side-band (A①②): `metered` carries running counters (kept
+      // out of `progress`, whose done/total mean "units done / units total"),
+      // `bucket` one finished category at a time (detail = "cat:count:total").
+      const stop = await subscribeJobProgress(id, (event) => {
+        if (event.event === "metered" && event.done !== null && event.total !== null) {
+          setStats({ files: event.done, bytes: event.total });
+          return;
+        }
+        setProgress(event);
+        if (event.event === "bucket" && event.detail) {
+          const [category, count, total] = event.detail.split(":");
+          setBuckets((current) => ({
+            ...current,
+            [category as Category]: {
+              count: Number(count) || 0,
+              total: Number(total) || 0,
+            },
+          }));
+        }
+      });
       try {
         const next =
           kind === "cleanup"
@@ -115,6 +144,7 @@ export function useScanWorkspace(
         if (activeJob.current === id) {
           setScanning(false);
           setProgress(null);
+          setStats(null);
           setCurrentJob(null);
         }
       }
@@ -276,6 +306,8 @@ export function useScanWorkspace(
     result,
     selected,
     progress,
+    stats,
+    buckets,
     scanning,
     deleting,
     error,

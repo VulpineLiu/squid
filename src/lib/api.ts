@@ -5,6 +5,7 @@ import type {
   Bootstrap,
   DeleteMode,
   DeleteResult,
+  ExploreResult,
   HistorySession,
   JobProgress,
   LargestFile,
@@ -14,9 +15,10 @@ import type {
   PlanResult,
   PopupClosedEvent,
   PopupWindowItem,
+  PreflightResult,
   ScanResult,
   SettingsView,
-  StorageNode,
+  SpaceInsight,
   SystemSnapshot,
   UndoResult,
   UpdateCheckResult,
@@ -52,6 +54,8 @@ export const api = {
     }),
   cleanupDelete: (jobId: string, scanId: string, selected: number[], mode: DeleteMode) =>
     invoke<DeleteResult>("cleanup_delete", { jobId, scanId, selected, mode }),
+  cleanupPreflight: (scanId: string, selected: number[]) =>
+    invoke<PreflightResult>("cleanup_preflight", { scanId, selected }),
   purgeScan: (jobId: string, roots: string[] = [], minAgeDays: number | null = null, force = false) =>
     invoke<ScanResult>("purge_scan", { jobId, roots, minAgeDays, force }),
   purgeDelete: (jobId: string, scanId: string, selected: number[], mode: DeleteMode) =>
@@ -60,8 +64,9 @@ export const api = {
   appPlan: (jobId: string, appKey: string) => invoke<PlanResult>("app_plan", { jobId, appKey }),
   appUninstall: (jobId: string, planId: string, selected: number[], mode: DeleteMode) =>
     invoke<DeleteResult>("app_uninstall", { jobId, planId, selected, mode }),
-  storageExplore: (jobId: string, path?: string | null, depth = 1, top = 16) =>
-    invoke<StorageNode>("storage_explore", { jobId, path, depth, top }),
+  storageExplore: (jobId: string, path?: string | null, depth = 1, top = 16, force = false) =>
+    invoke<ExploreResult>("storage_explore", { jobId, path, depth, top, force }),
+  storageInsights: () => invoke<SpaceInsight[]>("storage_insights"),
   storageLargestFiles: (jobId: string, path: string, limit = 40) =>
     invoke<LargestFile[]>("storage_largest_files", { jobId, path, limit }),
   systemSnapshot: (full = false) => invoke<SystemSnapshot>("system_snapshot", { full }),
@@ -72,6 +77,9 @@ export const api = {
   settingsSave: (patch: SettingsPatch) => invoke<SettingsView>("settings_save", { patch }),
   whitelistAdd: (path: string) => invoke<SettingsView>("whitelist_add", { path }),
   whitelistRemove: (pattern: string) => invoke<SettingsView>("whitelist_remove", { pattern }),
+  whitelistAudit: () => invoke<{ pattern: string; live: boolean }[]>("whitelist_audit"),
+  writeTextFile: (path: string, contents: string) =>
+    invoke<void>("write_text_file", { path, contents }),
   revealPath: (path: string) => invoke<void>("reveal_path", { path }),
   openTrash: () => invoke<void>("open_trash"),
   permissionStatus: () => invoke<PermissionStatus>("permission_status"),

@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 const CHILD_CAP: usize = 512;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Node {
     pub path: PathBuf,
     pub logical: Bytes,
@@ -196,9 +197,9 @@ pub fn expand(
         })
         .collect();
     progress.tick(0, Some(targets.len() as u64), None);
-    let sizes = fs::measure_all(&targets, cancel, |index, _info| {
+    let sizes = fs::measure_all(&targets, cancel, |index, completed, _info| {
         progress.tick(
-            index as u64 + 1,
+            completed as u64,
             Some(targets.len() as u64),
             targets.get(index).map(|(path, _)| path.clone()),
         );

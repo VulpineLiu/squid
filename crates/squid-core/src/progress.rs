@@ -30,6 +30,12 @@ pub enum Event {
         total: Bytes,
         count: usize,
     },
+    /// Cumulative measurement counters, streamed while sizes are computed
+    /// (Mole's "Scanning: 128,431 files · 38.2 GB" live status line).
+    Metered {
+        files: u64,
+        bytes: Bytes,
+    },
     Deleted {
         path: PathBuf,
         freed: Bytes,

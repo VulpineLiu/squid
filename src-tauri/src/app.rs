@@ -35,6 +35,11 @@ pub struct AppState {
     /// Last light snapshot, so the widget window and the main window polling
     /// a beat apart share one refresh instead of paying for two.
     snapshot_cache: Mutex<Option<(Instant, squid_stats::SystemSnapshot)>>,
+    /// Mole-style size cache (A⑥): explored storage trees answered from
+    /// memory until a delete run bumps the epoch and invalidates them.
+    /// Stamp is wall-clock so the age survives nicely for UI copy.
+    storage_cache: Mutex<HashMap<String, (u64, std::time::SystemTime, analyze::Node)>>,
+    clean_epoch: std::sync::atomic::AtomicU64,
 }
 
 impl AppState {
@@ -42,6 +47,16 @@ impl AppState {
         value
             .lock()
             .map_err(|_| "The application state is unavailable; restart Squid.".to_string())
+    }
+
+    fn epoch(&self) -> u64 {
+        self.clean_epoch.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Any successful delete invalidates cached storage sizes (Mole bumps its
+    /// cache schema whenever deletion semantics change what totals mean).
+    fn invalidate_storage_cache(&self) {
+        self.clean_epoch.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn begin(&self, job_id: &str) -> Result<CancelToken, String> {
@@ -193,6 +208,17 @@ fn emit_progress(app: &AppHandle, job_id: &str, kind: &str, event: Event) {
             subject: None,
             freed: None,
         },
+        Event::Metered { files, bytes } => ProgressView {
+            job_id: job_id.into(),
+            kind: kind.into(),
+            event: "metered".into(),
+            phase: None,
+            detail: None,
+            done: Some(files),
+            total: Some(bytes.as_u64()),
+            subject: None,
+            freed: None,
+        },
         Event::Done(_) => return,
     };
     let _ = app.emit("squid://progress", payload);
@@ -213,6 +239,9 @@ pub struct CleanupItemView {
     selected: bool,
     lock: Option<LockReason>,
     note: Option<String>,
+    last_write_secs: Option<u64>,
+    file_count: u64,
+    evidence: Vec<String>,
 }
 
 impl From<&CleanupItem> for CleanupItemView {
@@ -230,6 +259,9 @@ impl From<&CleanupItem> for CleanupItemView {
             selected: item.selected,
             lock: item.lock,
             note: item.note.clone(),
+            last_write_secs: item.last_write_secs,
+            file_count: item.file_count,
+            evidence: item.evidence.clone(),
         }
     }
 }
@@ -508,6 +540,7 @@ pub async fn cleanup_delete(
     if let Ok(mut scans) = app.state::<AppState>().scans.lock() {
         scans.remove(&scan_id);
     }
+    app.state::<AppState>().invalidate_storage_cache();
     Ok(DeleteResultView::from_outcome(outcome))
 }
 
@@ -591,6 +624,7 @@ pub async fn purge_delete(
     if let Ok(mut scans) = app.state::<AppState>().scans.lock() {
         scans.remove(&scan_id);
     }
+    app.state::<AppState>().invalidate_storage_cache();
     Ok(DeleteResultView::from_outcome(outcome))
 }
 
@@ -759,8 +793,23 @@ pub async fn app_uninstall(
     if let Ok(mut plans) = app.state::<AppState>().plans.lock() {
         plans.remove(&plan_id);
     }
+    app.state::<AppState>().invalidate_storage_cache();
     Ok(DeleteResultView::from_outcome(outcome))
 }
+
+/// What `storage_explore` answers: the tree plus how fresh it is (A⑥).
+/// `cached` = served from the in-memory size cache; `measuredAtMs` = age of
+/// the measurement so the page can say "12 分钟前" honestly. `Node` itself
+/// serializes camelCase, same as before for the frontend contract.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExploreView {
+    node: Node,
+    cached: bool,
+    measured_at_ms: Option<u64>,
+}
+
+const STORAGE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 
 #[tauri::command]
 pub async fn storage_explore(
@@ -769,7 +818,8 @@ pub async fn storage_explore(
     path: Option<String>,
     depth: Option<usize>,
     top: Option<usize>,
-) -> Result<Node, String> {
+    force: Option<bool>,
+) -> Result<ExploreView, String> {
     let token = app.state::<AppState>().begin(&job_id)?;
     let progress = Progress::new();
     let reporter =
@@ -783,20 +833,114 @@ pub async fn storage_explore(
         reporter.finish();
         return Err(format!("{} is not a folder.", root.display()));
     }
+    let depth = depth.unwrap_or(1).clamp(1, 3);
+    let top = top.unwrap_or(16);
+    let state = app.state::<AppState>();
+    let key = format!("{}|{depth}|{top}", root.to_string_lossy().to_lowercase());
+    let epoch = state.epoch();
+    if !force.unwrap_or(false) {
+        if let Ok(cache) = state.storage_cache.lock() {
+            if let Some((cached_epoch, at, node)) = cache.get(&key) {
+                let age = std::time::SystemTime::now()
+                    .duration_since(*at)
+                    .unwrap_or_default();
+                let fresh = epoch == *cached_epoch && age < STORAGE_TTL;
+                if fresh {
+                    app.state::<AppState>().finish(&job_id);
+                    reporter.finish();
+                    return Ok(ExploreView {
+                        node: node.clone(),
+                        cached: true,
+                        measured_at_ms: Some(u64::try_from(age.as_millis()).unwrap_or(u64::MAX)),
+                    });
+                }
+            }
+        }
+    }
     let task = tauri::async_runtime::spawn_blocking(move || {
-        analyze::explore(
-            &root,
-            depth.unwrap_or(1).clamp(1, 3),
-            top.unwrap_or(16),
-            &token,
-            &progress,
-        )
+        analyze::explore(&root, depth, top, &token, &progress)
     })
     .await
     .map_err(|error| format!("Storage analysis failed: {error}"))?;
     reporter.finish();
     app.state::<AppState>().finish(&job_id);
-    task.map_err(|error| error.to_string())
+    let node = task.map_err(|error| error.to_string())?;
+    if let Ok(mut cache) = state.storage_cache.lock() {
+        // Tiny memory cap: the epoch clears everything after a delete run.
+        if cache.len() > 48 {
+            cache.clear();
+        }
+        cache.insert(key, (epoch, std::time::SystemTime::now(), node.clone()));
+    }
+    Ok(ExploreView {
+        node,
+        cached: false,
+        measured_at_ms: Some(0),
+    })
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InsightView {
+    id: String,
+    title: String,
+    path: String,
+    size: u64,
+    action: String,
+    command: Option<String>,
+    hint: String,
+}
+
+/// Hidden-space insights for the storage page's curated section (A⑤).
+#[tauri::command]
+pub async fn storage_insights() -> Result<Vec<InsightView>, String> {
+    let rows = tauri::async_runtime::spawn_blocking(squid_engine::insights::collect)
+        .await
+        .map_err(|error| format!("Insight scan failed: {error}"))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| InsightView {
+            id: row.id,
+            title: row.title,
+            path: row.path,
+            size: row.size,
+            action: row.action,
+            command: row.command,
+            hint: row.hint,
+        })
+        .collect())
+}
+
+/// Mole-style last-second re-check surfaced before deletion (B1).
+#[tauri::command]
+pub async fn cleanup_preflight(
+    app: AppHandle,
+    scan_id: String,
+    selected: Vec<usize>,
+) -> Result<serde_json::Value, String> {
+    let report = app
+        .state::<AppState>()
+        .scans
+        .lock()
+        .map_err(|_| "The scan cache is unavailable.".to_string())?
+        .get(&scan_id)
+        .cloned()
+        .ok_or_else(|| "This scan has expired. Run it again.".to_string())?;
+    let view = tauri::async_runtime::spawn_blocking(move || {
+        let engine = Engine::new();
+        let preflight = engine.preflight(&report, &selected);
+        serde_json::json!({
+            "checked": preflight.checked,
+            "blocked": preflight
+                .blocked
+                .into_iter()
+                .map(|(path, reason)| serde_json::json!({ "path": path, "reason": reason }))
+                .collect::<Vec<_>>(),
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(view)
 }
 
 #[tauri::command]
@@ -862,6 +1006,34 @@ pub fn stop_process(app: AppHandle, process: ProcessSample) -> Result<(), String
     let state = app.state::<AppState>();
     let mut sampler = AppState::lock(&state.sampler)?;
     sampler.stop(&process).map_err(|error| error.to_string())
+}
+
+/// Write a UTF-8 text file (B5 clean-list export; the UI picked the path
+/// through the save dialog, so this is a plain, bounded write).
+#[tauri::command]
+pub async fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let target = paths::expand(&path);
+        std::fs::write(&target, contents.as_bytes())
+            .map_err(|error| format!("{}: {error}", target.display()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// B2: which protection patterns actually hit something on this machine.
+#[tauri::command]
+pub async fn whitelist_audit() -> Result<serde_json::Value, String> {
+    let rows: Vec<serde_json::Value> = tauri::async_runtime::spawn_blocking(|| {
+        Engine::new()
+            .audit_whitelist()
+            .into_iter()
+            .map(|(pattern, live)| serde_json::json!({ "pattern": pattern, "live": live }))
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(serde_json::Value::Array(rows))
 }
 
 #[tauri::command]

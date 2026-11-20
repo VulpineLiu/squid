@@ -43,6 +43,11 @@ export interface CleanupItem {
   selected: boolean;
   lock: LockReason | null;
   note: string | null;
+  /** Seconds since the newest last-write inside the item (A③). */
+  lastWriteSecs?: number | null;
+  fileCount?: number;
+  /** Machine tokens for the B3 evidence panel ("lock:package-lock.json"). */
+  evidence?: string[];
 }
 
 export interface ScanResult {
@@ -69,7 +74,7 @@ export interface DeleteResult {
 export interface JobProgress {
   jobId: string;
   kind: string;
-  event: "phase" | "tick" | "note" | "warning" | "deleted" | "bucket";
+  event: "phase" | "tick" | "note" | "warning" | "deleted" | "bucket" | "metered";
   phase: string | null;
   detail: string | null;
   done: number | null;
@@ -249,12 +254,36 @@ export interface StorageNode {
   allocated: number;
   files: number;
   dirs: number;
-  is_dir: boolean;
+  isDir: boolean;
   readable: boolean;
   children: StorageNode[];
   folded: number;
-  folded_size: number;
+  foldedSize: number;
   complete: boolean;
+}
+
+/** storage_explore now answers with freshness metadata (A⑥ size cache). */
+export interface ExploreResult {
+  node: StorageNode;
+  cached: boolean;
+  measuredAtMs: number | null;
+}
+
+/** Hidden-space insight row (A⑤, Mole overview idiom). */
+export interface SpaceInsight {
+  id: string;
+  title: string;
+  path: string;
+  size: number;
+  action: "cleanable" | "command" | "external" | "info";
+  command: string | null;
+  hint: string;
+}
+
+/** cleanup_preflight verdict (B1 last-second re-check). */
+export interface PreflightResult {
+  checked: number;
+  blocked: { path: string; reason: string }[];
 }
 
 export interface LargestFile {

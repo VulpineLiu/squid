@@ -889,6 +889,7 @@ impl App {
                 };
                 panel.buckets.insert(category, (total, count));
             }
+            Event::Metered { .. } => {}
             Event::Deleted { path, freed } => {
                 self.push_log(format!(
                     "removed {} ({})",

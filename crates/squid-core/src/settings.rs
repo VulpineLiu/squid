@@ -161,6 +161,13 @@ impl Settings {
             .collect()
     }
 
+    /// One raw whitelist line as a matcher — the shape the audit layer
+    /// needs when it must answer about a single pattern, not the list.
+    pub fn whitelist_matcher_for(raw: &str) -> Option<GlobMatcher> {
+        let expanded = paths::expand(raw).to_string_lossy().into_owned();
+        Glob::new(&expanded).ok().map(|g| g.compile_matcher())
+    }
+
     pub fn is_whitelisted(&self, path: &Path, matchers: &[GlobMatcher]) -> bool {
         if self.whitelist.is_empty() {
             return false;

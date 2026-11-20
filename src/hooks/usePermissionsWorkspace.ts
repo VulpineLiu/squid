@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { isCancelled, messageFrom } from "../lib/format";
+import { useToast } from "../components/ui";
 import type { ManageView, PopupWindowItem } from "../types";
 
 export type PermissionsTab = "startup" | "extensions" | "popup";
@@ -36,6 +37,7 @@ export function usePermissionsWorkspace(active: boolean): PermissionsWorkspace {
   const [error, setError] = useState<string | null>(null);
   const [closedTotal, setClosedTotal] = useState(0);
   const [recentClosed, setRecentClosed] = useState<{ process: string; title: string }[]>([]);
+  const { push } = useToast();
 
   const scan = useCallback(async () => {
     setScanning(true);
@@ -101,12 +103,16 @@ export function usePermissionsWorkspace(active: boolean): PermissionsWorkspace {
         await api.startupSetEnabled(id, enabled);
         await scan();
       } catch (reason) {
-        setError(messageFrom(reason));
+        const why = messageFrom(reason);
+        setError(why);
+        // The row snaps back without this; a toast right where the user is
+        // looking explains *why* (cancelled UAC prompt, protected key, …).
+        push(why, "danger");
       } finally {
         setBusyId(null);
       }
     },
-    [scan],
+    [push, scan],
   );
 
   const toggleExtension = useCallback(

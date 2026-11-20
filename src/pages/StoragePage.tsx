@@ -1,27 +1,31 @@
 import {
   ArrowLeft,
   ChevronRight,
+  Copy,
   ExternalLink,
   FileArchive,
   FolderOpen,
   FolderSearch,
   HardDrive,
+  Lightbulb,
   LoaderCircle,
   RefreshCw,
   ScanSearch,
+  TimerReset,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as apiClient from "../lib/api";
 import { useI18n } from "../i18n";
 import {
+  agoLabel,
   basename,
   formatBytes,
   formatCount,
   percent,
   shortPath,
 } from "../lib/format";
-import type { Bootstrap, StorageNode } from "../types";
+import type { Bootstrap, SpaceInsight, StorageNode } from "../types";
 import { useStorageWorkspace } from "../hooks/useStorageWorkspace";
 import {
   Button,
@@ -29,6 +33,7 @@ import {
   PageHeader,
   ProgressCard,
   SectionTitle,
+  useToast,
 } from "../components/ui";
 
 const BAR_TONES = ["blue", "violet", "cyan", "teal", "orange", "pink", "indigo", "slate"];
@@ -48,10 +53,28 @@ function parentDirectory(path: string): string | null {
 }
 
 export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const { push } = useToast();
   const workspace = useStorageWorkspace();
   const [pathInput, setPathInput] = useState("");
   const [manualPath, setManualPath] = useState(false);
+  const [insights, setInsights] = useState<SpaceInsight[] | null>(null);
+
+  // A⑤: hidden space hogs measured quietly once per page visit.
+  useEffect(() => {
+    let alive = true;
+    void apiClient.api
+      .storageInsights()
+      .then((rows) => {
+        if (alive) setInsights(rows);
+      })
+      .catch(() => {
+        if (alive) setInsights([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (workspace.node && !manualPath) setPathInput(workspace.node.path);
@@ -89,8 +112,17 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
   };
 
   const drill = (node: StorageNode) => {
-    if (!node.is_dir || node.path === workspace.node?.path) return;
+    if (!node.isDir || node.path === workspace.node?.path) return;
     explore(node.path);
+  };
+
+  const copyCommand = async (command: string) => {
+    try {
+      await navigator.clipboard.writeText(command);
+      push(t("Command copied to the clipboard", "命令已复制到剪贴板"), "success");
+    } catch {
+      push(t(`Copy failed: ${command}`, `复制失败：${command}`), "danger");
+    }
   };
 
   const parent = workspace.node ? parentDirectory(workspace.node.path) : null;
@@ -180,6 +212,32 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
               </div>
             </div>
 
+            {workspace.cached ? (
+              <div className="storage-fresh">
+                <TimerReset size={13} />
+                <span>
+                  {t(
+                    `Instant open · cached measurement${
+                      workspace.measuredAtMs
+                        ? ` · taken ${agoLabel(workspace.measuredAtMs, lang)}`
+                        : ""
+                    }`,
+                    `秒开 · 缓存数据${
+                      workspace.measuredAtMs
+                        ? ` · 上次测量 ${agoLabel(workspace.measuredAtMs, lang)}`
+                        : ""
+                    }`,
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void workspace.explore(workspace.node?.path, true)}
+                >
+                  {t("Re-measure", "重新测量")}
+                </button>
+              </div>
+            ) : null}
+
             {children.length > 0 ? (
               <>
                 <div className="storage-map" aria-label={t("Folder distribution", "文件夹占比")}>
@@ -197,10 +255,10 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
                   <p className="storage-folded">
                     {t(
                       `${workspace.node.folded} smaller folders (${formatBytes(
-                        workspace.node.folded_size,
+                        workspace.node.foldedSize,
                       )}) are folded into the remainder.`,
                       `${workspace.node.folded} 个较小文件夹（${formatBytes(
-                        workspace.node.folded_size,
+                        workspace.node.foldedSize,
                       )}）已合并显示。`,
                     )}
                   </p>
@@ -213,7 +271,7 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
                       <button
                         key={`${child.path}-${index}`}
                         className={`storage-child ${
-                          child.is_dir && child.path !== workspace.node?.path
+                          child.isDir && child.path !== workspace.node?.path
                             ? "is-navigable"
                             : ""
                         }`}
@@ -221,7 +279,7 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
                       >
                         <span className={`storage-child-dot tone-${BAR_TONES[index % BAR_TONES.length]}`} />
                         <span className="storage-child-icon">
-                          {child.is_dir ? <FolderOpen size={19} /> : <FileArchive size={19} />}
+                          {child.isDir ? <FolderOpen size={19} /> : <FileArchive size={19} />}
                         </span>
                         <span className="storage-child-copy">
                           <strong>{basename(child.path)}</strong>
@@ -256,7 +314,7 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
                           >
                             <ExternalLink size={14} />
                           </span>
-                          {child.is_dir && child.path !== workspace.node?.path ? (
+                          {child.isDir && child.path !== workspace.node?.path ? (
                             <ChevronRight size={15} />
                           ) : null}
                         </span>
@@ -354,6 +412,66 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
             ) : null}
           </section>
         </>
+      ) : null}
+
+      {insights && insights.length > 0 ? (
+        <section className="storage-insights">
+          <SectionTitle
+            title={t("Hidden space hogs", "隐藏的吃空间大户")}
+            subtitle={t(
+              "Things a folder scan never shows you — measured just now.",
+              "文件夹扫描永远看不到的占用 — 刚刚测量过。",
+            )}
+          />
+          <div className="storage-insight-list">
+            {insights.map((insight) => (
+              <div className="storage-insight" key={insight.id}>
+                <span className="storage-insight-icon">
+                  <Lightbulb size={16} />
+                </span>
+                <span className="storage-insight-copy">
+                  <strong>{insight.title}</strong>
+                  <small title={insight.path}>{shortPath(insight.path, 68)}</small>
+                  <small className="storage-insight-hint">{insight.hint}</small>
+                </span>
+                <span className="storage-insight-size">
+                  {insight.size > 0 ? formatBytes(insight.size) : "—"}
+                </span>
+                <span className="storage-insight-acts">
+                  {insight.path ? (
+                    <button
+                      className="row-reveal"
+                      title={t("Show in Explorer", "在资源管理器中显示")}
+                      onClick={() => reveal(insight.path)}
+                    >
+                      <ExternalLink size={14} />
+                    </button>
+                  ) : null}
+                  {insight.action === "cleanable" ? (
+                    <button
+                      type="button"
+                      className="storage-insight-cta"
+                      onClick={() => explore(insight.path)}
+                    >
+                      {t("Inspect", "查看")}
+                    </button>
+                  ) : null}
+                  {insight.action === "command" && insight.command ? (
+                    <button
+                      type="button"
+                      className="storage-insight-cta"
+                      title={insight.command}
+                      onClick={() => void copyCommand(insight.command!)}
+                    >
+                      <Copy size={13} />
+                      {t("Copy command", "复制命令")}
+                    </button>
+                  ) : null}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
       ) : null}
 
       {!workspace.node && !workspace.exploring ? (

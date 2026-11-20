@@ -165,6 +165,21 @@ pub struct CleanupItem {
     /// stale or hand-edited item can never escape its sandbox.
     #[serde(default)]
     pub anchors: Vec<PathBuf>,
+    /// Seconds since the *most recent* last-write inside the item (Mole's
+    /// decision aid: 1.2 GB alone is not actionable, "untouched for 3 months"
+    /// is — and a low value flags a live, working directory). Unknown until
+    /// measurement; `None` for unreadable paths.
+    #[serde(default)]
+    pub last_write_secs: Option<u64>,
+    /// File count from measurement — lets the UI say "12 files · 5 folders".
+    #[serde(default)]
+    pub file_count: u64,
+    /// Machine-readable judgement tokens (Mole's evidence chain, made
+    /// visible): `lock:<file>`, `record:<file>`, `record-missing`,
+    /// `modified:<n>`, `git:ignored|untracked|none|tracked`, `age:<days>`,
+    /// `busy`. The UI renders each token as a ✓/! line in a detail panel.
+    #[serde(default)]
+    pub evidence: Vec<String>,
 }
 
 impl CleanupItem {
@@ -187,6 +202,9 @@ impl CleanupItem {
             lock: lock_default(kind),
             note: None,
             anchors: Vec::new(),
+            last_write_secs: None,
+            file_count: 0,
+            evidence: Vec::new(),
         }
     }
 
