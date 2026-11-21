@@ -1,4 +1,4 @@
-import { BellRing, RefreshCw, Search, ShieldCheck, Trash2, X } from "lucide-react";
+import { BellRing, ChevronRight, RefreshCw, Search, ShieldCheck, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useI18n } from "../i18n";
 import { shortPath } from "../lib/format";
@@ -38,6 +38,7 @@ function RowIcon({ icon, label }: { icon: string | null | undefined; label: stri
 export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [extCat, setExtCat] = useState<string | null>(null);
   const view = workspace.view;
 
@@ -118,13 +119,32 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
       item.displayName.toLowerCase().includes(needle) ||
       item.command.toLowerCase().includes(needle),
   );
-  // 电脑管家 style: one group per software, Chinese name in the header.
+  // 电脑管家 style: one group per software (Chinese name in the header);
+  // every entry the backend could not attribute to a real product lands in
+  // a catch-all 其他软件 group, which always sorts last.
+  const otherName = t("Other software", "其他软件");
   const startupGroups = new Map<string, typeof startup>();
   for (const item of startup) {
-    const list = startupGroups.get(item.displayName) ?? [];
+    const key = item.named && item.displayName ? item.displayName : otherName;
+    const list = startupGroups.get(key) ?? [];
     list.push(item);
-    startupGroups.set(item.displayName, list);
+    startupGroups.set(key, list);
   }
+  const orderedGroups = [...startupGroups.entries()].sort(
+    ([a], [b]) => Number(a === otherName) - Number(b === otherName),
+  );
+  // Groups start folded (管家 habit): the header carries a master switch
+  // and the status line; expanding shows the per-entry detail. Searching
+  // force-expands everything so matches are never hidden.
+  const searching = query.trim().length > 0;
+  const isGroupOpen = (name: string) => searching || openGroups.has(name);
+  const toggleGroupOpen = (name: string) =>
+    setOpenGroups((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
   const groupedExtensions = view.extensions
     .filter(
       (entry) =>
@@ -202,50 +222,88 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
               placeholder={t("Filter by name or path…", "按名称或路径筛选…")}
             />
           </label>
-          {Array.from(startupGroups.entries()).map(([software, items]) => (
-            <div key={software}>
-              <h4 className="perm-group">
-                {items.find((item) => item.icon)?.icon ? (
-                  <img className="perm-group-icon" src={softwareIcon(items)} alt="" />
-                ) : (
-                  <span className="perm-group-icon perm-group-icon-fallback" aria-hidden="true">
-                    {software.trim().slice(0, 1).toUpperCase()}
-                  </span>
-                )}
-                <span>{software}</span>
-                <b>
-                  {t(
-                    `${items.filter((item) => item.enabled).length}/${items.length} on`,
-                    `${items.filter((item) => item.enabled).length}/${items.length} 开启`,
+          {orderedGroups.map(([software, items]) => {
+            const onCount = items.filter((item) => item.enabled).length;
+            const allOn = onCount === items.length;
+            const open = isGroupOpen(software);
+            const groupIds = items.map((item) => item.id);
+            return (
+              <div key={software} className={`perm-group-card ${open ? "is-open" : ""}`}>
+                <h4 className="perm-group" onClick={() => toggleGroupOpen(software)}>
+                  {items.find((item) => item.icon)?.icon ? (
+                    <img className="perm-group-icon" src={softwareIcon(items)} alt="" />
+                  ) : (
+                    <span className="perm-group-icon perm-group-icon-fallback" aria-hidden="true">
+                      {software.trim().slice(0, 1).toUpperCase()}
+                    </span>
                   )}
-                </b>
-              </h4>
-              <div className="perm-rows">
-                {items.map((item) => (
-                  <div
-                    className={`settings-row ${workspace.busyId === item.id ? "is-busy" : ""}`}
-                    key={item.id}
+                  <span className="perm-group-name">{software}</span>
+                  <b className={allOn ? "is-all" : onCount === 0 ? "is-none" : "is-part"}>
+                    {allOn
+                      ? t("All on", "全部开启")
+                      : onCount === 0
+                        ? t("All off", "已全部关闭")
+                        : t(
+                            `${onCount}/${items.length} on`,
+                            `部分开启 ${onCount}/${items.length}`,
+                          )}
+                  </b>
+                  <span
+                    className="perm-group-tail"
+                    onClick={(event) => event.stopPropagation()}
                   >
-                    <div className="perm-row perm-row-noicon">
-                      <div>
-                        <span>{item.name}</span>
-                        <small title={item.command}>
-                          {item.sourceLabel} · {scopeLabel(item.scope, t)}
-                          {item.command ? ` · ${shortPath(item.command, 72)}` : ""}
-                        </small>
-                      </div>
-                    </div>
+                    <span
+                      className="perm-group-count"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleGroupOpen(software);
+                      }}
+                    >
+                      {items.length > 1
+                        ? t(`${items.length} items`, `共${items.length}项`)
+                        : t("1 item", "共1项")}
+                      <ChevronRight
+                        size={13}
+                        className={`perm-group-chv ${open ? "is-open" : ""}`}
+                      />
+                    </span>
                     <Toggle
-                      checked={item.enabled}
+                      checked={allOn}
                       disabled={workspace.busyId !== null}
-                      onChange={(next) => void workspace.toggleStartup(item.id, next)}
-                      label={`${item.name} ${item.enabled ? "disable" : "enable"}`}
+                      onChange={(next) => void workspace.toggleStartupGroup(groupIds, next)}
+                      label={`${software} master ${allOn ? "disable" : "enable"}`}
                     />
+                  </span>
+                </h4>
+                {open ? (
+                  <div className="perm-rows">
+                    {items.map((item) => (
+                      <div
+                        className={`settings-row ${workspace.busyId === item.id ? "is-busy" : ""}`}
+                        key={item.id}
+                      >
+                        <div className="perm-row perm-row-noicon">
+                          <div>
+                            <span>{item.name}</span>
+                            <small title={item.command}>
+                              {item.sourceLabel} · {scopeLabel(item.scope, t)}
+                              {item.command ? ` · ${shortPath(item.command, 72)}` : ""}
+                            </small>
+                          </div>
+                        </div>
+                        <Toggle
+                          checked={item.enabled}
+                          disabled={workspace.busyId !== null}
+                          onChange={(next) => void workspace.toggleStartup(item.id, next)}
+                          label={`${item.name} ${item.enabled ? "disable" : "enable"}`}
+                        />
+                      </div>
+                    ))}
                   </div>
-                ))}
+                ) : null}
               </div>
-            </div>
-          ))}
+            );
+          })}
           {startup.length === 0 ? (
             <p className="perm-empty">{t("No matches.", "没有匹配的项目。")}</p>
           ) : null}

@@ -4970,6 +4970,68 @@ select:focus-visible,
   font-weight: var(--nex-weight-regular);
 }
 
+/* 电脑管家-style startup groups: folded software rows with a master switch. */
+.perm-group-card {
+  border-radius: 10px;
+  transition: background 0.15s ease;
+}
+
+.perm-group-card:hover {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.perm-group-card .perm-group {
+  cursor: pointer;
+  user-select: none;
+}
+
+.perm-group-card.is-open .perm-group {
+  margin-bottom: 0;
+}
+
+.perm-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perm-group b.is-all {
+  color: #4b8a55;
+}
+
+.perm-group b.is-part {
+  color: #b3854d;
+}
+
+.perm-group b.is-none {
+  color: #9aa6b2;
+}
+
+.perm-group-tail {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.perm-group-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #909fad;
+  font-size: var(--nex-text-3xs);
+  cursor: pointer;
+}
+
+.perm-group-chv {
+  color: #b7bfca;
+  transition: transform 0.15s ease;
+}
+
+.perm-group-chv.is-open {
+  transform: rotate(90deg);
+}
+
 /* Per-row software icon (电脑管家 shows the app icon on every list row). */
 .settings-row > .perm-row {
   display: flex;

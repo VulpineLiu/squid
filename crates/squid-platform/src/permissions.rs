@@ -28,6 +28,12 @@ pub struct StartupEntry {
     /// `currentUser` | `machine`
     pub scope: String,
     pub enabled: bool,
+    /// True once the entry was attributed to a real software product (the
+    /// binary carries a human FileDescription/ProductName). 电脑管家 groups
+    /// every entry it *cannot* attribute under 其他软件; this flag drives
+    /// that bucket on the UI side.
+    #[serde(default)]
+    pub named: bool,
     /// PNG bytes of the binary's default icon, extracted on Windows only —
     /// the 电脑管家 habit of showing the software icon next to its name.
     #[serde(default)]
@@ -540,11 +546,20 @@ mod windows {
                 .entry(probed.clone())
                 .or_insert_with(|| {
                     let (description, product, _company) = version_strings(&probed);
-                    (description, product, software_icon(&probed, &vendors))
+                    let usable = |text: Option<String>| text.filter(|t| !is_placeholder_label(t));
+                    (
+                        usable(description),
+                        usable(product),
+                        software_icon(&probed, &vendors),
+                    )
                 })
                 .clone();
             entry.display_name =
                 friendly_program_name(&entry.name, description.as_deref(), product.as_deref());
+            // 电脑管家's grouping rule: an entry is only attributed to a
+            // software product when the binary carries real human strings;
+            // everything else falls into the 其他软件 bucket.
+            entry.named = description.is_some() || product.is_some();
             entry.icon = icon;
         }
     }
@@ -1128,6 +1143,7 @@ mod windows {
                     "currentUser".to_string()
                 },
                 enabled,
+                named: false,
             });
         }
         out
@@ -1176,6 +1192,7 @@ mod windows {
                     "currentUser".to_string()
                 },
                 enabled,
+                named: false,
             });
         }
         out
@@ -1224,6 +1241,7 @@ mod windows {
                     source_label: "计划任务".to_string(),
                     scope: "machine".to_string(),
                     enabled: task_settings_enabled(&text),
+                    named: false,
                 });
             }
         }
@@ -1300,6 +1318,7 @@ mod windows {
                 source_label: "计划任务".to_string(),
                 scope: "machine".to_string(),
                 enabled,
+                named: false,
             });
         }
         out
@@ -1428,6 +1447,7 @@ mod windows {
                 .to_string(),
                 scope: "machine".to_string(),
                 enabled: start == 2,
+                named: false,
             });
         }
         out
@@ -2322,6 +2342,7 @@ mod macos {
                 source_label: label.to_string(),
                 scope: scope.to_string(),
                 enabled,
+                named: true,
             });
         }
         out
@@ -2426,6 +2447,7 @@ mod linux {
                 source_label: "~/.config/autostart".to_string(),
                 scope: "currentUser".to_string(),
                 enabled,
+                named: true,
             });
         }
         for entry in &mut out {

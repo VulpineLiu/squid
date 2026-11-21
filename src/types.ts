@@ -362,6 +362,8 @@ export interface StartupItem {
   sourceLabel: string;
   scope: string;
   enabled: boolean;
+  /** Attributed to a real product; false lands in the 其他软件 group. */
+  named: boolean;
 }
 
 export interface ShellExtension {

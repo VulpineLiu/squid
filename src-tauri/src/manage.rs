@@ -135,6 +135,8 @@ pub struct StartupView {
     source_label: String,
     scope: String,
     enabled: bool,
+    /// Attributed to a real software product (drives the 其他软件 bucket).
+    named: bool,
 }
 
 impl From<&StartupEntry> for StartupView {
@@ -149,6 +151,7 @@ impl From<&StartupEntry> for StartupView {
             source_label: entry.source_label.clone(),
             scope: entry.scope.clone(),
             enabled: entry.enabled,
+            named: entry.named,
         }
     }
 }

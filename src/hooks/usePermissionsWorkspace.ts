@@ -20,6 +20,8 @@ export interface PermissionsWorkspace {
   scan: () => Promise<void>;
   refreshWindows: () => Promise<void>;
   toggleStartup: (id: string, enabled: boolean) => Promise<void>;
+  /** 电脑管家's master switch: flip every entry of one software group. */
+  toggleStartupGroup: (ids: string[], enabled: boolean) => Promise<void>;
   toggleExtension: (id: string, registered: boolean) => Promise<void>;
   addRule: (hwnd: number, matcher: "exact" | "contains") => Promise<void>;
   toggleRule: (index: number, enabled: boolean) => Promise<void>;
@@ -110,6 +112,32 @@ export function usePermissionsWorkspace(active: boolean): PermissionsWorkspace {
         push(why, "danger");
       } finally {
         setBusyId(null);
+      }
+    },
+    [push, scan],
+  );
+
+  const toggleStartupGroup = useCallback(
+    async (ids: string[], enabled: boolean) => {
+      if (ids.length === 0) return;
+      setBusyId(ids[0]);
+      setError(null);
+      const failures: string[] = [];
+      try {
+        for (const id of ids) {
+          try {
+            await api.startupSetEnabled(id, enabled);
+          } catch (reason) {
+            failures.push(messageFrom(reason));
+          }
+        }
+        await scan();
+      } finally {
+        setBusyId(null);
+      }
+      if (failures.length > 0) {
+        setError(failures[0]);
+        push(failures[0], "danger");
       }
     },
     [push, scan],
@@ -217,6 +245,7 @@ export function usePermissionsWorkspace(active: boolean): PermissionsWorkspace {
     scan,
     refreshWindows,
     toggleStartup,
+    toggleStartupGroup,
     toggleExtension,
     addRule,
     toggleRule,
