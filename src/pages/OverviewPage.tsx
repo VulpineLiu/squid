@@ -108,7 +108,8 @@ export function OverviewPage({
     if (!scanned) {
       void cleanup.runScan().then(() =>
         purge.runScan({
-          roots: bootstrap.settings.purgeRoots,
+          // Empty = engine auto-discovery of project containers.
+          roots: [],
           minAgeDays: bootstrap.settings.purgeMinAgeDays || 7,
           force: false,
         }),

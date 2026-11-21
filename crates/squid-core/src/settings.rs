@@ -44,28 +44,9 @@ impl Default for Settings {
             delete_mode: DeleteMode::Trash,
             whitelist: Vec::new(),
             disabled_rules: Vec::new(),
-            purge_roots: vec![
-                // Windows-style project homes first; the classic dev names
-                // stay (case variants dedupe at check time), and every entry
-                // is skipped silently when absent — Mole's default-list habit.
-                "~/Desktop".into(),
-                "~/Documents".into(),
-                "~/Documents/WeChat Projects".into(),
-                "~/source/repos".into(),
-                "~/code".into(),
-                "~/Code".into(),
-                "~/dev".into(),
-                "~/Dev".into(),
-                "~/develop".into(),
-                "~/projects".into(),
-                "~/Projects".into(),
-                "~/repos".into(),
-                "~/Repos".into(),
-                "~/src".into(),
-                "~/work".into(),
-                "~/Work".into(),
-                "~/.codex/worktrees".into(),
-            ],
+            // Auto-discovery (purge::resolve_roots) owns the default story;
+            // this list is now only for hand-edited extra folders.
+            purge_roots: Vec::new(),
             purge_min_age_days: 7,
             purge_max_entries: 200_000,
             show_allocated: true,

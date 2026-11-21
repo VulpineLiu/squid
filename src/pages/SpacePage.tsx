@@ -16,7 +16,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
   useCallback,
   useEffect,
@@ -40,7 +40,6 @@ import type {
   DeleteMode,
   DeleteResult,
   PreflightResult,
-  RootStatus,
 } from "../types";
 import type { ScanWorkspace } from "../hooks/useScanWorkspace";
 import {
@@ -455,11 +454,6 @@ export function SpacePage({
 }) {
   const { t, lang, bin } = useI18n();
   const { push } = useToast();
-  // 深度扫描目录: the persisted list, edited in a checklist popover that
-  // mirrors Mole's manage screen (every path shown, ✓ / 不存在 marked).
-  const [roots, setRoots] = useState<string[]>(bootstrap.settings.purgeRoots);
-  const [rootsOpen, setRootsOpen] = useState(false);
-  const [rootStatuses, setRootStatuses] = useState<RootStatus[]>([]);
   const [minAge, setMinAge] = useState(bootstrap.settings.purgeMinAgeDays || 7);
   const [confirming, setConfirming] = useState(false);
   // Open accordions. On first results we auto-expand the biggest category so
@@ -492,79 +486,18 @@ export function SpacePage({
     try {
       await cleanup.runScan();
       await purge.runScan({
-        roots,
+        // Empty = the engine's auto-discovery (drive-root containers + home).
+        roots: [],
         minAgeDays: minAge > 0 ? minAge : null,
         force: false,
       });
     } finally {
       inFlight.current = false;
     }
-  }, [cleanup, deleting, minAge, purge, roots, scanning]);
+  }, [cleanup, deleting, minAge, purge, scanning]);
 
   // Default checking is seeded at scan time by the workspaces' selection
   // policy (App.tsx spaceDefaults): daily groups on, opt-in groups off.
-
-  // Every roots edit lands on disk right away (Mole persists its list file;
-  // a restart must never silently revert to defaults).
-  const saveRoots = async (next: string[]) => {
-    setRoots(next);
-    try {
-      await api.settingsSave({ purgeRoots: next });
-    } catch {
-      // Scan still uses the in-memory list; persistence can retry next edit.
-    }
-  };
-
-  const refreshRootStatuses = async (list: string[]) => {
-    try {
-      setRootStatuses(await api.rootsStatus(list));
-    } catch {
-      setRootStatuses([]);
-    }
-  };
-
-  const toggleRootsPopover = () => {
-    const next = !rootsOpen;
-    setRootsOpen(next);
-    if (next) void refreshRootStatuses(roots);
-  };
-
-  const addRoots = async () => {
-    const chosen = await open({
-      directory: true,
-      multiple: true,
-      title: t("Choose project folders to inspect", "选择要检查的项目目录"),
-    });
-    if (!chosen) return;
-    const picked = (Array.isArray(chosen) ? chosen : [chosen]).filter(
-      (path) => !roots.some((root) => root.toLowerCase() === path.toLowerCase()),
-    );
-    if (picked.length > 0) {
-      const next = [...roots, ...picked];
-      await saveRoots(next);
-      void refreshRootStatuses(next);
-    }
-  };
-
-  const removeRoot = async (raw: string) => {
-    const next = roots.filter((root) => root !== raw);
-    await saveRoots(next);
-    void refreshRootStatuses(next);
-  };
-
-  const resetRoots = async () => {
-    await saveRoots([]);
-    // [] on disk means defaults again: the Rust patch swaps in the built-in
-    // list, so re-read it to keep the popover honest.
-    try {
-      const status = await api.rootsStatus(null);
-      setRoots(status.map((row) => row.raw));
-      setRootStatuses(status);
-    } catch {
-      setRootStatuses([]);
-    }
-    push(t("Scan folders restored to defaults", "扫描目录已恢复默认"), "success");
-  };
 
   const entries = useMemo<Entry[]>(() => {
     const all: Entry[] = [];
@@ -1091,87 +1024,11 @@ export function SpacePage({
         <span className="space-config-label">
           {t("Deep-scan folders", "深度扫描目录")}
         </span>
-        <span className="space-roots-wrap">
-          <button
-            type="button"
-            className="space-config-value"
-            onClick={toggleRootsPopover}
-            aria-expanded={rootsOpen}
-          >
-            {(() => {
-              const living = rootStatuses.filter((row) => row.exists).length;
-              const missing = rootStatuses.length - living;
-              if (!rootStatuses.length) {
-                return roots.length
-                  ? t(`${roots.length} folder(s) · click to view`, `共 ${roots.length} 处 · 点击检视`)
-                  : t("Defaults · click to view", "默认目录 · 点击检视");
-              }
-              return missing > 0
-                ? t(
-                    `${living} active · ${missing} missing (skipped)`,
-                    `${living} 处有效 · ${missing} 处不存在已跳过`,
-                  )
-                : t(`${living} active folders`, `${living} 处目录全部有效`);
-            })()}
-            <ChevronRight
-              size={12}
-              style={{ transform: rootsOpen ? "rotate(90deg)" : undefined }}
-            />
-          </button>
-          {rootsOpen ? (
-            <div className="space-roots-pop">
-              <div className="space-roots-list">
-                {(rootStatuses.length ? rootStatuses : roots.map((raw) => ({ raw, expanded: raw, exists: true }))).map(
-                  (row) => (
-                    <div
-                      className={`space-roots-row ${row.exists ? "" : "is-missing"}`}
-                      key={row.raw}
-                    >
-                      <span className="space-roots-state">
-                        {row.exists ? "✓" : "⌀"}
-                      </span>
-                      <span className="space-roots-path" title={row.expanded}>
-                        {row.expanded}
-                      </span>
-                      {!row.exists ? (
-                        <small>{t("missing · skipped", "不存在 · 跳过")}</small>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="space-roots-x"
-                        aria-label={t("Remove folder", "移除该目录")}
-                        onClick={() => void removeRoot(row.raw)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ),
-                )}
-                {roots.length === 0 ? (
-                  <p className="space-roots-empty">
-                    {t(
-                      "No folders — the built-in defaults are used.",
-                      "未设置目录，使用内置默认清单。",
-                    )}
-                  </p>
-                ) : null}
-              </div>
-              <div className="space-roots-acts">
-                <Button variant="ghost" size="sm" icon={<FolderOpen size={13} />} onClick={() => void addRoots()}>
-                  {t("Add folder", "＋ 添加目录")}
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => void resetRoots()}>
-                  {t("Restore defaults", "恢复默认")}
-                </Button>
-                <small>
-                  {t(
-                    "Saved automatically; missing folders are skipped at scan time.",
-                    "改动即时保存；扫描时不存在的目录自动跳过。",
-                  )}
-                </small>
-              </div>
-            </div>
-          ) : null}
+        <span className="space-config-static">
+          {t(
+            "Auto-discovered: Desktop, Documents, project folders on every drive",
+            "自动发现：桌面、文档、各磁盘根目录下的项目目录（无需设置）",
+          )}
         </span>
         <span className="space-config-label">
           {t("Older than", "仅处理早于")}
@@ -1267,8 +1124,8 @@ export function SpacePage({
           <ScanSearch size={22} />
           <span>
             {t(
-              "Not scanned yet. Start scan checks known cache spots and searches the project folders above.",
-              "尚未扫描。点击「开始扫描」，Squid 会检查已知缓存位置并搜索上方项目目录里的构建产物。",
+              "Not scanned yet. Start scan checks known cache spots and auto-discovers project folders across the machine.",
+              "尚未扫描。点击「开始扫描」，Squid 会检查已知缓存位置，并自动发现本机各处的项目构建目录。",
             )}
           </span>
         </div>

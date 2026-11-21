@@ -16,7 +16,6 @@ import type {
   PopupClosedEvent,
   PopupWindowItem,
   PreflightResult,
-  RootStatus,
   ScanResult,
   SettingsView,
   SpaceInsight,
@@ -80,8 +79,6 @@ export const api = {
   whitelistAdd: (path: string) => invoke<SettingsView>("whitelist_add", { path }),
   whitelistRemove: (pattern: string) => invoke<SettingsView>("whitelist_remove", { pattern }),
   whitelistAudit: () => invoke<{ pattern: string; live: boolean }[]>("whitelist_audit"),
-  rootsStatus: (roots: string[] | null) =>
-    invoke<RootStatus[]>("roots_status", { roots: roots ?? null }),
   writeTextFile: (path: string, contents: string) =>
     invoke<void>("write_text_file", { path, contents }),
   revealPath: (path: string) => invoke<void>("reveal_path", { path }),

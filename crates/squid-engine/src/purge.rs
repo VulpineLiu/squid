@@ -196,9 +196,17 @@ pub fn scan(
     let mut candidates: Vec<Candidate> = Vec::new();
     let mut visited = 0usize;
     for root in &roots {
-        let top_level = roots.len() > 1 && root.components().count() <= 3;
-        let cap = if top_level { depth.min(4) } else { depth };
-        walk(root, cap, &mut candidates, &mut visited, progress, cancel)?;
+        // Shallow roots (the home folder itself) only get a depth-reduced
+        // walk; project containers are worth the full depth.
+        let cap = if root.shallow { depth.min(4) } else { depth };
+        walk(
+            &root.path,
+            cap,
+            &mut candidates,
+            &mut visited,
+            progress,
+            cancel,
+        )?;
     }
     candidates.sort_by(|a, b| a.path.cmp(&b.path));
     candidates.dedup_by(|a, b| a.path == b.path);
@@ -419,32 +427,118 @@ fn item_for(candidate: &Candidate) -> CleanupItem {
     .with_note(project)
 }
 
-/// Default roots: everything the user configured, plus the home folder itself
-/// (shallow) so a project in an unexpected place is still found.
-fn resolve_roots(engine: &Engine, options: &PurgeOptions) -> Vec<PathBuf> {
+/// Default roots are auto-discovered (Mole habit, but without the config
+/// file): the home folder, container-named children of the home
+/// (`~/source`, `~/repos`, …) and container-named children sitting directly
+/// under each fixed drive root (`D:\Projects`). A user who wants more passes
+/// explicit roots; a user who edits `purge_roots` in settings.toml keeps
+/// those extras honoured as well.
+fn resolve_roots(engine: &Engine, options: &PurgeOptions) -> Vec<RootSpec> {
     if !options.roots.is_empty() {
-        let chosen: Vec<PathBuf> = options
+        let chosen: Vec<RootSpec> = options
             .roots
             .iter()
             .map(|root| squid_core::paths::expand(&root.to_string_lossy()))
             .filter(|path| path.is_dir())
+            .map(|path| RootSpec {
+                path,
+                shallow: false,
+            })
             .collect();
-        // All the caller's paths are dead (classic case: the default roots
-        // are macOS-flavoured ~/code-style folders that never exist on
-        // Windows). Falling through to settings + home beats a scan that
-        // refuses to run and tells the user to pick a folder that is
-        // already in the box.
         if !chosen.is_empty() {
             return chosen;
         }
     }
-    let mut roots = engine.settings().purge_root_paths();
-    let home = squid_core::paths::home_dir();
-    if !roots.iter().any(|root| root == &home) {
-        roots.push(home);
+    let mut roots: Vec<RootSpec> = Vec::new();
+    let push = |path: PathBuf, shallow: bool, roots: &mut Vec<RootSpec>| {
+        if path.is_dir()
+            && !roots
+                .iter()
+                .any(|seen| squid_core::paths::same_path(&seen.path, &path))
+        {
+            roots.push(RootSpec { path, shallow });
+        }
+    };
+    // Extras the user maintains by hand in settings.toml (not a UI concept).
+    for root in engine.settings().purge_root_paths() {
+        push(root, false, &mut roots);
     }
-    roots.retain(|root| root.is_dir());
+    let home = squid_core::paths::home_dir();
+    // Container-named homes: full depth, high value.
+    for container in container_children(&home) {
+        push(container, false, &mut roots);
+    }
+    for mount in drive_roots(engine) {
+        for container in container_children(&mount) {
+            push(container, false, &mut roots);
+        }
+    }
+    // The home itself last, walked shallow: it still catches projects parked
+    // on Desktop / Documents without diving through the whole profile.
+    push(home, true, &mut roots);
     roots
+}
+
+/// One walk start point. `shallow` roots (the home folder) get the reduced
+/// depth cap; project containers are walked to the full depth.
+struct RootSpec {
+    path: PathBuf,
+    shallow: bool,
+}
+
+/// Names that, one level under the home or a drive root, mean "my projects
+/// live here". `documents`/`desktop` belong on drive roots (Windows users
+/// keep code under `D:\Documents`, VS writes `Documents\source\repos`);
+/// under the home folder they are reached by the shallow home walk anyway.
+const CONTAINER_NAMES: &[&str] = &[
+    "repos",
+    "repo",
+    "git",
+    "github",
+    "code",
+    "coding",
+    "dev",
+    "develop",
+    "development",
+    "projects",
+    "project",
+    "workspace",
+    "workspaces",
+    "work",
+    "src",
+    "source",
+    "documents",
+    "desktop",
+];
+
+fn container_children(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            CONTAINER_NAMES
+                .iter()
+                .any(|wanted| name.eq_ignore_ascii_case(wanted))
+                && entry.path().is_dir()
+        })
+        .map(|entry| entry.path())
+        .collect()
+}
+
+/// Fixed drive mount points (Windows) / the root volume only elsewhere —
+/// removable and network media are not project homes worth walking.
+fn drive_roots(engine: &Engine) -> Vec<PathBuf> {
+    let Ok(volumes) = engine.platform().volumes() else {
+        return Vec::new();
+    };
+    volumes
+        .into_iter()
+        .filter(|volume| !volume.is_removable)
+        .map(|volume| volume.mount_point)
+        .collect()
 }
 
 fn walk(

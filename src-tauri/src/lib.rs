@@ -131,7 +131,6 @@ pub fn run() {
             app::storage_explore,
             app::storage_insights,
             app::write_text_file,
-            app::roots_status,
             app::storage_largest_files,
             app::system_snapshot,
             app::stop_process,
