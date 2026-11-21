@@ -45,6 +45,13 @@ impl Default for Settings {
             whitelist: Vec::new(),
             disabled_rules: Vec::new(),
             purge_roots: vec![
+                // Windows-style project homes first; the classic dev names
+                // stay (case variants dedupe at check time), and every entry
+                // is skipped silently when absent — Mole's default-list habit.
+                "~/Desktop".into(),
+                "~/Documents".into(),
+                "~/Documents/WeChat Projects".into(),
+                "~/source/repos".into(),
                 "~/code".into(),
                 "~/Code".into(),
                 "~/dev".into(),
@@ -57,8 +64,6 @@ impl Default for Settings {
                 "~/src".into(),
                 "~/work".into(),
                 "~/Work".into(),
-                "~/Desktop".into(),
-                "~/Documents".into(),
                 "~/.codex/worktrees".into(),
             ],
             purge_min_age_days: 7,

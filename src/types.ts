@@ -286,6 +286,13 @@ export interface PreflightResult {
   blocked: { path: string; reason: string }[];
 }
 
+/** One 深度扫描目录 with its existence verdict (Mole manage-screen habit). */
+export interface RootStatus {
+  raw: string;
+  expanded: string;
+  exists: boolean;
+}
+
 export interface LargestFile {
   path: string;
   logical: number;

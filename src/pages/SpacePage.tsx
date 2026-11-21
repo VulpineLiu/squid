@@ -40,6 +40,7 @@ import type {
   DeleteMode,
   DeleteResult,
   PreflightResult,
+  RootStatus,
 } from "../types";
 import type { ScanWorkspace } from "../hooks/useScanWorkspace";
 import {
@@ -51,7 +52,6 @@ import {
   InlineError,
   ProgressCard,
   SectionTitle,
-  Toggle,
   categoryLabel,
   lockLabel,
   useToast,
@@ -455,9 +455,12 @@ export function SpacePage({
 }) {
   const { t, lang, bin } = useI18n();
   const { push } = useToast();
-  const [roots, setRoots] = useState(bootstrap.settings.purgeRoots.join("\n"));
+  // 深度扫描目录: the persisted list, edited in a checklist popover that
+  // mirrors Mole's manage screen (every path shown, ✓ / 不存在 marked).
+  const [roots, setRoots] = useState<string[]>(bootstrap.settings.purgeRoots);
+  const [rootsOpen, setRootsOpen] = useState(false);
+  const [rootStatuses, setRootStatuses] = useState<RootStatus[]>([]);
   const [minAge, setMinAge] = useState(bootstrap.settings.purgeMinAgeDays || 7);
-  const [force, setForce] = useState(false);
   const [confirming, setConfirming] = useState(false);
   // Open accordions. On first results we auto-expand the biggest category so
   // the list never reads as a dead panel; that initial choice is remembered
@@ -486,26 +489,47 @@ export function SpacePage({
     // (and its preflight verdict) no longer describes what is on screen.
     setInlineConfirm(false);
     setPreflight(null);
-    const rootList = roots
-      .split(/\r?\n/)
-      .map((root) => root.trim())
-      .filter(Boolean);
     try {
       await cleanup.runScan();
       await purge.runScan({
-        roots: rootList,
+        roots,
         minAgeDays: minAge > 0 ? minAge : null,
-        force,
+        force: false,
       });
     } finally {
       inFlight.current = false;
     }
-  }, [cleanup, deleting, force, minAge, purge, roots, scanning]);
+  }, [cleanup, deleting, minAge, purge, roots, scanning]);
 
   // Default checking is seeded at scan time by the workspaces' selection
   // policy (App.tsx spaceDefaults): daily groups on, opt-in groups off.
 
-  const browse = async () => {
+  // Every roots edit lands on disk right away (Mole persists its list file;
+  // a restart must never silently revert to defaults).
+  const saveRoots = async (next: string[]) => {
+    setRoots(next);
+    try {
+      await api.settingsSave({ purgeRoots: next });
+    } catch {
+      // Scan still uses the in-memory list; persistence can retry next edit.
+    }
+  };
+
+  const refreshRootStatuses = async (list: string[]) => {
+    try {
+      setRootStatuses(await api.rootsStatus(list));
+    } catch {
+      setRootStatuses([]);
+    }
+  };
+
+  const toggleRootsPopover = () => {
+    const next = !rootsOpen;
+    setRootsOpen(next);
+    if (next) void refreshRootStatuses(roots);
+  };
+
+  const addRoots = async () => {
     const chosen = await open({
       directory: true,
       multiple: true,
@@ -513,15 +537,33 @@ export function SpacePage({
     });
     if (!chosen) return;
     const picked = (Array.isArray(chosen) ? chosen : [chosen]).filter(
-      (path) => !roots.split(/\r?\n/).some((line) => line.trim() === path),
+      (path) => !roots.some((root) => root.toLowerCase() === path.toLowerCase()),
     );
     if (picked.length > 0) {
-      setRoots((current) =>
-        current.trim().length > 0
-          ? `${current.trimEnd()}\n${picked.join("\n")}`
-          : picked.join("\n"),
-      );
+      const next = [...roots, ...picked];
+      await saveRoots(next);
+      void refreshRootStatuses(next);
     }
+  };
+
+  const removeRoot = async (raw: string) => {
+    const next = roots.filter((root) => root !== raw);
+    await saveRoots(next);
+    void refreshRootStatuses(next);
+  };
+
+  const resetRoots = async () => {
+    await saveRoots([]);
+    // [] on disk means defaults again: the Rust patch swaps in the built-in
+    // list, so re-read it to keep the popover honest.
+    try {
+      const status = await api.rootsStatus(null);
+      setRoots(status.map((row) => row.raw));
+      setRootStatuses(status);
+    } catch {
+      setRootStatuses([]);
+    }
+    push(t("Scan folders restored to defaults", "扫描目录已恢复默认"), "success");
   };
 
   const entries = useMemo<Entry[]>(() => {
@@ -1049,20 +1091,88 @@ export function SpacePage({
         <span className="space-config-label">
           {t("Deep-scan folders", "深度扫描目录")}
         </span>
-        <button
-          type="button"
-          className="space-config-value"
-          onClick={() => void browse()}
-          title={roots.replace(/\r?\n/g, "\n")}
-        >
-          {roots.trim()
-            ? t(
-                `${roots.split(/\r?\n/).filter((line) => line.trim()).length} folder(s) · click to edit`,
-                `共 ${roots.split(/\r?\n/).filter((line) => line.trim()).length} 处 · 点击编辑`,
-              )
-            : t("Home folder (default)", "主目录（默认）")}
-          <FolderOpen size={13} />
-        </button>
+        <span className="space-roots-wrap">
+          <button
+            type="button"
+            className="space-config-value"
+            onClick={toggleRootsPopover}
+            aria-expanded={rootsOpen}
+          >
+            {(() => {
+              const living = rootStatuses.filter((row) => row.exists).length;
+              const missing = rootStatuses.length - living;
+              if (!rootStatuses.length) {
+                return roots.length
+                  ? t(`${roots.length} folder(s) · click to view`, `共 ${roots.length} 处 · 点击检视`)
+                  : t("Defaults · click to view", "默认目录 · 点击检视");
+              }
+              return missing > 0
+                ? t(
+                    `${living} active · ${missing} missing (skipped)`,
+                    `${living} 处有效 · ${missing} 处不存在已跳过`,
+                  )
+                : t(`${living} active folders`, `${living} 处目录全部有效`);
+            })()}
+            <ChevronRight
+              size={12}
+              style={{ transform: rootsOpen ? "rotate(90deg)" : undefined }}
+            />
+          </button>
+          {rootsOpen ? (
+            <div className="space-roots-pop">
+              <div className="space-roots-list">
+                {(rootStatuses.length ? rootStatuses : roots.map((raw) => ({ raw, expanded: raw, exists: true }))).map(
+                  (row) => (
+                    <div
+                      className={`space-roots-row ${row.exists ? "" : "is-missing"}`}
+                      key={row.raw}
+                    >
+                      <span className="space-roots-state">
+                        {row.exists ? "✓" : "⌀"}
+                      </span>
+                      <span className="space-roots-path" title={row.expanded}>
+                        {row.expanded}
+                      </span>
+                      {!row.exists ? (
+                        <small>{t("missing · skipped", "不存在 · 跳过")}</small>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="space-roots-x"
+                        aria-label={t("Remove folder", "移除该目录")}
+                        onClick={() => void removeRoot(row.raw)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ),
+                )}
+                {roots.length === 0 ? (
+                  <p className="space-roots-empty">
+                    {t(
+                      "No folders — the built-in defaults are used.",
+                      "未设置目录，使用内置默认清单。",
+                    )}
+                  </p>
+                ) : null}
+              </div>
+              <div className="space-roots-acts">
+                <Button variant="ghost" size="sm" icon={<FolderOpen size={13} />} onClick={() => void addRoots()}>
+                  {t("Add folder", "＋ 添加目录")}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => void resetRoots()}>
+                  {t("Restore defaults", "恢复默认")}
+                </Button>
+                <small>
+                  {t(
+                    "Saved automatically; missing folders are skipped at scan time.",
+                    "改动即时保存；扫描时不存在的目录自动跳过。",
+                  )}
+                </small>
+              </div>
+            </div>
+          ) : null}
+        </span>
         <span className="space-config-label">
           {t("Older than", "仅处理早于")}
         </span>
@@ -1078,20 +1188,8 @@ export function SpacePage({
             </button>
           ))}
         </div>
-        <span className="space-config-label">
-          {t("Git-protected", "Git 保护")}
-        </span>
-        <Toggle
-          checked={!force}
-          onChange={(on) => setForce(!on)}
-          label={t("Git protection", "Git 保护")}
-        />
-        <input
-          className="space-roots-hidden"
-          value={roots}
-          onChange={(event) => setRoots(event.target.value)}
-          aria-label={t("Project folders to inspect", "要检查的项目目录")}
-        />
+        {/* Git 保护不再有开关：它永远是开着的（删前用 git 复核被跟踪的目录），
+            需要绕过时走 CLI 的 --all。 */}
       </div>
 
       {scanning ? (

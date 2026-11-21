@@ -5329,7 +5329,6 @@ select:focus-visible,
   align-items: center;
   gap: 6px;
   min-width: 0;
-  flex: 1;
   border: none;
   background: none;
   color: var(--nex-muted);
@@ -5377,6 +5376,121 @@ select:focus-visible,
   background: #fbf6ec;
   color: var(--nex-muted);
   font-size: var(--nex-text-2xs);
+}
+
+/* 深度扫描目录 checklist popover (Mole manage-screen habit). */
+.space-roots-wrap {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  flex: 1;
+}
+
+.space-roots-wrap .space-config-value {
+  flex: 1;
+}
+
+.space-roots-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: min(460px, 86vw);
+  padding: 10px 12px 12px;
+  border: 1px solid #eee1cc;
+  border-radius: 12px;
+  background: #fffdf8;
+  box-shadow: 0 12px 32px rgba(90, 60, 20, 0.16);
+}
+
+.space-roots-list {
+  display: flex;
+  max-height: 240px;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+
+.space-roots-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 7px;
+}
+
+.space-roots-row:hover {
+  background: #f8f1e2;
+}
+
+.space-roots-state {
+  flex: 0 0 auto;
+  width: 14px;
+  color: #4b8a55;
+  font-size: var(--nex-text-3xs);
+  text-align: center;
+}
+
+.space-roots-row.is-missing .space-roots-state {
+  color: #c0b49b;
+}
+
+.space-roots-path {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: #42505e;
+  font-size: var(--nex-text-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-roots-row.is-missing .space-roots-path {
+  color: #b3a688;
+  text-decoration: line-through;
+  text-decoration-color: rgba(179, 166, 136, 0.5);
+}
+
+.space-roots-row small {
+  flex: 0 0 auto;
+  color: #b3a688;
+  font-size: var(--nex-text-3xs);
+}
+
+.space-roots-x {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: #c0b49b;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.space-roots-x:hover {
+  color: #a94c52;
+}
+
+.space-roots-empty {
+  margin: 4px 0;
+  color: #909fad;
+  font-size: var(--nex-text-3xs);
+}
+
+.space-roots-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #eee1cc;
+}
+
+.space-roots-acts small {
+  margin-left: auto;
+  color: #b3a688;
+  font-size: var(--nex-text-3xs);
 }
 
 .space-stage-steps {

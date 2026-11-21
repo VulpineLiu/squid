@@ -1010,6 +1010,44 @@ pub fn stop_process(app: AppHandle, process: ProcessSample) -> Result<(), String
 
 /// Write a UTF-8 text file (B5 clean-list export; the UI picked the path
 /// through the save dialog, so this is a plain, bounded write).
+/// Existence check for the 深度扫描目录 picker: Mole's manage screen shows
+/// per-path ✓ / not-found, so the UI needs the same facts. `~` expands.
+/// Without an explicit list the persisted one is reported on.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RootStatus {
+    raw: String,
+    expanded: String,
+    exists: bool,
+}
+
+#[tauri::command]
+pub async fn roots_status(roots: Option<Vec<String>>) -> Result<Vec<RootStatus>, String> {
+    let list = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<RootStatus>, String> {
+        let list = match roots {
+            Some(list) => list,
+            None => {
+                let (settings, _) = Settings::load();
+                settings.purge_roots
+            }
+        };
+        Ok(list
+            .iter()
+            .map(|raw| {
+                let path = squid_core::paths::expand(raw);
+                RootStatus {
+                    raw: raw.clone(),
+                    expanded: squid_core::paths::pretty(&path),
+                    exists: path.is_dir(),
+                }
+            })
+            .collect())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(list)
+}
+
 #[tauri::command]
 pub async fn write_text_file(path: String, contents: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -1066,6 +1104,7 @@ pub struct SettingsPatch {
     language: Option<String>,
     show_allocated: Option<bool>,
     purge_min_age_days: Option<u64>,
+    purge_roots: Option<Vec<String>>,
     history_keep: Option<usize>,
     setup_reviewed: Option<bool>,
 }
@@ -1086,6 +1125,15 @@ pub async fn settings_save(patch: SettingsPatch) -> Result<SettingsView, String>
         }
         if let Some(days) = patch.purge_min_age_days {
             settings.purge_min_age_days = days.min(3650);
+        }
+        if let Some(roots) = patch.purge_roots {
+            // Empty list = "back to the built-in defaults", mirroring Mole's
+            // leave-the-file-blank-to-reset habit.
+            settings.purge_roots = if roots.is_empty() {
+                Settings::default().purge_roots
+            } else {
+                roots
+            };
         }
         if let Some(keep) = patch.history_keep {
             settings.history_keep = keep.clamp(5, 500);
