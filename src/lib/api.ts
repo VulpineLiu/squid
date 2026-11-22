@@ -18,6 +18,7 @@ import type {
   ScanResult,
   SettingsView,
   SecurityAction,
+  AllowKind,
   SecurityScan,
   SecuritySettings,
   SecurityStatus,
@@ -131,6 +132,12 @@ export const api = {
     invoke<SecurityAction>("security_delete_quarantine", { id }),
   securityIgnore: (findingId: string, ignored: boolean) =>
     invoke<SecurityAction>("security_ignore", { findingId, ignored }),
+  securityTrust: (
+    findingId: string,
+    scope: "publisher" | "folder" | "evidence",
+  ) => invoke<SecurityAction>("security_trust", { findingId, scope }),
+  securityUntrust: (kind: AllowKind, value: string) =>
+    invoke<SecurityAction>("security_untrust", { kind, value }),
   securityExclusions: (action: "add" | "remove", path: string) =>
     invoke<SecuritySettings>("security_exclusions", { action, path }),
   securitySettingsSave: (patch: SecurityPatch) =>

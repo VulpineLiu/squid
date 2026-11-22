@@ -69,10 +69,6 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
         <PageHeader
           eyebrow={t("Permissions", "权限管理")}
           title={t("Scanning startup and shell…", "正在扫描开机启动项与右键菜单…")}
-          description={t(
-            "Reading registry Run keys, startup folders, scheduled tasks, context menus and open windows.",
-            "正在读取注册表 Run 键、启动文件夹、计划任务、右键菜单与当前窗口。",
-          )}
         />
         <div className="perm-loading">
           <RefreshCw size={18} className="perm-spin" />
@@ -88,10 +84,6 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
         <PageHeader
           eyebrow={t("Permissions", "权限管理")}
           title={t("Startup, context menus and popups", "开机启动、右键菜单与弹窗拦截")}
-          description={t(
-            "Everything the shell runs before you ask it to.",
-            "管理系统在你开口之前就自己运行的东西。",
-          )}
         />
         <EmptyState
           icon={<ShieldCheck size={30} />}
@@ -150,10 +142,6 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
       <PageHeader
         eyebrow={t("Permissions", "权限管理")}
         title={t("Startup, context menus and popups", "开机启动、右键菜单与弹窗拦截")}
-        description={t(
-          "Everything the shell runs before you ask it to.",
-          "管理系统在你开口之前就自己运行的东西。",
-        )}
         actions={
           <Button
             variant="secondary"

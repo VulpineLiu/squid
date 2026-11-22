@@ -294,6 +294,8 @@ pub fn run() {
             security::security_restore,
             security::security_delete_quarantine,
             security::security_ignore,
+            security::security_trust,
+            security::security_untrust,
             security::security_exclusions,
             security::security_settings_save,
             security::security_update_rules,

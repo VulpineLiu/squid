@@ -185,10 +185,6 @@ export function OverviewPage({
       <PageHeader
         eyebrow={`${greeting(lang)} · ${bootstrap.osName}`}
         title={t("Your computer, at its best", "让电脑始终保持在最佳状态")}
-        description={t(
-          "One safe scan tidies clutter, space and everyday performance.",
-          "一次安全扫描，整理垃圾、空间与日常性能。",
-        )}
         actions={
           <Button
             variant="primary"

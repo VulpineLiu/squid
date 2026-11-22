@@ -90,10 +90,6 @@ export function HistoryPage() {
     <div className="page history-page">
       <PageHeader
         title={t("Every change, on the record", "每一次改动，都有记录")}
-        description={t(
-          `Review past cleanups and put files back from the ${bin} when you change your mind.`,
-          `查看过去的清理记录，改变主意时还可以从${bin}还原文件。`,
-        )}
         actions={
           <Button
             variant="secondary"

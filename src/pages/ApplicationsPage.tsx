@@ -152,10 +152,6 @@ export function ApplicationsPage({
     <div className="page apps-page">
       <PageHeader
         title={t("Uninstall completely", "卸载，干净彻底")}
-        description={t(
-          "Remove an app together with the caches, preferences and support files it leaves behind.",
-          "卸载应用，并一并处理它留下的缓存、偏好设置与支持文件。",
-        )}
         actions={
           <Button
             variant={workspace.scanned ? "secondary" : "primary"}

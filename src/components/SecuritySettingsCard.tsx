@@ -22,6 +22,13 @@ const SCHEDULES: [ScanSchedule, string, string][] = [
   ["weekly", "Weekly while Squid is in the tray", "驻留托盘时每周一次"],
 ];
 
+const EVIDENCE_LABELS: Record<string, [string, string]> = {
+  startup: ["Startup items", "登录启动项"],
+  unsigned: ["Unsigned files", "未签名文件"],
+  writable: ["Writable locations", "可写位置"],
+  missing: ["Missing targets", "目标缺失"],
+};
+
 /**
  * The security half of Settings.
  *
@@ -86,6 +93,17 @@ export function SecuritySettingsCard({
       setRulesNote(await action());
     } catch (reason) {
       setRulesNote(messageFrom(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const untrust = async (kind: "publisher" | "path" | "evidence", value: string) => {
+    setBusy(true);
+    try {
+      push(await security.untrust(kind, value), "success");
+    } catch (reason) {
+      push(messageFrom(reason), "danger");
     } finally {
       setBusy(false);
     }
@@ -281,6 +299,54 @@ export function SecuritySettingsCard({
           )}
         </div>
       </div>
+
+      {settings.allowlist.length ? (
+        <div className="settings-subsection">
+          <div className="settings-subsection-head">
+            <strong>{t("Trusted software", "已信任的软件")}</strong>
+            <span>
+              {t(
+                `${settings.allowlist.length} rules quiet ordinary advisories. Confirmed threats are never trusted.`,
+                `${settings.allowlist.length} 条规则用于静默普通提示，已确认威胁永远不会被信任。`,
+              )}
+            </span>
+          </div>
+          <div className="whitelist-list">
+            {settings.allowlist.map((entry) => (
+              <div className="whitelist-row" key={`${entry.kind}:${entry.value}`}>
+                <span className="whitelist-icon">
+                  <ShieldCheck size={15} />
+                </span>
+                <span className="allowlist-kind">
+                  {entry.kind === "publisher"
+                    ? t("Publisher", "发布者")
+                    : entry.kind === "path"
+                      ? t("Folder", "文件夹")
+                      : t("Note type", "提示类型")}
+                </span>
+                <code title={entry.value}>
+                  {entry.kind === "evidence"
+                    ? t(
+                        EVIDENCE_LABELS[entry.value]?.[0] ?? entry.value,
+                        EVIDENCE_LABELS[entry.value]?.[1] ?? entry.value,
+                      )
+                    : entry.kind === "path"
+                      ? shortPath(entry.value, 88)
+                      : entry.value}
+                </code>
+                <button
+                  className="row-reveal"
+                  aria-label={t("Stop trusting", "取消信任")}
+                  onClick={() => void untrust(entry.kind, entry.value)}
+                  disabled={busy}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {settings.ignoredFindings.length ? (
         <div className="settings-subsection">

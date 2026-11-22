@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type SecurityPatch } from "../lib/api";
 import { isCancelled, messageFrom } from "../lib/format";
-import type { JobProgress, ScanMode, SecurityStatus } from "../types";
+import type { AllowKind, JobProgress, ScanMode, SecurityStatus } from "../types";
 
 function jobId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -21,6 +21,11 @@ export interface SecurityWorkspace {
   restore: (id: string) => Promise<string>;
   purge: (id: string) => Promise<string>;
   dismiss: (findingId: string, ignored: boolean) => Promise<string>;
+  trust: (
+    findingId: string,
+    scope: "publisher" | "folder" | "evidence",
+  ) => Promise<string>;
+  untrust: (kind: AllowKind, value: string) => Promise<string>;
   exclude: (action: "add" | "remove", path: string) => Promise<string>;
   updateRules: () => Promise<string>;
   rollbackRules: () => Promise<string>;
@@ -158,6 +163,15 @@ export function useSecurityWorkspace(active: boolean): SecurityWorkspace {
     (findingId: string, ignored: boolean) => apply(() => api.securityIgnore(findingId, ignored)),
     [apply],
   );
+  const trust = useCallback(
+    (findingId: string, scope: "publisher" | "folder" | "evidence") =>
+      apply(() => api.securityTrust(findingId, scope)),
+    [apply],
+  );
+  const untrust = useCallback(
+    (kind: AllowKind, value: string) => apply(() => api.securityUntrust(kind, value)),
+    [apply],
+  );
 
   const exclude = useCallback(
     async (action: "add" | "remove", path: string) => {
@@ -203,6 +217,8 @@ export function useSecurityWorkspace(active: boolean): SecurityWorkspace {
     restore,
     purge,
     dismiss,
+    trust,
+    untrust,
     exclude,
     updateRules,
     rollbackRules,

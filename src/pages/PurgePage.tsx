@@ -42,10 +42,6 @@ export function PurgePage({
     <div className="page">
       <PageHeader
         title={t("Find the space normal cleaning misses", "找到普通清理遗漏的空间")}
-        description={t(
-          "Search projects for rebuildable build folders and dependency caches. Git history and source files are never selected.",
-          "在项目中查找可重建的构建目录与依赖缓存。Git 历史和源文件绝不会被选中。",
-        )}
         actions={
           <Button variant="primary" icon={<ScanSearch size={16} />} onClick={run}>
             {t("Start deep scan", "开始深度扫描")}

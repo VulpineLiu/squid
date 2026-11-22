@@ -14,6 +14,7 @@ use crate::app::{AppState, ProgressReporter};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use squid_core::progress::{CancelToken, Progress};
+use squid_core::settings::{AllowEntry, AllowKind};
 use squid_core::{paths, Settings};
 use squid_guard::intel::IntelStatus;
 use squid_guard::quarantine::{Quarantine, QuarantineEntry};
@@ -69,7 +70,27 @@ pub(crate) fn outstanding() -> (usize, usize, bool) {
         .map(|entry| (entry.id.clone(), entry.original_path.clone()))
         .collect();
     store.mark_quarantined(&pairs);
-    let (confirmed, suspicious, _) = store.counts();
+    let (settings, _) = Settings::load();
+    let (confirmed, suspicious, _) = store
+        .scan()
+        .map(|scan| {
+            let mut counts = (0, 0, 0);
+            for finding in &scan.findings {
+                if finding.ignored
+                    || finding.quarantined
+                    || squid_guard::allowlist::is_allowlisted(finding, &settings.security.allowlist)
+                {
+                    continue;
+                }
+                match finding.confidence {
+                    Confidence::Confirmed => counts.0 += 1,
+                    Confidence::Suspicious => counts.1 += 1,
+                    Confidence::Advisory => counts.2 += 1,
+                }
+            }
+            counts
+        })
+        .unwrap_or((0, 0, 0));
     (confirmed, suspicious, scanned)
 }
 
@@ -122,10 +143,11 @@ pub struct FindingView {
     found_at_ms: u64,
     quarantined: bool,
     ignored: bool,
+    allowlisted: bool,
 }
 
-impl From<&Finding> for FindingView {
-    fn from(finding: &Finding) -> FindingView {
+impl FindingView {
+    fn new(finding: &Finding, allowlist: &[AllowEntry]) -> FindingView {
         FindingView {
             id: finding.id.clone(),
             confidence: finding.confidence,
@@ -145,6 +167,7 @@ impl From<&Finding> for FindingView {
             found_at_ms: finding.found_at_ms,
             quarantined: finding.quarantined,
             ignored: finding.ignored,
+            allowlisted: squid_guard::allowlist::is_allowlisted(finding, allowlist),
         }
     }
 }
@@ -174,7 +197,12 @@ pub struct ScanView {
 }
 
 impl ScanView {
-    fn new(report: &ScanReport) -> ScanView {
+    fn new(report: &ScanReport, allowlist: &[AllowEntry]) -> ScanView {
+        let findings: Vec<FindingView> = report
+            .findings
+            .iter()
+            .map(|finding| FindingView::new(finding, allowlist))
+            .collect();
         ScanView {
             scan_id: report.scan_id.clone(),
             mode: report.mode.as_str().to_string(),
@@ -197,23 +225,25 @@ impl ScanView {
                         .unwrap_or_else(|| gap.outcome.as_str().into()),
                 })
                 .collect(),
-            findings: report.findings.iter().map(FindingView::from).collect(),
+            findings: findings.clone(),
             system_advisories: report
                 .system_advisories
                 .iter()
-                .map(FindingView::from)
+                .map(|finding| FindingView::new(finding, allowlist))
                 .collect(),
-            confirmed: report.confirmed(),
-            suspicious: report.suspicious(),
-            advisory: report.advisory(),
+            confirmed: count_open(&findings, Confidence::Confirmed),
+            suspicious: count_open(&findings, Confidence::Suspicious),
+            advisory: count_open(&findings, Confidence::Advisory),
             clean: report.clean_and_complete(),
         }
     }
 
-    fn from_stored(scan: &StoredScan) -> ScanView {
-        // Counted by the record itself, so the badge, the tray and this view can
-        // never disagree about what "still needs a decision" means.
-        let (confirmed, suspicious, advisory) = scan.counts();
+    fn from_stored(scan: &StoredScan, allowlist: &[AllowEntry]) -> ScanView {
+        let findings: Vec<FindingView> = scan
+            .findings
+            .iter()
+            .map(|finding| FindingView::new(finding, allowlist))
+            .collect();
         ScanView {
             scan_id: scan.scan_id.clone(),
             mode: scan.mode.clone(),
@@ -232,14 +262,26 @@ impl ScanView {
                     reason: reason.clone(),
                 })
                 .collect(),
-            findings: scan.findings.iter().map(FindingView::from).collect(),
+            confirmed: count_open(&findings, Confidence::Confirmed),
+            suspicious: count_open(&findings, Confidence::Suspicious),
+            advisory: count_open(&findings, Confidence::Advisory),
+            findings,
             system_advisories: Vec::new(),
             clean: scan.findings.is_empty() && scan.coverage_complete && !scan.cancelled,
-            confirmed,
-            suspicious,
-            advisory,
         }
     }
+}
+
+fn count_open(findings: &[FindingView], confidence: Confidence) -> usize {
+    findings
+        .iter()
+        .filter(|finding| {
+            finding.confidence == confidence
+                && !finding.ignored
+                && !finding.allowlisted
+                && !finding.quarantined
+        })
+        .count()
 }
 
 /// The security half of the settings file, in the shape the UI binds to.
@@ -252,6 +294,7 @@ pub struct SecuritySettingsView {
     update_rules: bool,
     scan_exclusions: Vec<String>,
     ignored_findings: Vec<String>,
+    allowlist: Vec<AllowEntry>,
     /// Absolute paths a scan covers, so the UI can promise only what it can show.
     quick_roots: Vec<String>,
     full_roots: Vec<String>,
@@ -269,6 +312,7 @@ impl SecuritySettingsView {
             update_rules: settings.security.update_rules,
             scan_exclusions: settings.security.scan_exclusions.clone(),
             ignored_findings: settings.security.ignored_findings.clone(),
+            allowlist: settings.security.allowlist.clone(),
             quick_roots: display_list(&squid_guard::scan::quick_roots()),
             full_roots: display_list(&squid_guard::scan::full_roots()),
             quarantined: held,
@@ -358,6 +402,7 @@ pub struct SecurityPaths {
 #[tauri::command]
 pub async fn security_status() -> Result<SecurityStatus, String> {
     tauri::async_runtime::spawn_blocking(|| {
+        let (settings, _) = Settings::load();
         let mut store = squid_guard::store::Store::new();
         let mut held = Quarantine::new();
         // The ledger, not the frontend, decides what counts as handled.
@@ -367,7 +412,9 @@ pub async fn security_status() -> Result<SecurityStatus, String> {
             .map(|entry| (entry.id.clone(), entry.original_path.clone()))
             .collect();
         store.mark_quarantined(&pairs);
-        let scan = store.scan().map(ScanView::from_stored);
+        let scan = store
+            .scan()
+            .map(|scan| ScanView::from_stored(scan, &settings.security.allowlist));
         let (confirmed, suspicious) = scan
             .as_ref()
             .map(|view| (view.confirmed, view.suspicious))
@@ -561,8 +608,8 @@ fn run_scan(
     // has the ledger folded into it.
     Ok(store
         .scan()
-        .map(ScanView::from_stored)
-        .unwrap_or_else(|| ScanView::new(&report)))
+        .map(|scan| ScanView::from_stored(scan, &settings.security.allowlist))
+        .unwrap_or_else(|| ScanView::new(&report, &settings.security.allowlist)))
 }
 
 /// Everything that follows a finished scan once the ledger has been folded in:
@@ -739,6 +786,184 @@ pub async fn security_ignore(finding_id: String, ignored: bool) -> Result<Action
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+/// Trust one piece of software so its ordinary advisories stop asking for a
+/// decision. The frontend names a finding and a scope; the path and publisher
+/// come from the stored scan, not from the webview.
+#[tauri::command]
+pub async fn security_trust(finding_id: String, scope: String) -> Result<ActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let finding = {
+            let store = squid_guard::store::Store::new();
+            store
+                .finding(&finding_id)
+                .cloned()
+                .ok_or_else(|| "This finding is no longer in the last scan.".to_string())?
+        };
+        let entry = trust_entry_for(&finding, &scope)?;
+        let message = match entry.kind {
+            AllowKind::Publisher => format!("Trusted publisher {}", entry.value),
+            AllowKind::Path => format!("Trusted {}", paths::pretty(&paths::expand(&entry.value))),
+            AllowKind::Evidence => format!("No longer reporting {} advisories", entry.value),
+        };
+        let (mut settings, _) = Settings::load();
+        settings.security.allow(entry.kind, entry.value);
+        settings
+            .save()
+            .map_err(|error| format!("Could not save settings: {error}"))?;
+        let mut store = squid_guard::store::Store::new();
+        store.note("trust", message.clone(), finding.path.clone());
+        Ok(ActionResult {
+            message,
+            status: status_now(),
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Remove a trust rule. The next status is rebuilt from the stored scan, so the
+/// findings it covered become actionable again without waiting for a rescan.
+#[tauri::command]
+pub async fn security_untrust(kind: String, value: String) -> Result<ActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let kind =
+            AllowKind::parse(&kind).ok_or_else(|| format!("Unknown trust rule kind {kind}."))?;
+        let (mut settings, _) = Settings::load();
+        if !settings.security.remove_allow(kind, value.trim()) {
+            return Err("That trust rule was not present.".into());
+        }
+        settings
+            .save()
+            .map_err(|error| format!("Could not save settings: {error}"))?;
+        Ok(ActionResult {
+            message: "This software will be reported again.".into(),
+            status: status_now(),
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn trust_entry_for(finding: &Finding, scope: &str) -> Result<AllowEntry, String> {
+    if finding.confidence == Confidence::Confirmed {
+        return Err("Confirmed threats cannot be trusted.".into());
+    }
+    match scope {
+        "publisher" => {
+            let publisher = finding
+                .signed
+                .then_some(finding.publisher.as_deref())
+                .flatten()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "This finding has no verified publisher to trust.".to_string())?;
+            Ok(AllowEntry {
+                kind: AllowKind::Publisher,
+                value: publisher.to_string(),
+            })
+        }
+        "folder" => {
+            let path = finding
+                .path
+                .as_deref()
+                .ok_or_else(|| "This finding has no file to trust.".to_string())?;
+            let root = trust_root(path).ok_or_else(|| {
+                "This file is too close to a broad system folder to trust by path.".to_string()
+            })?;
+            Ok(AllowEntry {
+                kind: AllowKind::Path,
+                value: root.to_string_lossy().into_owned(),
+            })
+        }
+        "evidence" => {
+            if finding.confidence != Confidence::Advisory {
+                return Err("Only advisory notes can be hidden by type.".into());
+            }
+            let mut kinds: Vec<&str> = finding
+                .evidence
+                .iter()
+                .filter_map(squid_guard::allowlist::evidence_kind)
+                .collect();
+            kinds.sort_unstable();
+            kinds.dedup();
+            match kinds.as_slice() {
+                [kind] => Ok(AllowEntry {
+                    kind: AllowKind::Evidence,
+                    value: (*kind).to_string(),
+                }),
+                [] => Err("This finding has no trustable advisory class.".into()),
+                _ => Err(
+                    "This finding has several advisory classes; trust its folder or publisher instead."
+                        .into(),
+                ),
+            }
+        }
+        other => Err(format!("Unknown trust scope {other}.")),
+    }
+}
+
+/// The app bundle when there is one, otherwise the containing folder. Broad
+/// folders are refused: one click must not trust every app on the machine.
+fn trust_root(path: &std::path::Path) -> Option<PathBuf> {
+    let mut bundle = None;
+    let mut prefix = PathBuf::new();
+    for component in path.components() {
+        prefix.push(component.as_os_str());
+        if component
+            .as_os_str()
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .ends_with(".app")
+        {
+            bundle = Some(prefix.clone());
+        }
+    }
+    let root = bundle.or_else(|| path.parent().map(std::path::Path::to_path_buf))?;
+    if paths::is_root_like(&root) {
+        return None;
+    }
+    let home = squid_platform::startup::home_dir();
+    let mut broad = vec![
+        home.clone(),
+        home.join("Applications"),
+        home.join("Desktop"),
+        home.join("Documents"),
+        home.join("Downloads"),
+        home.join("Library"),
+        home.join("Library/Application Support"),
+        home.join("Library/Caches"),
+        home.join("Library/LaunchAgents"),
+        home.join("Library/LaunchDaemons"),
+        home.join("Library/Preferences"),
+        PathBuf::from("/Applications"),
+        PathBuf::from("/Library"),
+        PathBuf::from("/Library/Application Support"),
+        PathBuf::from("/Library/LaunchAgents"),
+        PathBuf::from("/Library/LaunchDaemons"),
+        PathBuf::from("/Users/Shared"),
+        PathBuf::from("/System"),
+        PathBuf::from("/usr"),
+        PathBuf::from("/private"),
+        PathBuf::from("/tmp"),
+        PathBuf::from("/var"),
+    ];
+    for key in [
+        "LOCALAPPDATA",
+        "APPDATA",
+        "ProgramData",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+    ] {
+        if let Some(path) = std::env::var_os(key) {
+            broad.push(PathBuf::from(path));
+        }
+    }
+    if broad.iter().any(|broad| paths::same_path(broad, &root)) {
+        return None;
+    }
+    Some(root)
 }
 
 /// Add or drop a scan exclusion. Separate from the cleanup whitelist on purpose,
@@ -1032,7 +1257,7 @@ pub fn last_scan_label() -> Option<String> {
 mod tests {
     use super::*;
     use squid_guard::findings::Evidence;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn finding(id: &str, confidence: Confidence, ignored: bool, quarantined: bool) -> Finding {
         Finding {
@@ -1078,12 +1303,15 @@ mod tests {
         // The tray badge and the page must agree, and both must stop counting a
         // file that has been quarantined or ignored. Otherwise "3 issues found"
         // follows a user who has already handled all three.
-        let view = ScanView::from_stored(&scan_with(vec![
-            finding("confirmed-open", Confidence::Confirmed, false, false),
-            finding("confirmed-held", Confidence::Confirmed, false, true),
-            finding("confirmed-dismissed", Confidence::Confirmed, true, false),
-            finding("suspicious-open", Confidence::Suspicious, false, false),
-        ]));
+        let view = ScanView::from_stored(
+            &scan_with(vec![
+                finding("confirmed-open", Confidence::Confirmed, false, false),
+                finding("confirmed-held", Confidence::Confirmed, false, true),
+                finding("confirmed-dismissed", Confidence::Confirmed, true, false),
+                finding("suspicious-open", Confidence::Suspicious, false, false),
+            ]),
+            &[],
+        );
         assert_eq!(
             view.confirmed, 1,
             "only the unhandled confirmed finding counts"
@@ -1098,17 +1326,66 @@ mod tests {
     #[test]
     fn a_scan_with_gaps_is_never_called_clean() {
         let mut stored = scan_with(Vec::new());
-        assert!(ScanView::from_stored(&stored).clean);
+        assert!(ScanView::from_stored(&stored, &[]).clean);
         stored.coverage_complete = false;
         stored.gaps = vec![("/protected".into(), "permission denied".into())];
-        let view = ScanView::from_stored(&stored);
+        let view = ScanView::from_stored(&stored, &[]);
         assert!(
             !view.clean,
             "an unreadable folder is not the same as a clean one"
         );
         assert_eq!(view.gaps.len(), 1);
         stored.cancelled = true;
-        assert!(!ScanView::from_stored(&stored).clean);
+        assert!(!ScanView::from_stored(&stored, &[]).clean);
+    }
+
+    #[test]
+    fn a_trusted_finding_stops_counting_without_hiding_confirmed_ones() {
+        let stored = scan_with(vec![
+            finding("advisory-trusted", Confidence::Advisory, false, false),
+            finding("confirmed-trusted", Confidence::Confirmed, false, false),
+        ]);
+        let allowlist = vec![AllowEntry {
+            kind: AllowKind::Path,
+            value: "/tmp".into(),
+        }];
+        let view = ScanView::from_stored(&stored, &allowlist);
+        assert_eq!(view.advisory, 0, "the trusted advisory is handled");
+        assert_eq!(
+            view.confirmed, 1,
+            "a confirmed finding is never hidden by trust"
+        );
+        assert_eq!(
+            view.findings
+                .iter()
+                .filter(|finding| finding.allowlisted)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn trust_by_path_stops_at_the_bundle_and_refuses_broad_folders() {
+        assert_eq!(
+            trust_root(Path::new(
+                "/Applications/Example.app/Contents/MacOS/Example"
+            )),
+            Some(PathBuf::from("/Applications/Example.app"))
+        );
+        assert_eq!(
+            trust_root(Path::new("/Applications")),
+            None,
+            "one click must not trust every app"
+        );
+        assert_eq!(trust_root(Path::new("/tmp/example")), None);
+    }
+
+    #[test]
+    fn trust_refuses_confirmed_findings_and_suspicious_evidence_rules() {
+        let confirmed = finding("confirmed", Confidence::Confirmed, false, false);
+        assert!(trust_entry_for(&confirmed, "folder").is_err());
+        let suspicious = finding("suspicious", Confidence::Suspicious, false, false);
+        assert!(trust_entry_for(&suspicious, "evidence").is_err());
     }
 
     #[test]

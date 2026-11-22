@@ -19,10 +19,6 @@ export function CleanupPage({
     <div className="page cleanup-page">
       <PageHeader
         title={t("Clutter, without the guesswork", "清理垃圾，不靠猜")}
-        description={t(
-          "Rebuildable caches, old logs and other safe-to-remove files — always reviewed before deletion.",
-          "可重建缓存、旧日志与其他可安全删除的文件，删除前始终由您确认。",
-        )}
         actions={
           workspace.result ? (
             <Button

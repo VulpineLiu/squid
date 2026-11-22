@@ -106,6 +106,10 @@ pub struct SecuritySettings {
     pub scan_exclusions: Vec<String>,
     /// Findings the user dismissed, as `confidence|path` fingerprints.
     pub ignored_findings: Vec<String>,
+    /// Software the user trusts. Matching findings stay visible in the trusted
+    /// filter but stop counting as outstanding. Confirmed threats are never
+    /// matched, whatever is in here.
+    pub allowlist: Vec<AllowEntry>,
 }
 
 impl Default for SecuritySettings {
@@ -119,6 +123,7 @@ impl Default for SecuritySettings {
             update_rules: true,
             scan_exclusions: Vec::new(),
             ignored_findings: Vec::new(),
+            allowlist: Vec::new(),
         }
     }
 }
@@ -161,6 +166,55 @@ impl SecuritySettings {
         self.ignored_findings.retain(|kept| kept != fingerprint);
         self.ignored_findings.len() != before
     }
+
+    pub fn allow(&mut self, kind: AllowKind, value: impl Into<String>) -> bool {
+        let value = value.into().trim().to_string();
+        if value.is_empty() {
+            return false;
+        }
+        if self
+            .allowlist
+            .iter()
+            .any(|entry| entry.kind == kind && entry.value.eq_ignore_ascii_case(&value))
+        {
+            return false;
+        }
+        self.allowlist.push(AllowEntry { kind, value });
+        true
+    }
+
+    pub fn remove_allow(&mut self, kind: AllowKind, value: &str) -> bool {
+        let before = self.allowlist.len();
+        self.allowlist
+            .retain(|entry| !(entry.kind == kind && entry.value.eq_ignore_ascii_case(value)));
+        self.allowlist.len() != before
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AllowKind {
+    Publisher,
+    Path,
+    Evidence,
+}
+
+impl AllowKind {
+    pub fn parse(value: &str) -> Option<AllowKind> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "publisher" => Some(AllowKind::Publisher),
+            "path" | "folder" => Some(AllowKind::Path),
+            "evidence" | "kind" => Some(AllowKind::Evidence),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AllowEntry {
+    pub kind: AllowKind,
+    pub value: String,
 }
 
 impl Default for Settings {
@@ -644,5 +698,17 @@ mod tests {
         let older = "history_keep = 60\n";
         let restored: Settings = toml::from_str(older).unwrap();
         assert!(!restored.desktop_setup_reviewed);
+        assert!(restored.security.allowlist.is_empty());
+    }
+
+    #[test]
+    fn trust_rules_are_deduplicated_and_removable() {
+        let mut security = SecuritySettings::default();
+        assert!(security.allow(AllowKind::Publisher, " Example Ltd "));
+        assert!(!security.allow(AllowKind::Publisher, "example ltd"));
+        assert!(security.allow(AllowKind::Path, "/Applications/Example.app"));
+        assert_eq!(security.allowlist.len(), 2);
+        assert!(security.remove_allow(AllowKind::Publisher, "EXAMPLE LTD"));
+        assert_eq!(security.allowlist.len(), 1);
     }
 }

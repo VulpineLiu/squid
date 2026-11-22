@@ -196,10 +196,6 @@ export function SettingsPage({
     <div className="page settings-page">
       <PageHeader
         title={t("Make Squid yours", "按您的方式使用 Squid")}
-        description={t(
-          "Language, cleanup rules, protection and updates.",
-          "语言、清理规则、保护与更新。",
-        )}
       />
 
       {error ? <InlineError message={error} onDismiss={() => setError(null)} /> : null}

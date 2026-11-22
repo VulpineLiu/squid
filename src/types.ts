@@ -351,6 +351,7 @@ export interface Finding {
   foundAtMs: number;
   quarantined: boolean;
   ignored: boolean;
+  allowlisted: boolean;
 }
 
 export interface ScanGap {
@@ -431,9 +432,17 @@ export interface SecuritySettings {
   updateRules: boolean;
   scanExclusions: string[];
   ignoredFindings: string[];
+  allowlist: AllowEntry[];
   quickRoots: string[];
   fullRoots: string[];
   quarantined: string[];
+}
+
+export type AllowKind = "publisher" | "path" | "evidence";
+
+export interface AllowEntry {
+  kind: AllowKind;
+  value: string;
 }
 
 export interface SecurityStatus {

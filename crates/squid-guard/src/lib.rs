@@ -24,6 +24,7 @@
 //! - heuristics answer "would a careful person look at this twice"
 //!   (`suspicious`/`advisory`) and never quarantine on their own.
 
+pub mod allowlist;
 pub mod coverage;
 pub mod findings;
 pub mod heuristics;

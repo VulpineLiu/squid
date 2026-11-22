@@ -1,11 +1,13 @@
 import {
   AlertTriangle,
   Ban,
+  BadgeCheck,
   CheckCircle2,
   Download,
   Eye,
   EyeOff,
   FolderOpen,
+  FolderCheck,
   FolderSearch,
   FolderX,
   HardDriveDownload,
@@ -16,7 +18,7 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
@@ -35,13 +37,30 @@ import {
   useToast,
 } from "../components/ui";
 
-type Filter = "all" | Confidence | "quarantined";
+type Filter = "all" | Confidence | "quarantined" | "trusted";
 
 const CONFIDENCE_META: Record<Confidence, { tone: string; en: string; zh: string }> = {
   confirmed: { tone: "danger", en: "Confirmed", zh: "已确认" },
   suspicious: { tone: "warning", en: "Suspicious", zh: "可疑" },
   advisory: { tone: "neutral", en: "Advisory", zh: "提示" },
 };
+
+const TRUSTABLE_EVIDENCE = new Set(["startup", "unsigned", "writable", "missing"]);
+
+const EVIDENCE_TRUST_LABELS: Record<string, [string, string]> = {
+  startup: ["Hide all startup notes", "隐藏所有登录启动提示"],
+  unsigned: ["Hide all unsigned notes", "隐藏所有未签名提示"],
+  writable: ["Hide all writable-location notes", "隐藏所有可写位置提示"],
+  missing: ["Hide all missing-target notes", "隐藏所有目标缺失提示"],
+};
+
+function trustableEvidenceKey(finding: Finding): string | null {
+  if (finding.confidence !== "advisory") return null;
+  const kinds = new Set(finding.evidence.map((item) => item.key.split(":")[0]));
+  if (kinds.size !== 1) return null;
+  const [kind] = [...kinds];
+  return TRUSTABLE_EVIDENCE.has(kind) ? kind : null;
+}
 
 /**
  * Security: what protects this machine, what squid found, and what it is holding.
@@ -71,9 +90,17 @@ export function SecurityPage({
 
   const findings = useMemo(() => {
     const all = scan?.findings ?? [];
-    if (filter === "all") return all.filter((finding) => !finding.ignored);
+    if (filter === "all") {
+      return all.filter((finding) => !finding.ignored && !finding.allowlisted);
+    }
+    if (filter === "trusted") {
+      return all.filter((finding) => !finding.ignored && finding.allowlisted);
+    }
     if (filter === "quarantined") return all.filter((finding) => finding.quarantined);
-    return all.filter((finding) => finding.confidence === filter && !finding.ignored);
+    return all.filter(
+      (finding) =>
+        finding.confidence === filter && !finding.ignored && !finding.allowlisted,
+    );
   }, [filter, scan]);
 
   /**
@@ -84,15 +111,31 @@ export function SecurityPage({
    */
   const counts = useMemo(() => {
     const all = scan?.findings ?? [];
-    const open = all.filter((finding) => !finding.ignored);
+    const open = all.filter((finding) => !finding.ignored && !finding.allowlisted);
     return {
       all: open.length,
       confirmed: open.filter((f) => f.confidence === "confirmed").length,
       suspicious: open.filter((f) => f.confidence === "suspicious").length,
       advisory: open.filter((f) => f.confidence === "advisory").length,
       quarantined: all.filter((f) => f.quarantined).length,
+      trusted: all.filter((f) => !f.ignored && f.allowlisted).length,
     };
   }, [scan]);
+
+  const filterOptions: [Filter, string, number][] = [
+    ["all", t("All", "全部"), counts.all],
+    ["confirmed", t("Confirmed", "已确认"), counts.confirmed],
+    ["suspicious", t("Suspicious", "可疑"), counts.suspicious],
+    ["advisory", t("Advisory", "提示"), counts.advisory],
+    ["quarantined", t("Quarantined", "已隔离"), counts.quarantined],
+  ];
+  if (counts.trusted > 0) {
+    filterOptions.push(["trusted", t("Trusted", "已信任"), counts.trusted]);
+  }
+
+  useEffect(() => {
+    if (filter === "trusted" && counts.trusted === 0) setFilter("all");
+  }, [counts.trusted, filter]);
 
   const run = async (mode: "quick" | "full") => {
     try {
@@ -130,15 +173,17 @@ export function SecurityPage({
     }
   };
 
+  const trust = (finding: Finding, scope: "publisher" | "folder" | "evidence") => {
+    setDetail(null);
+    void act(() => security.trust(finding.id, scope));
+  };
+  const detailEvidence = detail ? trustableEvidenceKey(detail) : null;
+
   if (!status) {
     return (
       <div className="page is-stacked">
         <PageHeader
           title={t("Checking this machine…", "正在检查这台电脑…")}
-          description={t(
-            "Reading what protects the machine and what ran at the last login.",
-            "正在读取系统防护状态与上次的启动项。",
-          )}
         />
         {security.error ? <InlineError message={security.error} /> : null}
       </div>
@@ -153,10 +198,6 @@ export function SecurityPage({
             ? t("The last scan, and what to do about it", "上次扫描的结果，以及下一步")
             : t("Nothing has been scanned yet", "还没有扫描过这台电脑")
         }
-        description={t(
-          "Scans run when you ask. Real-time protection stays with the system.",
-          "扫描只在你要求时运行，实时防护仍由系统负责。",
-        )}
         actions={
           <>
             <Button
@@ -217,15 +258,7 @@ export function SecurityPage({
           action={
             scan ? (
               <div className="chip-row" role="tablist">
-                {(
-                  [
-                    ["all", t("All", "全部"), counts.all],
-                    ["confirmed", t("Confirmed", "已确认"), counts.confirmed],
-                    ["suspicious", t("Suspicious", "可疑"), counts.suspicious],
-                    ["advisory", t("Advisory", "提示"), counts.advisory],
-                    ["quarantined", t("Quarantined", "已隔离"), counts.quarantined],
-                  ] as [Filter, string, number][]
-                ).map(([key, label, count]) => (
+                {filterOptions.map(([key, label, count]) => (
                   <button
                     key={key}
                     role="tab"
@@ -250,20 +283,29 @@ export function SecurityPage({
           <EmptyState
             icon={<CheckCircle2 size={26} />}
             title={
-              scan.coverageComplete
-                ? t("Nothing found in the range this scan covers", "在已检查范围内未发现威胁")
-                : t("Nothing found in what could be read", "在可读取范围内未发现威胁")
+              filter === "trusted"
+                ? t("Nothing is trusted yet", "尚未信任任何软件")
+                : counts.trusted > 0
+                  ? t("No untrusted findings", "没有未信任的发现")
+                  : scan.coverageComplete
+                    ? t("Nothing found in the range this scan covers", "在已检查范围内未发现威胁")
+                    : t("Nothing found in what could be read", "在可读取范围内未发现威胁")
             }
             description={
-              scan.coverageComplete
+              counts.trusted > 0
                 ? t(
-                    "Files the scan never opened are listed in the coverage card above.",
-                    "未检查的范围见上方覆盖说明。",
+                    `${counts.trusted} trusted items are hidden here. Manage them under Settings → Security.`,
+                    `${counts.trusted} 项已信任内容已隐藏，可在“设置 → 安全”中管理。`,
                   )
-                : t(
-                    "Part of this scan could not be read. See the coverage card above.",
-                    "本次扫描有部分目录无法读取，请查看上方覆盖范围。",
-                  )
+                : scan.coverageComplete
+                  ? t(
+                      "Files the scan never opened are listed in the coverage card above.",
+                      "未检查的范围见上方覆盖说明。",
+                    )
+                  : t(
+                      "Part of this scan could not be read. See the coverage card above.",
+                      "本次扫描有部分目录无法读取，请查看上方覆盖范围。",
+                    )
             }
           />
         ) : (
@@ -276,6 +318,7 @@ export function SecurityPage({
                 onOpen={() => setDetail(finding)}
                 onQuarantine={() => setQuarantining(finding)}
                 onDismiss={(ignored) => void act(() => security.dismiss(finding.id, ignored))}
+                onTrust={() => trust(finding, "folder")}
                 onExclude={() =>
                   finding.path &&
                   void act(() => security.exclude("add", parentFolder(finding.path as string)))
@@ -308,16 +351,62 @@ export function SecurityPage({
         title={detail?.name ?? ""}
         subtitle={detail?.displayPath ?? undefined}
         footer={
-          detail && !detail.quarantined && detail.confidence === "confirmed" ? (
-            <Button
-              variant="danger"
-              onClick={() => {
-                setDetail(null);
-                setQuarantining(detail);
-              }}
-            >
-              {t("Move to quarantine", "移入隔离区")}
-            </Button>
+          detail && !detail.quarantined && !detail.allowlisted ? (
+            <div className="detail-actions">
+              {!detail.allowlisted && detail.confidence !== "confirmed" ? (
+                <>
+                  {detail.signed && detail.publisher ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<ShieldCheck size={14} />}
+                      disabled={busy}
+                      onClick={() => trust(detail, "publisher")}
+                    >
+                      {t("Trust publisher", "信任发布者")}
+                    </Button>
+                  ) : null}
+                  {detail.path ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<FolderCheck size={14} />}
+                      disabled={busy}
+                      onClick={() => trust(detail, "folder")}
+                    >
+                      {t("Trust folder", "信任文件夹")}
+                    </Button>
+                  ) : null}
+                  {detailEvidence ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<BadgeCheck size={14} />}
+                      disabled={busy}
+                      onClick={() => trust(detail, "evidence")}
+                    >
+                      {t(
+                        EVIDENCE_TRUST_LABELS[detailEvidence]?.[0] ??
+                          "Hide this type",
+                        EVIDENCE_TRUST_LABELS[detailEvidence]?.[1] ??
+                          "隐藏此类提示",
+                      )}
+                    </Button>
+                  ) : null}
+                </>
+              ) : null}
+              {!detail.quarantined && detail.confidence === "confirmed" ? (
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    setDetail(null);
+                    setQuarantining(detail);
+                  }}
+                >
+                  {t("Move to quarantine", "移入隔离区")}
+                </Button>
+              ) : null}
+            </div>
           ) : null
         }
       >
@@ -698,6 +787,7 @@ function FindingRow({
   onOpen,
   onQuarantine,
   onDismiss,
+  onTrust,
   onExclude,
   onReveal,
 }: {
@@ -706,13 +796,18 @@ function FindingRow({
   onOpen: () => void;
   onQuarantine: () => void;
   onDismiss: (ignored: boolean) => void;
+  onTrust: () => void;
   onExclude: () => void;
   onReveal: () => void;
 }) {
   const { t } = useI18n();
   const meta = CONFIDENCE_META[finding.confidence];
   return (
-    <li className={`item-row is-${meta.tone} ${finding.quarantined ? "is-handled" : ""}`}>
+    <li
+      className={`item-row is-${meta.tone} ${
+        finding.quarantined || finding.allowlisted ? "is-handled" : ""
+      }`}
+    >
       <button className="item-main" onClick={onOpen}>
         <span className="item-copy">
           <strong>{finding.name}</strong>
@@ -722,8 +817,8 @@ function FindingRow({
           <em>{finding.title}</em>
         </span>
       </button>
-      <span className={`status-chip is-${meta.tone}`}>
-        {t(meta.en, meta.zh)}
+      <span className={`status-chip is-${finding.allowlisted ? "neutral" : meta.tone}`}>
+        {finding.allowlisted ? t("Trusted", "已信任") : t(meta.en, meta.zh)}
         {finding.quarantined ? ` · ${t("held", "已隔离")}` : ""}
       </span>
       <div className="item-actions">
@@ -736,8 +831,17 @@ function FindingRow({
             <FolderOpen size={15} />
           </button>
         ) : null}
-        {finding.quarantined ? null : (
+        {finding.quarantined || finding.allowlisted ? null : (
           <>
+            {finding.confidence !== "confirmed" && finding.path ? (
+              <button
+                className="icon-button"
+                title={t("Trust this app or folder", "信任此应用或文件夹")}
+                onClick={onTrust}
+              >
+                <FolderCheck size={15} />
+              </button>
+            ) : null}
             <button
               className="icon-button"
               title={t("Ignore this finding", "忽略此发现")}
