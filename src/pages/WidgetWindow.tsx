@@ -111,8 +111,10 @@ export function WidgetWindow() {
         void windowRef.current
           ?.setSize(new LogicalSize(350, height))
           .then(() => {
-            // Keep the docked corner anchored after the size change.
-            if (!lastPos.current) void api.widgetSet({ redock: true }).catch(() => undefined);
+            // Keep the widget anchored after the size change: redock runs
+            // the backend maths, which re-corners a corner-docked widget and
+            // keeps (clamped) a remembered drag spot — correct in both modes.
+            void api.widgetSet({ redock: true }).catch(() => undefined);
           })
           .catch(() => {
             lastFit.current = 0;
@@ -133,16 +135,32 @@ export function WidgetWindow() {
     patch({ collapsed: !collapsed });
   };
 
-  // Persist a dragged position after the pointer settles (the header is a
-  // native drag region, so poll once shortly after mouseup).
+  // Persist a *real* drag after the pointer settles (the header is a native
+  // drag region, so poll once shortly after mouseup). Mere clicks must not
+  // pin the position: seed lastPos with the true current spot on mount, and
+  // only persist once the window has actually moved (≥5 px). An earlier bug
+  // let a click right after an RDP re-layout save the drifted mid-screen
+  // spot as "the user's chosen position" forever.
   useEffect(() => {
+    void windowRef.current
+      ?.outerPosition()
+      .then((position) => {
+        lastPos.current = position;
+      })
+      .catch(() => undefined);
     const onUp = () => {
       window.setTimeout(() => {
         void windowRef.current
           ?.outerPosition()
           .then((position) => {
             const previous = lastPos.current;
-            if (previous && previous.x === position.x && previous.y === position.y) return;
+            if (
+              previous &&
+              Math.abs(previous.x - position.x) < 5 &&
+              Math.abs(previous.y - position.y) < 5
+            ) {
+              return;
+            }
             lastPos.current = position;
             patch({ position: [position.x, position.y], keepPosition: true });
           })

@@ -61,6 +61,94 @@ mod desktop_layer {
     const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOACTIVATE: u32 = 0x0010;
     const DWMWA_CLOAKED: u32 = 14;
+    const MONITOR_DEFAULTTOPRIMARY: u32 = 1;
+
+    #[repr(C)]
+    struct WinRect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+    #[repr(C)]
+    struct MonitorInfo {
+        cb_size: u32,
+        monitor: WinRect,
+        work: WinRect,
+        flags: u32,
+    }
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetWindowRect(hwnd: *mut c_void, rect: *mut WinRect) -> i32;
+        fn MonitorFromWindow(hwnd: *mut c_void, flags: u32) -> *mut c_void;
+        fn GetMonitorInfoW(monitor: *mut c_void, info: *mut MonitorInfo) -> i32;
+    }
+
+    /// (left, top, right, bottom) of the monitor this window sits on — in
+    /// true physical pixels, bypassing every DPI translation the webview
+    /// stack applies. (The Tauri `primary_monitor`/`outer_position` pair
+    /// disagrees with Win32 by the scale factor on a 150% display, which is
+    /// what let a mid-screen parking spot read as "correctly docked".)
+    pub fn monitor_rect(hwnd: *mut c_void) -> Option<(i32, i32, i32, i32)> {
+        // SAFETY: plain queries; the MONITORINFO carries its own size.
+        let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY) };
+        if monitor.is_null() {
+            return None;
+        }
+        let mut info = MonitorInfo {
+            cb_size: std::mem::size_of::<MonitorInfo>() as u32,
+            monitor: WinRect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            work: WinRect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            flags: 0,
+        };
+        if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+            return None;
+        }
+        Some((
+            info.monitor.left,
+            info.monitor.top,
+            info.monitor.right,
+            info.monitor.bottom,
+        ))
+    }
+
+    /// (x, y, width, height) of the window in physical pixels.
+    pub fn window_rect(hwnd: *mut c_void) -> Option<(i32, i32, i32, i32)> {
+        let mut rect = WinRect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        // SAFETY: plain query on a live handle.
+        if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+            return None;
+        }
+        Some((
+            rect.left,
+            rect.top,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+        ))
+    }
+
+    /// Move (keep size) and re-park on the desktop layer in one call.
+    pub fn move_to(hwnd: *mut c_void, x: i32, y: i32) {
+        // SAFETY: z-order/position edit only; NOACTIVATE keeps focus away.
+        unsafe {
+            SetWindowPos(hwnd, HWND_BOTTOM, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
 
     pub fn lower(hwnd: *mut c_void) {
         // SAFETY: hwnd comes from Tauri's own window handle; SetWindowPos with
@@ -173,19 +261,19 @@ pub fn spawn_desktop_watch(app: &AppHandle) {
             let Ok(hwnd) = window.hwnd() else { continue };
             let raw: *mut std::ffi::c_void = hwnd.0.cast();
             // ── position guard ────────────────────────────────────────────
-            let position = window.outer_position().ok().map(|p| (p.x, p.y));
-            if let Some(pos) = position {
-                if last_pos != Some(pos) {
+            if let Some((x, y, w, h)) = desktop_layer::window_rect(raw) {
+                if last_pos != Some((x, y)) {
                     // The window just moved: someone (the user, most likely)
                     // is working on it. Re-check shortly instead of yanking
                     // it mid-drag; the loop's cadence doubles as the grace.
-                    last_pos = Some(pos);
+                    last_pos = Some((x, y));
                     grace = std::time::Instant::now() + std::time::Duration::from_millis(3_500);
                 } else if std::time::Instant::now() >= grace {
-                    let settled = is_settled(&window, &prefs);
-                    if !settled {
-                        place_window(&app, &prefs);
-                        desktop_layer::lower(raw);
+                    if let Some(monitor) = desktop_layer::monitor_rect(raw) {
+                        let want = dock_point(monitor, (w, h), &prefs);
+                        if (x - want.0).abs() > 2 || (y - want.1).abs() > 2 {
+                            desktop_layer::move_to(raw, want.0, want.1);
+                        }
                     }
                 }
             }
@@ -207,25 +295,6 @@ pub fn spawn_desktop_watch(app: &AppHandle) {
             }
         }
     });
-}
-
-/// Whether the widget currently sits where the prefs say it belongs
-/// (tolerating a couple of pixels of DPI rounding). False when the geometry
-/// cannot be queried — a failed query re-docks rather than strands.
-#[cfg(windows)]
-fn is_settled(window: &tauri::WebviewWindow, prefs: &WidgetPrefs) -> bool {
-    let Ok(Some(monitor)) = window.primary_monitor() else {
-        return false;
-    };
-    let Ok(pos) = window.outer_position() else {
-        return false;
-    };
-    let outer = window
-        .outer_size()
-        .map(|s| (s.width as i32, s.height as i32))
-        .unwrap_or((350, 620));
-    let want = dock_position((monitor.size().width, monitor.size().height), outer, prefs);
-    (pos.x - want.0).abs() <= 2 && (pos.y - want.1).abs() <= 2
 }
 
 #[cfg(not(windows))]
@@ -261,6 +330,15 @@ pub struct WidgetPrefs {
     pub collapsed: bool,
     /// Last user-dragged position; None re-docks to `corner`.
     pub position: Option<(i32, i32)>,
+    /// Docking scheme generation. Pre-0.1.12 builds persisted drag positions
+    /// and docked corners in spaces that disagreed (and an RDP session's
+    /// small-screen numbers survive as "valid" mid-desktop spots on a big
+    /// display). The first 0.1.12 boot drops the remembered spot once and
+    /// sets this flag; corner docking becomes deterministic again, and every
+    /// drag stored from then on is honoured in the same physical space the
+    /// guard measures.
+    #[serde(default)]
+    pub dock_v2: bool,
 }
 
 impl Default for WidgetPrefs {
@@ -278,6 +356,7 @@ impl Default for WidgetPrefs {
             remember_collapsed: true,
             collapsed: false,
             position: None,
+            dock_v2: true,
         }
     }
 }
@@ -346,36 +425,89 @@ fn save_prefs(state: &WidgetState) -> Result<(), String> {
     fs::write(path, text).map_err(|error| error.to_string())
 }
 
-/// Where the widget belongs on a screen of `screen` pixels, all in physical
-/// pixels: the remembered drag position clamped into the monitor (an
-/// unplugged-secondary position can not hide it off-screen), or the
-/// configured corner. Pure so the re-dock maths stays testable headless.
-fn dock_position(screen: (u32, u32), outer: (i32, i32), prefs: &WidgetPrefs) -> (i32, i32) {
-    let margin = 16;
+/// Where the widget belongs on a monitor rect `(left, top, right, bottom)`
+/// of physical screen pixels — the same space Win32 `GetWindowRect` and the
+/// persisted drag position (`outerPosition`, Tauri "physical") live in, so
+/// the heartbeat compares like with like. A remembered drag position is
+/// clamped onto the monitor (an unplugged-secondary position can not hide
+/// it off-screen); otherwise the configured corner + a margin (24 physical
+/// px ≈ the old 16 logical px at 150% scale). Pure so the re-dock maths
+/// stays testable headless.
+fn dock_point(monitor: (i32, i32, i32, i32), size: (i32, i32), prefs: &WidgetPrefs) -> (i32, i32) {
+    let margin = 24;
+    let (left, top, right, bottom) = monitor;
     if let Some((x, y)) = prefs.position {
         (
-            x.clamp(0, (screen.0 as i32 - outer.0).max(0)),
-            y.clamp(0, (screen.1 as i32 - outer.1).max(0)),
+            x.clamp(left, (right - size.0).max(left)),
+            y.clamp(top, (bottom - size.1).max(top)),
         )
     } else {
         let x = match prefs.corner.as_str() {
-            "top-left" | "bottom-left" => margin,
-            _ => screen.0 as i32 - outer.0 - margin,
+            "top-left" | "bottom-left" => left + margin,
+            _ => right - size.0 - margin,
         };
         let y = match prefs.corner.as_str() {
-            "bottom-left" | "bottom-right" => screen.1 as i32 - outer.1 - margin,
-            _ => margin,
+            "bottom-left" | "bottom-right" => bottom - size.1 - margin,
+            _ => top + margin,
         };
         (x, y)
     }
 }
 
-/// Dock to a screen corner (widget width ~350px) or restore the remembered
-/// drag position. Called on creation, whenever the corner changes, and
-/// whenever the heartbeat sees the desktop geometry shift (RDP connect/
-/// disconnect rewrites the console's display: the widget would otherwise sit
-/// at the small virtual screen's corner, stranded mid-desktop after the
-/// native resolution comes back).
+/// Dock to the configured corner or restore the remembered drag position.
+/// Called on creation, whenever the corner changes, and whenever the
+/// heartbeat sees the window drift off its spot.
+///
+/// The drift this guards against is what the user hit: an RDP session runs
+/// the console at the peer's resolution (e.g. 1920×1080); Windows re-lays
+/// out top-level windows there, and any position persisted from that
+/// session is a *small-screen* number. Back at the native 2560×1440 the
+/// old code still found that number "valid" (it clamps fine) and re-docked
+/// to it — the widget parked ~660 px short of the right edge, mid-desktop.
+/// Now the guard compares the window's live Win32 rect with what the prefs
+/// demand every beat, and pre-0.1.12 remembered spots are dropped once
+/// (`dock_v2`) so corner docking becomes deterministic again.
+#[cfg(windows)]
+fn place_window(app: &AppHandle, prefs: &WidgetPrefs) {
+    let Some(window) = app.get_webview_window(WIDGET_LABEL) else {
+        return;
+    };
+    let Ok(hwnd) = window.hwnd() else { return };
+    let raw: *mut std::ffi::c_void = hwnd.0.cast();
+    let Some(monitor) = desktop_layer::monitor_rect(raw) else {
+        return;
+    };
+    let size = desktop_layer::window_rect(raw).map(|(_, _, w, h)| (w, h));
+    // A just-created window may still report the builder size before the
+    // content fit lands; dock_point tolerates that (worst case the next
+    // auto-resize redocks through the same path).
+    let size = size.unwrap_or((525, 930));
+    let pos = dock_point(monitor, size, prefs);
+    desktop_layer::move_to(raw, pos.0, pos.1);
+}
+
+/// One-time repair of pre-0.1.12 `position` values: they were persisted
+/// while the docking maths (physical px) and the drag readback (DPI-scaled
+/// virtual px) disagreed, and an RDP re-layout could even persist a drifted
+/// mid-screen spot as if the user had chosen it. Rather than guess, drop the
+/// remembered spot once — the widget returns to the configured corner; any
+/// drag from now on is persisted in the same physical space this file docks
+/// in (the page now sends `outerPosition` through the device scale factor),
+/// so it is respected forever.
+#[cfg(windows)]
+fn migrate_stale_position(state: &WidgetState) -> Result<(), String> {
+    {
+        let mut prefs = WidgetState::lock(&state.prefs)?;
+        if prefs.dock_v2 {
+            return Ok(());
+        }
+        prefs.position = None;
+        prefs.dock_v2 = true;
+    }
+    save_prefs(state)
+}
+
+#[cfg(not(windows))]
 fn place_window(app: &AppHandle, prefs: &WidgetPrefs) {
     let Some(window) = app.get_webview_window(WIDGET_LABEL) else {
         return;
@@ -383,12 +515,17 @@ fn place_window(app: &AppHandle, prefs: &WidgetPrefs) {
     let Ok(Some(monitor)) = window.primary_monitor() else {
         return;
     };
-    let screen = (monitor.size().width, monitor.size().height);
+    let rect = (
+        0,
+        0,
+        monitor.size().width as i32,
+        monitor.size().height as i32,
+    );
     let outer = window
         .outer_size()
         .map(|s| (s.width as i32, s.height as i32))
         .unwrap_or((350, 620));
-    let pos = dock_position(screen, outer, prefs);
+    let pos = dock_point(rect, outer, prefs);
     let _ = window.set_position(tauri::PhysicalPosition::new(pos.0, pos.1));
 }
 
@@ -565,6 +702,12 @@ pub fn widget_hide(app: AppHandle) -> Result<(), String> {
 /// Create the window at startup when enabled; the main page can also open it
 /// later through widget_set.
 pub fn spawn_startup(app: &AppHandle) {
+    #[cfg(windows)]
+    {
+        // One-time drop of a pre-dock-v2 remembered position (see the field
+        // docs) before anything docks off it.
+        let _ = migrate_stale_position(&app.state::<WidgetState>());
+    }
     let prefs = app.state::<WidgetState>().current();
     sync_window(app, &prefs);
 }
@@ -586,7 +729,7 @@ pub fn toggle_from_tray(app: &AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{dock_position, WidgetPatch, WidgetPrefs};
+    use super::{dock_point, WidgetPatch, WidgetPrefs};
 
     #[test]
     fn corner_dock_follows_the_screen_size() {
@@ -597,15 +740,19 @@ mod tests {
             corner: "top-right".into(),
             ..WidgetPrefs::default()
         };
-        let big = dock_position((2560, 1440), (350, 620), &prefs);
-        assert_eq!(big, (2560 - 350 - 16, 16));
-        let small = dock_position((1280, 720), (350, 620), &prefs);
-        assert_eq!(small, (1280 - 350 - 16, 16));
+        let big = dock_point((0, 0, 2560, 1440), (350, 620), &prefs);
+        assert_eq!(big, (2560 - 350 - 24, 24));
+        let small = dock_point((0, 0, 1280, 720), (350, 620), &prefs);
+        assert_eq!(small, (1280 - 350 - 24, 24));
         let left = WidgetPrefs {
             corner: "bottom-left".into(),
             ..WidgetPrefs::default()
         };
-        assert_eq!(dock_position((2560, 1440), (350, 620), &left), (16, 804));
+        assert_eq!(dock_point((0, 0, 2560, 1440), (350, 620), &left), (24, 796));
+        // A monitor that is not at the origin (extended desktop with the
+        // primary on the right) docks to *its own* corners.
+        let offset = dock_point((1920, 0, 1920 + 2560, 1440), (350, 620), &prefs);
+        assert_eq!(offset, (1920 + 2560 - 350 - 24, 24));
     }
 
     #[test]
@@ -614,11 +761,14 @@ mod tests {
             position: Some((1200, 300)),
             ..WidgetPrefs::default()
         };
-        assert_eq!(dock_position((2560, 1440), (350, 620), &prefs), (1200, 300));
+        assert_eq!(
+            dock_point((0, 0, 2560, 1440), (350, 620), &prefs),
+            (1200, 300)
+        );
         // A remembered spot from a bigger unplugged monitor is clamped back
         // into the current desktop instead of being lost or hidden.
         assert_eq!(
-            dock_position((1280, 720), (350, 620), &prefs),
+            dock_point((0, 0, 1280, 720), (350, 620), &prefs),
             (1280 - 350, 720 - 620)
         );
     }
