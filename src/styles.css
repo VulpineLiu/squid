@@ -990,6 +990,44 @@ select:focus-visible,
   background: var(--nex-primary-tint);
 }
 
+/* 卸载增强: 安装不完整 rows and package-manager provenance chips. */
+.status-chip.is-danger {
+  color: #b3372c;
+  background: #fdeae7;
+}
+
+.status-chip.is-source {
+  color: #4c5f94;
+  background: #e9edf8;
+}
+
+.plan-dead-callout {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #f3cfc9;
+  border-radius: 14px;
+  background: #fdf1ef;
+  color: #8c2f26;
+}
+
+.plan-dead-callout > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.plan-dead-callout strong {
+  display: block;
+  font-size: var(--nex-text-sm);
+}
+
+.plan-dead-callout p {
+  margin: 4px 0 8px;
+  color: #a05a53;
+  font-size: var(--nex-text-xs);
+  line-height: 1.5;
+}
+
 /* Header gauge and cards */
 
 .overview-hero {

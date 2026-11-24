@@ -2053,6 +2053,7 @@ mod tests {
                 publisher: None,
                 installed_ms: None,
                 display_icon: None,
+                ..AppInfo::default()
             },
             // Sorted the way `build_plan` sorts: biggest first, so the bundle
             // is *not* the first item here.

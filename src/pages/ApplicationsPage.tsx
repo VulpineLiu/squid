@@ -2,15 +2,18 @@ import {
   AppWindow,
   ChevronRight,
   FolderOpen,
+  Hammer,
   PackageX,
   Play,
   Search,
+  ShieldAlert,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useI18n } from "../i18n";
-import { formatBytes, formatCount, shortPath } from "../lib/format";
+import { api } from "../lib/api";
+import { formatBytes, formatCount, messageFrom, shortPath } from "../lib/format";
 import type { AppInfo, DeleteMode } from "../types";
 import type { AppsWorkspace } from "../hooks/useAppsWorkspace";
 import {
@@ -27,6 +30,23 @@ import {
   useToast,
 } from "../components/ui";
 
+/* 卸载增强: package-manager provenance as a chip. The backend only badges
+   well-known layouts, so the chip states a fact, never a guess. */
+const SOURCE_BADGES: Record<string, [string, string]> = {
+  winget: ["winget", "winget"],
+  scoop: ["scoop", "scoop"],
+  Chocolatey: ["Chocolatey", "Chocolatey"],
+  "Microsoft Store": ["Store", "Microsoft Store"],
+  Toolbox: ["Toolbox", "JetBrains Toolbox"],
+};
+
+function sourceBadge(source: string): [string, string] | null {
+  for (const [key, badge] of Object.entries(SOURCE_BADGES)) {
+    if (source.includes(key)) return badge;
+  }
+  return null;
+}
+
 function AppRow({
   app,
   selected,
@@ -38,6 +58,7 @@ function AppRow({
 }) {
   const { t } = useI18n();
   const letter = app.name.trim().slice(0, 1).toUpperCase() || "?";
+  const badge = sourceBadge(app.source);
   return (
     <button className={`app-row ${selected ? "is-selected" : ""}`} onClick={onSelect}>
       <span className="app-glyph" aria-hidden="true">
@@ -52,12 +73,24 @@ function AppRow({
               {t("Running", "运行中")}
             </span>
           ) : null}
+          {app.dead ? (
+            <span className="status-chip is-danger">
+              <ShieldAlert size={10} />
+              {t("Incomplete install", "安装不完整")}
+            </span>
+          ) : null}
+          {badge ? (
+            <span className="status-chip is-source" title={badge[1]}>
+              <Hammer size={10} />
+              {badge[0]}
+            </span>
+          ) : null}
         </span>
         <span>{app.bundle_id || shortPath(app.path, 45)}</span>
       </span>
       <span className="app-row-meta">
         <strong>{formatBytes(app.size)}</strong>
-        <small>{app.version ? `v${app.version}` : app.source}</small>
+        <small>{app.version ? `v${app.version}` : app.publisher || app.source}</small>
       </span>
       <ChevronRight size={16} />
     </button>
@@ -75,6 +108,7 @@ export function ApplicationsPage({
   const [query, setQuery] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [mode, setMode] = useState<DeleteMode>("trash");
+  const [recordBusy, setRecordBusy] = useState(false);
 
   const apps = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -106,6 +140,24 @@ export function ApplicationsPage({
         ),
         result.failed > 0 ? "danger" : "success",
       );
+    }
+  };
+
+  // 卸载增强: an 安装不完整 entry is only fully gone once its registry
+  // record goes too — otherwise Windows (and every scanner) still lists it.
+  const removeRecord = async () => {
+    const regKey = workspace.plan?.app.reg_key;
+    if (!regKey || recordBusy) return;
+    setRecordBusy(true);
+    try {
+      await api.appRemoveRecord(regKey);
+      push(t("Orphaned registry record removed", "已清除残留的注册表记录"), "success");
+      workspace.chooseApp(null);
+      await workspace.scan();
+    } catch (reason) {
+      push(messageFrom(reason), "danger");
+    } finally {
+      setRecordBusy(false);
     }
   };
 
@@ -232,6 +284,32 @@ export function ApplicationsPage({
                     <PackageX size={17} />
                   </button>
                 </div>
+
+                {workspace.plan.app.dead ? (
+                  <div className="plan-dead-callout">
+                    <ShieldAlert size={16} />
+                    <div>
+                      <strong>{t("Incomplete install", "安装不完整")}</strong>
+                      <p>
+                        {t(
+                          "The program files are already gone; only its registry record and leftovers remain. Removing the record makes Windows stop listing it.",
+                          "程序本体已经不存在，只剩下注册表记录和残留文件。清除记录后，系统将不再列出这个应用。",
+                        )}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon={<PackageX size={14} />}
+                        disabled={recordBusy}
+                        onClick={() => void removeRecord()}
+                      >
+                        {recordBusy
+                          ? t("Cleaning…", "正在清理…")
+                          : t("Clean leftovers", "清理残留记录")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
 
                 {workspace.plan.warnings.length > 0 ? (
                   <div className="plan-warnings">

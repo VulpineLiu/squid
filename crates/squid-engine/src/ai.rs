@@ -210,14 +210,17 @@ fn ollama_models(home: &Path) -> Vec<CleanupItem> {
             shared_note = format!("；另有 {shared_skipped} 个共享层被其它模型使用，不计算在内");
         }
         let label = format!("Ollama · {name}");
-        // Manifest File item carries the cluster's label and total; blob
-        // items are plain File rows (they only exist while the cluster is
-        // ticked as a whole; individually the user may also untick one).
-        let mut item = model_item(manifest, label.clone(), size, newest, &rule);
+        // The manifest is the anchor row and carries the cluster label. Every
+        // row — manifest and blobs alike — carries **its own** size: the 清理点
+        // row sums its members, so charging the total to the manifest on top
+        // of the blobs would double-count the model.
+        let manifest_bytes = std::fs::metadata(&manifest).map(|m| m.len()).unwrap_or(0);
+        let mut item = model_item(manifest, label.clone(), manifest_bytes, newest, &rule);
         item.kind = ItemKind::File; // the manifest file itself
         item.note = Some(format!(
-            "{}；删除后 `ollama pull` 可原样恢复{shared_note}",
-            age.clone().unwrap_or_else(|| "从未记录使用时间".into())
+            "{}；整个模型可释放 {}，删除后 `ollama pull` 可原样恢复{shared_note}",
+            age.clone().unwrap_or_else(|| "从未记录使用时间".into()),
+            Bytes(size + manifest_bytes)
         ));
         rows.push(item);
         for (blob, bytes, ms) in blob_items {
@@ -383,16 +386,18 @@ mod tests {
         assert_eq!(rows.len(), 2, "{rows:?}");
         assert!(rows.iter().all(|r| r.rule_id == "ai-ollama-qwen3-8b"));
         assert_eq!(rows[0].label, "Ollama · qwen3/8b");
-        assert_eq!(
-            rows.iter().map(|r| r.size.as_u64()).sum::<u64>(),
-            2048,
-            "manifest row carries the cluster total, blob its own size"
-        );
+        // Each row carries its own size; the cluster total rides in the note.
+        let total = rows.iter().map(|r| r.size.as_u64()).sum::<u64>();
+        assert!(total >= 2048, "manifest + exclusive blob, no double count");
+        assert!(rows[0]
+            .note
+            .as_deref()
+            .is_some_and(|n| n.contains("可释放")));
         assert!(rows.iter().all(|r| !r.selected), "models never pre-checked");
         assert!(rows[0]
             .note
             .as_deref()
-            .is_some_and(|n| n.contains("重新下载")));
+            .is_some_and(|n| n.contains("可原样恢复")));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -432,15 +437,26 @@ mod tests {
             .iter()
             .filter(|r| r.rule_id == "ai-ollama-b-latest")
             .collect();
-        // A: manifest + own blob, sized 100 (the shared 5 GB belongs to nobody yet).
+        // A: manifest (its own JSON bytes) + own blob sized 100; the shared
+        // 5 GB belongs to nobody yet, so it is billed to neither row.
         assert_eq!(model_a.len(), 2, "{model_a:?}");
-        assert_eq!(model_a[0].size.as_u64(), 100);
+        assert_eq!(model_a[1].size.as_u64(), 100);
+        assert!(
+            model_a[0].size.as_u64() < 200,
+            "manifest carries its own bytes"
+        );
         assert!(model_a[0]
             .note
             .as_deref()
             .is_some_and(|n| n.contains("共享层")));
-        // B: only the manifest survives, sized 0 → skipped entirely.
-        assert!(model_b.iter().all(|r| r.size.as_u64() == 0) || model_b.is_empty());
+        // B: only the manifest survives (its own JSON bytes, not the shared
+        // 5 GB), and its note says the layers are held by other models.
+        assert_eq!(model_b.len(), 1, "{model_b:?}");
+        assert!(model_b[0].size.as_u64() < 200, "manifest bytes only");
+        assert!(model_b[0]
+            .note
+            .as_deref()
+            .is_some_and(|n| n.contains("共享层")));
         let _ = std::fs::remove_dir_all(&root);
     }
 

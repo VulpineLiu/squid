@@ -2612,6 +2612,7 @@ mod tests {
             publisher: None,
             installed_ms: None,
             display_icon: None,
+            ..AppInfo::default()
         };
         let items = vec![
             CleanupItem::new(
@@ -2708,6 +2709,7 @@ mod tests {
             publisher: None,
             installed_ms: None,
             display_icon: None,
+            ..AppInfo::default()
         }];
         app.uninstall.filter = "Squid".into();
         assert_eq!(app.uninstall.visible().len(), 1);

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use sysinfo::{Disks, System};
 use winreg::enums::{
-    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
+    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY, KEY_WRITE,
 };
 use winreg::RegKey;
 
@@ -23,25 +23,133 @@ const UNINSTALL_SUBKEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Unins
 const NT_VERSION_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
 const BIOS_KEY: &str = r"HARDWARE\DESCRIPTION\System\BIOS";
 
-fn open_uninstall_hives() -> Vec<(RegKey, &'static str)> {
+fn open_uninstall_hives() -> Vec<(RegKey, &'static str, &'static str)> {
     let mut hives = Vec::new();
     let views = [
-        (KEY_WOW64_64KEY, "Registry (HKLM 64-bit)"),
-        (KEY_WOW64_32KEY, "Registry (HKLM 32-bit)"),
+        (KEY_WOW64_64KEY, "Registry (HKLM 64-bit)", "HKLM64"),
+        (KEY_WOW64_32KEY, "Registry (HKLM 32-bit)", "HKLM32"),
     ];
-    for (flag, label) in views {
+    for (flag, label, tag) in views {
         if let Ok(key) = RegKey::predef(HKEY_LOCAL_MACHINE)
             .open_subkey_with_flags(UNINSTALL_SUBKEY, KEY_READ | flag)
         {
-            hives.push((key, label));
+            hives.push((key, label, tag));
         }
     }
     if let Ok(key) =
         RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(UNINSTALL_SUBKEY, KEY_READ)
     {
-        hives.push((key, "Registry (HKCU)"));
+        hives.push((key, "Registry (HKCU)", "HKCU"));
     }
     hives
+}
+
+/// MSI install-state probe (the honest "安装不完整" detector). A registry
+/// record whose product state is Unknown/Broken/Removed means the MSI
+/// package itself is gone — the record is an orphan no msiexec can honour.
+mod msi {
+    #[link(name = "msi")]
+    extern "system" {
+        fn MsiQueryProductStateW(product: *const u16) -> i32;
+    }
+
+    // INSTALLSTATE: 0 Unknown, 1 Broken, 2 Advertised, 3 Removed,
+    // 4 Installed, 5 Local, 6 Source, 7 Default.
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    /// True when the MSI product for `guid` is missing or unusable.
+    pub fn product_broken(guid: &str) -> bool {
+        let normalized = guid.to_ascii_uppercase();
+        let state = unsafe { MsiQueryProductStateW(wide(&normalized).as_ptr()) };
+        matches!(state, 0 | 1 | 3)
+    }
+}
+
+/// The product GUID inside an `MsiExec.exe /X{GUID}` style command.
+fn msi_guid(uninstall_string: &str) -> Option<&str> {
+    let upper = uninstall_string.to_ascii_uppercase();
+    if !upper.contains("MSIEXEC") {
+        return None;
+    }
+    let start = uninstall_string.find('{')?;
+    let end = uninstall_string[start..].find('}')? + start + 1;
+    Some(&uninstall_string[start..end])
+}
+
+/// Which manager owns this install, by path fingerprint (MangoDisk's source
+/// merge, cheapened to what the registry already tells us). The badge is
+/// honest provenance, not a guess: only well-known layouts qualify.
+fn package_source(path: &Path, fallback: &str) -> String {
+    let lower = path.to_string_lossy().to_lowercase();
+    if lower.contains("\\windowsapps\\") {
+        return "Microsoft Store".into();
+    }
+    if lower.contains("\\scoop\\apps\\") {
+        return "scoop".into();
+    }
+    if lower.contains("\\chocolatey\\") {
+        return "Chocolatey".into();
+    }
+    if lower.contains("\\winget\\") || lower.contains("\\packages\\desktopappinstaller") {
+        return "winget".into();
+    }
+    if lower.contains("\\jetbrains\\toolbox\\apps\\") {
+        return "Toolbox".into();
+    }
+    fallback.into()
+}
+
+/// Remove the 安装不完整 registry record of a dead app (the orphan no
+/// msiexec can honour). `reg_key` is the scanner's "HKLM64|<subkey>" tag.
+/// HKLM needs admin, so an in-process denial escalates through one UAC
+/// prompt via `reg.exe` — the record either goes or the user declines.
+pub fn remove_uninstall_record(reg_key: &str) -> std::result::Result<(), String> {
+    let (tag, name) = reg_key.split_once('|').ok_or("注册表记录标识无效")?;
+    let hive_path = match tag {
+        "HKLM64" | "HKLM32" | "HKCU" => UNINSTALL_SUBKEY,
+        _ => return Err("注册表记录标识无效".into()),
+    };
+    if tag != "HKCU" {
+        use std::os::windows::process::CommandExt;
+        // reg.exe spells the 32-bit view through WOW6432Node.
+        let elevated_path = format!(
+            "HKLM\\{}\\{}",
+            if tag == "HKLM32" {
+                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+            } else {
+                hive_path
+            },
+            name
+        );
+        let status = Command::new("reg.exe")
+            .args(["delete", &elevated_path, "/f"])
+            .creation_flags(0x0800_0000) // no console flash
+            .status();
+        if matches!(&status, Ok(s) if s.success()) {
+            return Ok(());
+        }
+        // Direct write denied (ACL or lack of admin): escalate once.
+        let script = format!(
+            "$ErrorActionPreference='Stop'; Start-Process -FilePath 'reg.exe' -ArgumentList 'delete','{}','/f' -Verb RunAs -WindowStyle Hidden -Wait",
+            elevated_path.replace('\'', "''")
+        );
+        let escalated = Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .creation_flags(0x0800_0000)
+            .status()
+            .map_err(|error| format!("无法启动提权助手：{error}"))?;
+        if !escalated.success() {
+            return Err("管理员授权被取消，注册表记录未删除".into());
+        }
+        return Ok(());
+    }
+    let hive = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey_with_flags(hive_path, KEY_READ | KEY_WRITE)
+        .map_err(|error| format!("无法打开卸载注册表：{error}"))?;
+    hive.delete_subkey_all(name)
+        .map_err(|error| format!("删除注册表记录失败：{error}"))
 }
 
 fn str_value(key: &RegKey, name: &str) -> Option<String> {
@@ -213,7 +321,7 @@ impl Platform for Windows {
             .map(|p| p.to_lowercase())
             .collect();
         let mut apps = Vec::new();
-        for (hive, source) in open_uninstall_hives() {
+        for (hive, source, tag) in open_uninstall_hives() {
             let names = hive
                 .enum_keys()
                 .filter_map(|name| name.ok())
@@ -254,6 +362,21 @@ impl Platform for Windows {
                         running.iter().any(|exe| exe.starts_with(&loc))
                     })
                     .unwrap_or(false);
+                // 安装不完整 detection (MangoDisk's cross-check): the record
+                // exists but the product cannot be found any more — the MSI
+                // state says gone, or neither the install folder nor the
+                // uninstaller binary is on disk.
+                let dead = match uninstall_string.as_deref().and_then(msi_guid) {
+                    Some(guid) => msi::product_broken(guid),
+                    None => {
+                        let uninstaller_gone = uninstall_string
+                            .as_deref()
+                            .and_then(uninstall_program)
+                            .map(|exe| !exe.exists())
+                            .unwrap_or(true);
+                        install_location.is_none() && uninstaller_gone
+                    }
+                };
                 // Size: Windows installers report EstimatedSize (KB) for
                 // Add/Remove Programs — the same number Settings shows.
                 // Absent that, measure the install folder when asked.
@@ -267,18 +390,25 @@ impl Platform for Windows {
                         .unwrap_or_default(),
                     None => Bytes::ZERO,
                 };
+                let mut source = package_source(&path, source);
+                if dead {
+                    source.push_str(" · 安装不完整");
+                }
                 apps.push(AppInfo {
                     name: display_name,
                     bundle_id: None,
                     path,
                     version: str_value(&key, "DisplayVersion"),
                     size,
-                    source: source.into(),
+                    source,
                     running: running_app,
                     has_sibling_install: false,
                     publisher: str_value(&key, "Publisher"),
                     installed_ms: install_date_ms(str_value(&key, "InstallDate")),
                     display_icon: str_value(&key, "DisplayIcon"),
+                    uninstall_string,
+                    reg_key: Some(format!("{tag}|{name}")),
+                    dead,
                 });
             }
         }

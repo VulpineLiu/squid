@@ -415,10 +415,23 @@ pub struct AppInfo {
     pub has_sibling_install: bool,
     pub publisher: Option<String>,
     pub installed_ms: Option<u64>,
-    /// Raw `DisplayIcon` registry value (Windows): a path, optionally with an
+    /// Raw `DisplayIcon` registry value (Windows): a path, optionally with a
     /// `,index` suffix — the icon Explorer shows for this app.
     #[serde(default)]
     pub display_icon: Option<String>,
+    /// The uninstaller command recorded by the app itself, when present.
+    #[serde(default)]
+    pub uninstall_string: Option<String>,
+    /// Windows: the exact registry key holding this entry
+    /// (`HKCU|HKLM` + subkey), so an orphaned record can be removed after
+    /// its files are gone.
+    #[serde(default)]
+    pub reg_key: Option<String>,
+    /// Install is broken: neither the install folder nor the uninstaller
+    /// target exists any more (or MSI reports the product absent while the
+    /// registry record remains). 「安装不完整」 — offer leftover cleanup.
+    #[serde(default)]
+    pub dead: bool,
 }
 
 impl AppInfo {

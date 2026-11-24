@@ -1172,6 +1172,7 @@ dependencies = [
  "squid-rules",
  "squid-stats",
  "walkdir",
+ "winreg",
 ]
 
 [[package]]
@@ -1184,6 +1185,7 @@ dependencies = [
  "png",
  "rayon",
  "serde",
+ "serde_json",
  "squid-core",
  "sysinfo",
  "unicode-width 0.2.0",

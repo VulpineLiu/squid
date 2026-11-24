@@ -139,6 +139,7 @@ pub fn run() {
             app::apps_scan,
             app::app_plan,
             app::app_uninstall,
+            app::app_remove_record,
             app::storage_explore,
             app::storage_insights,
             app::write_text_file,

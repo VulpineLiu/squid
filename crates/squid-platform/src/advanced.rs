@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn exe_extraction_handles_quotes_and_arguments() {
         assert_eq!(
-            windows::exe_of(r#""C:\Program Files\Tool\warp.exe" --quiet""#.as_ref()).as_deref(),
+            windows::exe_of(r#""C:\Program Files\Tool\warp.exe" --quiet""#).as_deref(),
             Some(r"C:\Program Files\Tool\warp.exe")
         );
         assert_eq!(

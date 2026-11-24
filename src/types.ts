@@ -165,6 +165,12 @@ export interface AppInfo {
   publisher: string | null;
   installed_ms: number | null;
   display_icon: string | null;
+  /** Recorded uninstaller command (Windows), when the app left one. */
+  uninstall_string?: string | null;
+  /** Windows: "HKLM64|<subkey>" — the uninstall registry record itself. */
+  reg_key?: string | null;
+  /** 安装不完整: the record survives but the product files are gone. */
+  dead?: boolean;
   /** data-URL PNG icon (apps_scan only; null when extraction failed). */
   icon?: string | null;
 }

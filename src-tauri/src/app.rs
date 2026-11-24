@@ -1193,6 +1193,26 @@ pub async fn app_uninstall(
     Ok(DeleteResultView::from_outcome(outcome))
 }
 
+/// 卸载增强: drop the 安装不完整 registry record after its files are gone.
+/// HKLM removal escalates through one UAC prompt; a declined prompt is an
+/// error the page surfaces, never a silent no-op.
+#[tauri::command]
+pub async fn app_remove_record(_app: AppHandle, reg_key: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            squid_platform::windows::remove_uninstall_record(&reg_key)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = reg_key;
+        Err("此系统没有注册表记录".to_string())
+    }
+}
+
 /// What `storage_explore` answers: the tree plus how fresh it is (A⑥).
 /// `cached` = served from the in-memory size cache; `measuredAtMs` = age of
 /// the measurement so the page can say "12 分钟前" honestly. `Node` itself

@@ -136,7 +136,14 @@ pub fn build_plan(
         Some(version) => format!("{} · {}", app.source, version),
         None => app.source.clone(),
     });
-    if system {
+    if app.dead || app.path.as_os_str().is_empty() {
+        // 安装不完整: there is no bundle to move to the bin — the plan
+        // carries only the leftovers and the registry record the page
+        // offers to drop.
+        bundle_item = bundle_item
+            .locked(LockReason::Protected)
+            .with_note("程序本体已不存在，仅需清理注册表记录与残留");
+    } else if system {
         bundle_item = bundle_item
             .locked(LockReason::Protected)
             .with_note("system application");
@@ -472,6 +479,7 @@ mod tests {
             publisher: None,
             installed_ms: None,
             display_icon: None,
+            ..AppInfo::default()
         }
     }
 

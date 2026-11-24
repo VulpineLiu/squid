@@ -201,6 +201,7 @@ impl Platform for Linux {
                     publisher: desktop.icon.clone(),
                     installed_ms: None,
                     display_icon: None,
+                    ..AppInfo::default()
                 });
             }
         }
@@ -236,6 +237,7 @@ impl Platform for Linux {
                         publisher: None,
                         installed_ms: None,
                         display_icon: None,
+                        ..AppInfo::default()
                     });
                 }
             }

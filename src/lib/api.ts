@@ -97,6 +97,7 @@ export const api = {
   appPlan: (jobId: string, appKey: string) => invoke<PlanResult>("app_plan", { jobId, appKey }),
   appUninstall: (jobId: string, planId: string, selected: number[], mode: DeleteMode) =>
     invoke<DeleteResult>("app_uninstall", { jobId, planId, selected, mode }),
+  appRemoveRecord: (regKey: string) => invoke<void>("app_remove_record", { regKey }),
   storageExplore: (jobId: string, path?: string | null, depth = 1, top = 16, force = false) =>
     invoke<ExploreResult>("storage_explore", { jobId, path, depth, top, force }),
   storageInsights: () => invoke<SpaceInsight[]>("storage_insights"),

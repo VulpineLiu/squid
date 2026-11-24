@@ -406,8 +406,11 @@ pub async fn advanced_scan(app: AppHandle) -> Result<AdvancedScanView, String> {
 }
 
 #[tauri::command]
-pub async fn advanced_set_enabled(app: AppHandle, id: String, enabled: bool) -> Result<(), String> {
-    let manage = app.state::<ManageState>();
+pub async fn advanced_set_enabled(
+    _app: AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
     // Advanced rows carry their whole state in the id + a fresh scan match.
     let entry = tauri::async_runtime::spawn_blocking(squid_platform::advanced::scan_advanced)
         .await
