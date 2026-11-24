@@ -7116,10 +7116,10 @@ html.widget-mode body {
   text-align: right;
 }
 
-.dup-toolbar .dup-clean {
-  border-color: #d67358 !important;
-  color: #c25438 !important;
-}
+/* The clean button rides the global danger style (white text on the red
+   gradient). It used to override its own text to dark red with !important,
+   which sat unreadably on the red background — page-level button colour
+   overrides are banned for this reason. */
 
 .dup-confirm {
   display: flex;
@@ -7149,8 +7149,60 @@ html.widget-mode body {
 }
 
 .dup-confirm small {
+  display: block;
   color: #97826c;
   font-size: var(--nex-text-3xs);
+}
+
+/* The keeper row can now be picked ("delete this group entirely"): swap its
+   green frame for the amber warning family so it reads as destructive. */
+.dup-copy.is-keep.is-keep-picked {
+  color: #9a6f1d;
+  background: rgba(154, 111, 29, 0.07);
+}
+
+.dup-copy.is-keep.is-keep-picked .dup-copy-path {
+  color: #9a6f1d;
+}
+
+.dup-keep-chip.is-danger {
+  border-color: #e8c88f;
+  background: rgba(154, 111, 29, 0.1);
+  color: #9a6f1d;
+}
+
+/* Group header badge: every copy of this group is going away. */
+.dup-empty-chip {
+  padding: 1px 8px;
+  border: 1px solid #e8c88f;
+  border-radius: 99px;
+  background: rgba(154, 111, 29, 0.09);
+  color: #9a6f1d;
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+/* Toolbar summary callout for the same, counted across all groups. */
+.dup-empties {
+  margin-left: 6px;
+  color: #9a6f1d;
+  font-style: normal;
+  font-weight: var(--nex-weight-semibold);
+}
+
+/* Confirm strip turns red-flag when groups would vanish completely. */
+.dup-confirm.is-strict {
+  border-color: #e6c2b8;
+  background: rgba(194, 84, 56, 0.07);
+  color: #8c4732;
+}
+
+.dup-confirm.is-strict > svg {
+  color: #b0563d;
+}
+
+.dup-confirm-warn {
+  color: #b0563d;
 }
 
 .dup-groups {
@@ -8053,6 +8105,171 @@ html.widget-mode body {
   color: #8b94a0;
   font-size: var(--nex-text-3xs);
   white-space: nowrap;
+}
+
+/* ── 开机启动项 MangoDisk 化（筛选段/系统项开关/来源芯片/残留）─────── */
+
+.perm-startup-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.perm-filter {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--nex-line);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.perm-filter-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-2xs);
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.perm-filter-tab b {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--nex-cream);
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.perm-filter-tab.is-active {
+  background: #fff;
+  color: #2b2620;
+  font-weight: var(--nex-weight-semibold);
+  box-shadow: 0 1px 4px rgba(60, 50, 35, 0.12);
+}
+
+.perm-filter-tab.has-leftover b {
+  background: rgba(194, 84, 56, 0.12);
+  color: #b0563d;
+}
+
+.perm-startup-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.perm-system-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #6c7a87;
+  font-size: var(--nex-text-2xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.perm-group-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.perm-src-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 8px;
+  border: 1px solid #ddd6cc;
+  border-radius: 99px;
+  background: rgba(140, 140, 140, 0.05);
+  color: #7d8896;
+  font-size: var(--nex-text-3xs);
+  white-space: nowrap;
+}
+
+.perm-src-chip i {
+  font-style: normal;
+  color: #aab4c0;
+}
+
+/* 残留 verdict chip — red sibling of .perm-sig. */
+.perm-sig.is-leftover,
+.perm-row-tag.is-leftover {
+  border: 1px solid #e0b3a6;
+  background: rgba(194, 84, 56, 0.13);
+  color: #a84e34;
+  font-weight: var(--nex-weight-semibold);
+}
+
+/* Row status tag (已启用 / 已禁用 / 残留). */
+.perm-row-tag {
+  margin-left: 6px;
+  padding: 0 7px;
+  border: 1px solid #ddd6cc;
+  border-radius: 99px;
+  color: #8b94a0;
+  font-size: var(--nex-text-3xs);
+  font-style: normal;
+  vertical-align: 1px;
+}
+
+.perm-row-tag.is-on {
+  border-color: #bfe0c4;
+  background: rgba(88, 170, 98, 0.08);
+  color: #4b8a55;
+}
+
+.perm-row-tag.is-off {
+  border-color: #ddd6cc;
+  background: rgba(140, 140, 140, 0.07);
+  color: #98a2ae;
+}
+
+/* Full command line, third detail line of an expanded row. */
+.perm-row-full {
+  color: #b0a89c !important;
+  font-family: var(--nex-font-mono, monospace);
+  max-width: 100%;
+}
+
+/* A group whose every row is a leftover gets a red frame; single leftover
+   rows get a faint red wash. */
+.perm-group-card.is-leftover {
+  border: 1px solid rgba(194, 84, 56, 0.35);
+}
+
+.settings-row.is-leftover-row {
+  background: rgba(194, 84, 56, 0.045);
+}
+
+/* Summary bar at the bottom of an expanded group with leftovers. */
+.perm-group-leftover-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px 30px;
+  padding: 7px 12px;
+  border: 1px dashed #e0b3a6;
+  border-radius: 10px;
+  color: #a84e34;
+  font-size: var(--nex-text-3xs);
+}
+
+.perm-group-leftover-bar > span {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* ── Hub pages（空间清理/系统维护 三页签容器，方案①②）────────────── */

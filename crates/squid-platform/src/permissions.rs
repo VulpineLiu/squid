@@ -38,6 +38,31 @@ pub struct StartupEntry {
     /// the 电脑管家 habit of showing the software icon next to its name.
     #[serde(default)]
     pub icon: Option<Vec<u8>>,
+    /// The executable this entry really runs (lnk targets resolved). Empty
+    /// when the command holds no path at all.
+    #[serde(default)]
+    pub target: String,
+    /// False when `target` does not exist on disk — the program was removed
+    /// but its autostart config survived: a 残留项 (leftover), removable via
+    /// [`remove_startup_entry`].
+    #[serde(default)]
+    pub target_exists: bool,
+    /// When this fires: `boot` | `logon` | `background` | `unknown`, from the
+    /// registry value / task triggers / service start type. Shown as a chip.
+    #[serde(default)]
+    pub trigger: String,
+    /// Microsoft-signed or living under %SystemRoot% — the UI folds these
+    /// into a 系统组件 group that 「显示系统项」 can hide.
+    #[serde(default)]
+    pub system_item: bool,
+    /// Digital-signature verdict of `target`: `microsoft` | `vendor` |
+    /// `unsigned` | `invalid` | `unknown` (nothing resolvable / non-Windows).
+    /// Filled by the batch signature pass at the end of the scan.
+    #[serde(default)]
+    pub signature: String,
+    /// Subject of the signing certificate when known.
+    #[serde(default)]
+    pub signer: Option<String>,
 }
 
 /// One registered context-menu ("右键菜单") handler.
@@ -143,6 +168,22 @@ pub fn set_startup_enabled(entry: &StartupEntry, enabled: bool) -> Result<(), St
     {
         let _ = (entry, enabled);
         Err("startup management is not supported on this platform".into())
+    }
+}
+
+/// Delete a leftover autostart configuration (the program it points at is
+/// gone). Only the *registration* disappears — registry value, Startup-folder
+/// shortcut, task definition — never a program's files. Services are disabled
+/// rather than uninstalled because other software may still reference them.
+pub fn remove_startup_entry(entry: &StartupEntry) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        windows::remove_startup_entry(entry)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = entry;
+        Err("删除启动项仅在 Windows 提供".into())
     }
 }
 
@@ -525,8 +566,20 @@ mod windows {
     /// Per-binary cache payload: (FileDescription, ProductName, icon PNG).
     type SoftwareInfo = (Option<String>, Option<String>, Option<Vec<u8>>);
 
+    /// Whether a launch path is concrete enough to judge: a drive-qualified or
+    /// UNC path. `foo.exe` alone resolves against *our* working directory, so
+    /// answering "missing" for it would invent false 残留项.
+    fn is_absolute_path(path: &str) -> bool {
+        let trimmed = path.trim_matches('"');
+        let bytes = trimmed.as_bytes();
+        (bytes.len() > 2 && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
+            || trimmed.starts_with(r"\\")
+    }
+
     /// Resolve `display_name` (and the software icon) for every scanned
-    /// entry, once per binary.
+    /// entry, once per binary. Also settles `target` / `target_exists`: the
+    /// binary the row really runs, and whether it is still on disk (a missing
+    /// one is a 残留项).
     fn decorate_display_names(entries: &mut [StartupEntry]) {
         let vendors = vendor_icon_map();
         let mut cache: std::collections::HashMap<String, SoftwareInfo> = Default::default();
@@ -542,6 +595,8 @@ mod windows {
             } else {
                 probed
             };
+            entry.target = probed.clone();
+            entry.target_exists = !is_absolute_path(&probed) || Path::new(&probed).exists();
             let (description, product, icon) = cache
                 .entry(probed.clone())
                 .or_insert_with(|| {
@@ -1133,6 +1188,12 @@ mod windows {
                 id: format!("reg|{hive_label}|{}|{name}", source.key_path),
                 name: display_name(&command),
                 command,
+                target: String::new(),
+                target_exists: true,
+                trigger: "logon".to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "registry".to_string(),
@@ -1178,6 +1239,12 @@ mod windows {
                     .file_stem()
                     .map_or_else(|| file_name.clone(), |s| s.to_string_lossy().to_string()),
                 command: path.display().to_string(),
+                target: String::new(),
+                target_exists: true,
+                trigger: "logon".to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "startupFolder".to_string(),
@@ -1235,6 +1302,12 @@ mod windows {
                         .file_name()
                         .map_or_else(|| task_name.clone(), |n| n.to_string_lossy().to_string()),
                     command: task_actions(&text).unwrap_or_else(|| task_name.clone()),
+                    target: String::new(),
+                    target_exists: true,
+                    trigger: task_trigger(&text),
+                    system_item: false,
+                    signature: String::new(),
+                    signer: None,
                     display_name: String::new(),
                     icon: None,
                     source: "scheduledTask".to_string(),
@@ -1312,6 +1385,13 @@ mod windows {
                     .rsplit_once('\\')
                     .map_or_else(|| task_name.clone(), |(_, leaf)| leaf.to_string()),
                 command: String::new(),
+                target: String::new(),
+                // Nothing was resolved here, so "missing" would be a lie.
+                target_exists: true,
+                trigger: "unknown".to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "scheduledTask".to_string(),
@@ -1436,6 +1516,14 @@ mod windows {
                 id: format!("svc|{name}"),
                 name: display,
                 command: image,
+                target: String::new(),
+                target_exists: true,
+                // Automatic services are started by the SCM during boot;
+                // manual/disabled ones only run on demand.
+                trigger: if start == 2 { "boot" } else { "background" }.to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "service".to_string(),
@@ -1481,6 +1569,21 @@ mod windows {
         let tail = &text[start..];
         let end = tail.find("</Settings>").unwrap_or(tail.len());
         !tail[..end].contains("<Enabled>false")
+    }
+
+    /// When a task fires: a BootTrigger runs before anyone logs on, a
+    /// LogonTrigger at logon, anything else (calendar, event, maintenance) is
+    /// a background schedule the user does not experience as "startup".
+    fn task_trigger(text: &str) -> String {
+        if text.contains("<BootTrigger") {
+            "boot".to_string()
+        } else if text.contains("<LogonTrigger") {
+            "logon".to_string()
+        } else if text.contains("<Triggers>") {
+            "background".to_string()
+        } else {
+            "unknown".to_string()
+        }
     }
 
     fn task_actions(text: &str) -> Option<String> {
@@ -1539,7 +1642,42 @@ mod windows {
         entries.extend(scheduled_task_entries());
         entries.extend(auto_service_entries());
         decorate_display_names(&mut entries);
+        enrich_trust(&mut entries);
         entries
+    }
+
+    /// One batched signature grade over every resolved target, then stamp the
+    /// verdict and fold Microsoft-signed / %SystemRoot% rows into 系统组件 —
+    /// the same trust table the 进阶启动项 tab shows, shared so a scan pays
+    /// for one PowerShell process, not one per row.
+    fn enrich_trust(entries: &mut [StartupEntry]) {
+        let system_root = std::env::var("SystemRoot")
+            .unwrap_or_else(|_| r"C:\Windows".to_string())
+            .to_lowercase();
+        let mut targets: Vec<String> = Vec::new();
+        for entry in entries.iter_mut() {
+            entry.system_item = entry.target.to_lowercase().starts_with(&system_root);
+            if entry.target_exists
+                && !entry.target.is_empty()
+                && !targets
+                    .iter()
+                    .any(|seen| seen.eq_ignore_ascii_case(&entry.target))
+            {
+                targets.push(entry.target.clone());
+            }
+        }
+        let grades = crate::advanced::windows::signature_grades(&targets);
+        for entry in entries.iter_mut() {
+            if let Some((verdict, signer)) = grades.get(&entry.target.to_ascii_lowercase()) {
+                entry.signature = verdict.clone();
+                entry.signer = signer.clone();
+                if verdict == "microsoft" {
+                    entry.system_item = true;
+                }
+            } else {
+                entry.signature = "unknown".into();
+            }
+        }
     }
 
     pub(super) fn set_startup_enabled(entry: &StartupEntry, enabled: bool) -> Result<(), String> {
@@ -1670,6 +1808,149 @@ mod windows {
             .output()
             .map_err(|error| format!("sc 调用失败：{error}"))
             .map(|_| ())
+    }
+
+    /// Remove one autostart registration; see the module-level
+    /// `remove_startup_entry` for the semantics per source kind.
+    pub(super) fn remove_startup_entry(entry: &StartupEntry) -> Result<(), String> {
+        let Some((kind, rest)) = entry.id.split_once('|') else {
+            return Err("未知的启动项来源".to_string());
+        };
+        match kind {
+            "reg" => {
+                let pieces: Vec<&str> = rest.splitn(3, '|').collect();
+                let [hive_label, key_path, name] = pieces.as_slice() else {
+                    return Err("未知的启动项来源".to_string());
+                };
+                let (machine, base, list, prefix32) = split_run_path(hive_label, key_path);
+                let hive = RegKey::predef(if machine {
+                    HKEY_LOCAL_MACHINE
+                } else {
+                    HKEY_CURRENT_USER
+                });
+                let direct = (|| -> std::io::Result<()> {
+                    let key = hive.open_subkey_with_flags(key_path, KEY_READ | KEY_WRITE)?;
+                    key.delete_value(*name)
+                })();
+                if let Err(why) = direct {
+                    if why.kind() != std::io::ErrorKind::PermissionDenied {
+                        return Err(registry_error(why));
+                    }
+                    run_elevated(
+                        "reg.exe",
+                        &[
+                            "delete".to_string(),
+                            format!(r"{hive_label}\{key_path}"),
+                            "/v".to_string(),
+                            name.to_string(),
+                            "/f".to_string(),
+                        ],
+                    )?;
+                    if hive
+                        .open_subkey_with_flags(key_path, KEY_READ)
+                        .map(|key| key.get_raw_value(*name).is_ok())
+                        .unwrap_or(false)
+                    {
+                        return Err("提权删除后启动项仍然存在".to_string());
+                    }
+                }
+                // Task Manager keeps its own approval marker next to the row;
+                // drop it so the removed name cannot resurface as a ghost.
+                let marker = if prefix32 {
+                    format!("32|{name}")
+                } else {
+                    name.to_string()
+                };
+                let _ = hive
+                    .open_subkey_with_flags(
+                        format!(r"{base}\Explorer\StartupApproved\{list}"),
+                        KEY_READ | KEY_WRITE,
+                    )
+                    .and_then(|key| key.delete_value(&marker));
+                Ok(())
+            }
+            "folder" => {
+                let file = Path::new(rest);
+                match std::fs::remove_file(file) {
+                    Ok(()) => Ok(()),
+                    Err(why) if why.kind() == std::io::ErrorKind::PermissionDenied => {
+                        run_elevated(
+                            "cmd.exe",
+                            &["/C".to_string(), "del".to_string(), format!("/F /Q {rest}")],
+                        )?;
+                        if file.exists() {
+                            return Err("提权删除后快捷方式仍然存在".to_string());
+                        }
+                        Ok(())
+                    }
+                    Err(why) => Err(format!("删除快捷方式失败：{why}")),
+                }
+            }
+            "task" => {
+                use std::os::windows::process::CommandExt;
+                let output = std::process::Command::new("schtasks.exe")
+                    .args(["/Delete", "/TN", rest, "/F"])
+                    .creation_flags(0x0800_0000)
+                    .output()
+                    .map_err(|error| format!("无法调用 schtasks：{error}"))?;
+                if output.status.success() {
+                    return Ok(());
+                }
+                let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+                if stderr.contains("access is denied")
+                    || stderr.contains("access denied")
+                    || stderr.contains("拒绝访问")
+                {
+                    run_elevated(
+                        "schtasks.exe",
+                        &[
+                            "/Delete".to_string(),
+                            "/TN".to_string(),
+                            rest.to_string(),
+                            "/F".to_string(),
+                        ],
+                    )?;
+                    return Ok(());
+                }
+                Err(format!(
+                    "删除计划任务失败：{}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ))
+            }
+            "svc" => {
+                // Uninstalling a service outright breaks anything that still
+                // opens it, so 残留服务 is disabled instead (Start = 4).
+                set_startup_enabled(entry, false)?;
+                let key_path = format!(r"{SERVICES_KEY}\{rest}");
+                let direct = (|| -> std::io::Result<()> {
+                    let key = RegKey::predef(HKEY_LOCAL_MACHINE)
+                        .open_subkey_with_flags(&key_path, KEY_READ | KEY_WRITE)?;
+                    key.set_value("Start", &4u32)
+                })();
+                if let Err(why) = direct {
+                    if why.kind() != std::io::ErrorKind::PermissionDenied {
+                        return Err(registry_error(why));
+                    }
+                    run_elevated(
+                        "reg.exe",
+                        &[
+                            "add".to_string(),
+                            format!(r"HKLM\{key_path}"),
+                            "/v".to_string(),
+                            "Start".to_string(),
+                            "/t".to_string(),
+                            "REG_DWORD".to_string(),
+                            "/d".to_string(),
+                            "4".to_string(),
+                            "/f".to_string(),
+                        ],
+                    )?;
+                }
+                let _ = service_control(rest, "disabled");
+                Ok(())
+            }
+            _ => Err("这类启动项暂不支持删除".to_string()),
+        }
     }
 
     fn split_run_path(hive_label: &str, key_path: &str) -> (bool, String, &'static str, bool) {
@@ -2336,6 +2617,12 @@ mod macos {
                 id: format!("launchAgent|{}", path.display()),
                 name: label_text,
                 command: path.display().to_string(),
+                target: String::new(),
+                target_exists: true,
+                trigger: "logon".to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "launchAgent".to_string(),
@@ -2441,6 +2728,12 @@ mod linux {
                 id: format!("autostart|{}", path.display()),
                 name,
                 command: exec,
+                target: String::new(),
+                target_exists: true,
+                trigger: "logon".to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "autostart".to_string(),

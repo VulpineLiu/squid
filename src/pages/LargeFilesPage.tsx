@@ -266,8 +266,8 @@ export function LargeFilesPage({
                       `已选 ${pickedCount} 项 · ${formatBytes(pickedBytes)} → 移入回收站`,
                     )
                   : t(
-                      "Dormant files (180 days untouched) are tagged; disk images held by Hyper-V/WSL stay locked.",
-                      "长期未修改（180 天+）的文件会带休眠标记；被 Hyper-V/WSL 使用的镜像会锁定。",
+                      "Dormant files (180 days untouched) are tagged; disk images held by Hyper-V/WSL stay locked. Page files are hidden; hiberfil.sys frees via turning hibernation off.",
+                      "长期未修改（180 天+）的文件会带休眠标记；被 Hyper-V/WSL 使用的镜像会锁定。页面文件（pagefile/swapfile）已自动隐藏；hiberfil.sys 可通过关闭休眠释放。",
                     )}
               </small>
             </div>

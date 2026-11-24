@@ -42,7 +42,7 @@ pub struct AdvancedEntry {
 }
 
 #[cfg(windows)]
-mod windows {
+pub(crate) mod windows {
     use super::AdvancedEntry;
     use std::path::PathBuf;
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
@@ -241,6 +241,31 @@ mod windows {
         if exes.is_empty() {
             return;
         }
+        let grades = signature_grades(&exes);
+        for entry in entries.iter_mut() {
+            let Some(exe) = exe_of(&entry.command) else {
+                continue;
+            };
+            if let Some((verdict, signer)) = grades.get(&exe.to_ascii_lowercase()) {
+                entry.signature = verdict.clone();
+                entry.signer = signer.clone();
+            } else if entry.signature == "pending" {
+                entry.signature = "unknown".into();
+            }
+        }
+    }
+
+    /// One PowerShell round-trip grading many binaries at once:
+    /// lowercase path → (`verdict`, `signer`). Shared with the startup scan so
+    /// a page never shells out per row.
+    pub(crate) fn signature_grades(
+        exes: &[String],
+    ) -> std::collections::HashMap<String, (String, Option<String>)> {
+        let mut grades: std::collections::HashMap<String, (String, Option<String>)> =
+            Default::default();
+        if exes.is_empty() {
+            return grades;
+        }
         let list = exes
             .iter()
             .map(|exe| format!("'{}'", exe.replace('\'', "''")))
@@ -253,11 +278,9 @@ mod windows {
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .output()
         else {
-            return;
+            return grades;
         };
         let text = String::from_utf8_lossy(&output.stdout);
-        let mut grades: std::collections::HashMap<String, (String, Option<String>)> =
-            Default::default();
         for line in text.lines() {
             // Out-String may pad lines; match on containment of the marker.
             let Some(start) = line.find("@@|") else {
@@ -289,17 +312,7 @@ mod windows {
             };
             grades.insert(path.to_ascii_lowercase(), (verdict.into(), signer));
         }
-        for entry in entries.iter_mut() {
-            let Some(exe) = exe_of(&entry.command) else {
-                continue;
-            };
-            if let Some((verdict, signer)) = grades.get(&exe.to_ascii_lowercase()) {
-                entry.signature = verdict.clone();
-                entry.signer = signer.clone();
-            } else if entry.signature == "pending" {
-                entry.signature = "unknown".into();
-            }
-        }
+        grades
     }
 }
 

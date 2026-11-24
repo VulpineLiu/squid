@@ -68,6 +68,10 @@ function DupGroupCard({
 }) {
   const { t } = useI18n();
   const wasted = group.size * (group.copies.length - 1);
+  // The keeper row is now a normal, checkable copy: ticking it means "this
+  // group may end up with nothing left". The amber chip keeps saying 保留 so
+  // the strategy stays visible, and adds a warning when it gets picked.
+  const keepPicked = picked?.has(keep) ?? false;
   return (
     <section className={`dup-group ${group.personal ? "is-personal" : ""}`}>
       <header className="dup-group-head">
@@ -79,6 +83,11 @@ function DupGroupCard({
           <span className="dup-waste-chip">
             {t("wastes", "重复浪费")} {formatBytes(wasted)}
           </span>
+          {keepPicked ? (
+            <span className="dup-empty-chip">
+              {t("group will be empty", "本组将一份不剩")}
+            </span>
+          ) : null}
           {group.personal ? (
             <span className="dup-personal-chip">
               <Lock size={11} />
@@ -105,15 +114,32 @@ function DupGroupCard({
           return (
             <li
               key={copy.path}
-              className={`dup-copy ${checked ? "is-picked" : ""} ${isKeep ? "is-keep" : ""}`}
+              className={`dup-copy ${checked ? "is-picked" : ""} ${isKeep ? "is-keep" : ""} ${
+                isKeep && checked ? "is-keep-picked" : ""
+              }`}
             >
               <Checkbox
                 checked={checked}
-                disabled={Boolean(copy.locked) || isKeep}
+                disabled={Boolean(copy.locked)}
                 onChange={() => onToggle(index, copyIndex)}
                 label={copy.path}
               />
-              {isKeep ? <span className="dup-keep-chip">{t("keep", "保留")}</span> : null}
+              {isKeep ? (
+                <span
+                  className={`dup-keep-chip ${checked ? "is-danger" : ""}`}
+                  title={
+                    checked
+                      ? t(
+                          "This is the kept copy — deleting it leaves the group with nothing.",
+                          "此文件为最后保留版本，勾选即完全删除本组。",
+                        )
+                      : undefined
+                  }
+                >
+                  {checked ? t("keep · deleting", "保留 · 已勾选删除") : t("keep", "保留")}
+                </span>
+              ) : null}
+
               {copy.locked ? (
                 <span className="dup-lock-chip" title={copy.locked}>
                   <Lock size={11} />
@@ -192,6 +218,17 @@ export function DuplicateFilesPage({
   // Totals next to the toolbar follow the *visible* groups: an ignored group
   // stops counting toward what the page offers to reclaim.
   const visibleWasted = groups.reduce((sum, g) => sum + g.size * (g.copies.length - 1), 0);
+  // Groups whose *kept* copy is checked: deleting those erases the file
+  // entirely (every copy goes), which the summary strip and confirm dialog
+  // must call out before anything moves to the Recycle Bin.
+  const empties = entries.reduce(
+    (sum, entry) =>
+      sum +
+      (workspace.picks.get(entry.index)?.has(keepIndexOf(entry.group, workspace.keepStrategy))
+        ? 1
+        : 0),
+    0,
+  );
 
   // Hub badge: confirmed groups after ignores, or null before a scan.
   useEffect(() => {
@@ -347,6 +384,14 @@ export function DuplicateFilesPage({
               {formatCount(groups.length)} {t("groups · duplicate copies", "组 · 重复副本")}{" "}
               {formatCount(groups.reduce((sum, g) => sum + g.copies.length - 1, 0))} ·{" "}
               {formatBytes(visibleWasted)}
+              {empties > 0 ? (
+                <em className="dup-empties">
+                  {t(
+                    `${formatCount(empties)} group(s) will be fully removed`,
+                    ` · ${formatCount(empties)} 组将一份不剩`,
+                  )}
+                </em>
+              ) : null}
             </span>
             <Button
               variant="danger"
@@ -366,7 +411,7 @@ export function DuplicateFilesPage({
             </Button>
           </section>
           {confirming ? (
-            <section className="dup-confirm">
+            <section className={`dup-confirm ${empties > 0 ? "is-strict" : ""}`}>
               <ShieldAlert size={15} />
               <div>
                 <b>
@@ -374,16 +419,32 @@ export function DuplicateFilesPage({
                     ? `将 ${workspace.selectedCount} 个副本（${formatBytes(workspace.selectedBytes)}）移入回收站？`
                     : `Move ${workspace.selectedCount} copies (${formatBytes(workspace.selectedBytes)}) to the Recycle Bin?`}
                 </b>
+                {empties > 0 ? (
+                  <b className="dup-confirm-warn">
+                    {lang === "zh"
+                      ? `${formatCount(empties)} 组勾选了最后保留版本——这 ${formatCount(empties)} 组将被完全删除！`
+                      : `${formatCount(empties)} group(s) include the kept copy — they will be deleted entirely!`}
+                  </b>
+                ) : (
+                  <small>
+                    {t(
+                      "Every group keeps at least one copy; a mis-click is one Undo away from History.",
+                      "每组至少保留一份；误删可从「历史记录 → 撤销」找回。",
+                    )}
+                  </small>
+                )}
                 <small>
                   {t(
-                    "Every group keeps at least one copy; a mis-click is one Undo away from History.",
-                    "每组至少保留一份；误删可从「历史记录 → 撤销」找回。",
+                    "Deletions land in the Recycle Bin — undo from History.",
+                    "删除一律进回收站，可从「历史记录 → 撤销」找回。",
                   )}
                 </small>
               </div>
               <Button onClick={() => setConfirming(false)}>{t("Cancel", "取消")}</Button>
               <Button variant="danger" onClick={() => void confirmClean()}>
-                {t("Confirm", "确认清理")}
+                {empties > 0
+                  ? t("Delete everything selected", "确认完全删除")
+                  : t("Confirm", "确认清理")}
               </Button>
             </section>
           ) : null}

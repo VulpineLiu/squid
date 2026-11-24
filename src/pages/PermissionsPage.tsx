@@ -1,11 +1,23 @@
-import { BellRing, ChevronRight, RefreshCw, Search, ShieldCheck, Trash2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  BellRing,
+  ChevronRight,
+  FolderOpen,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { useI18n } from "../i18n";
+import { api } from "../lib/api";
 import { shortPath } from "../lib/format";
 import type { PermissionsWorkspace } from "../hooks/usePermissionsWorkspace";
 import type { StartupItem } from "../types";
 import {
   Button,
+  ConfirmDialog,
   EmptyState,
   IconButton,
   InlineError,
@@ -22,6 +34,84 @@ function scopeLabel(scope: string, t: (en: string, zh: string) => string): strin
 function softwareIcon(items: StartupItem[]): string {
   return items.find((item) => item.icon)?.icon ?? "";
 }
+
+// A row whose program binary no longer exists on disk — the config survived
+// an uninstall. MangoDisk calls these 残留项 and offers to delete the config.
+function isLeftover(item: StartupItem): boolean {
+  return item.targetExists === false;
+}
+
+// MangoDisk's source-kind chips: compact kind label, the detailed path lives
+// in the expanded row.
+const SOURCE_KIND: Record<string, [string, string]> = {
+  registry: ["Registry", "注册表"],
+  startupFolder: ["Startup folder", "启动文件夹"],
+  scheduledTask: ["Task", "计划任务"],
+  service: ["Service", "服务"],
+  launchAgent: ["LaunchAgent", "LaunchAgent"],
+  autostart: ["Autostart", "自启动"],
+};
+
+// When the row fires, phrased the way the user experiences it.
+const TRIGGER_LABEL: Record<string, [string, string]> = {
+  boot: ["On boot", "开机后"],
+  logon: ["On logon", "登录后"],
+  background: ["Background", "后台常驻"],
+};
+
+type SigTone = "microsoft" | "vendor" | "unsigned" | "invalid" | "unknown";
+
+function signatureChip(
+  verdict: string,
+  t: (en: string, zh: string) => string,
+): [string, string] | null {
+  switch (verdict as SigTone) {
+    case "microsoft":
+      return [t("Microsoft", "微软"), "is-microsoft"];
+    case "vendor":
+      return [t("Signed", "签名有效"), "is-vendor"];
+    case "unsigned":
+      return [t("Not signed", "未签名"), "is-unsigned"];
+    case "invalid":
+      return [t("Invalid", "签名无效"), "is-invalid"];
+    default:
+      return null;
+  }
+}
+
+// The one signature story a group tells: the worst verdict inside it, so a
+// group never looks greener than its sketchiest row.
+function groupSignature(items: StartupItem[]): string {
+  const seen = new Set(items.map((item) => item.signature ?? "unknown"));
+  if (seen.has("invalid")) return "invalid";
+  if (seen.has("unsigned")) return "unsigned";
+  if (seen.has("vendor")) return "vendor";
+  if (seen.has("microsoft")) return "microsoft";
+  return "unknown";
+}
+
+// 残留 / 已启用 / 已禁用 row tag; leftover wins the colour fight.
+function statusChip(
+  item: StartupItem,
+  t: (en: string, zh: string) => string,
+): [string, string] {
+  if (isLeftover(item)) return [t("Leftover", "残留"), "is-leftover"];
+  return item.enabled
+    ? [t("Enabled", "已启用"), "is-on"]
+    : [t("Disabled", "已禁用"), "is-off"];
+}
+
+// 启动文件夹 rows are removable by deleting the shortcut; the folder is a
+// nice human landing spot for anything else.
+function rowRevealPath(item: StartupItem): string {
+  const anchor = item.target || item.command;
+  if (!anchor) return "";
+  return anchor.replace(/"$/, "").replace(/^(.*\.(exe|lnk|bat|cmd))\s+/i, "$1");
+}
+
+// MangoDisk's status filter: a segment with live counts, 残留 included.
+type StartupFilter = "all" | "enabled" | "disabled" | "leftover";
+
 
 // 电脑管家 shows the owning software's icon on every row it can attribute to
 // an installed program; a grey initial covers the leftovers.
@@ -40,6 +130,9 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
   const [query, setQuery] = useState("");
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [extCat, setExtCat] = useState<string | null>(null);
+  const [startupFilter, setStartupFilter] = useState<StartupFilter>("all");
+  const [showSystem, setShowSystem] = useState(false);
+  const [removingIds, setRemovingIds] = useState<string[] | null>(null);
   const view = workspace.view;
 
   const tabs = useMemo(
@@ -121,26 +214,56 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
   }
 
   const needle = query.trim().toLowerCase();
-  const startup = view.startup.filter(
+  const startupSearch = view.startup.filter(
     (item) =>
       !needle ||
       item.name.toLowerCase().includes(needle) ||
       item.displayName.toLowerCase().includes(needle) ||
       item.command.toLowerCase().includes(needle),
   );
+  // MangoDisk's 显示系统项: Microsoft-signed / %SystemRoot% rows fold into a
+  // hideable 系统组件 group instead of mixing into the software list.
+  const systemName = t("System components", "系统组件");
+  const startupVisible = showSystem
+    ? startupSearch
+    : startupSearch.filter((item) => !item.systemItem);
+  const leftoverCount = startupVisible.filter(isLeftover).length;
+  const enabledCount = startupVisible.filter((item) => item.enabled && !isLeftover(item)).length;
+  const disabledCount = startupVisible.length - enabledCount - leftoverCount;
+  const counts: Record<StartupFilter, number> = {
+    all: startupVisible.length,
+    enabled: enabledCount,
+    disabled: disabledCount,
+    leftover: leftoverCount,
+  };
+  const startup = startupVisible.filter((item) =>
+    startupFilter === "all"
+      ? true
+      : startupFilter === "leftover"
+        ? isLeftover(item)
+        : startupFilter === "enabled"
+          ? item.enabled && !isLeftover(item)
+          : !item.enabled && !isLeftover(item),
+  );
   // 电脑管家 style: one group per software (Chinese name in the header);
   // every entry the backend could not attribute to a real product lands in
-  // a catch-all 其他软件 group, which always sorts last.
+  // a catch-all 其他软件 group; system rows sink to their own group last.
   const otherName = t("Other software", "其他软件");
   const startupGroups = new Map<string, typeof startup>();
   for (const item of startup) {
-    const key = item.named && item.displayName ? item.displayName : otherName;
+    const key = item.systemItem
+      ? systemName
+      : item.named && item.displayName
+        ? item.displayName
+        : otherName;
     const list = startupGroups.get(key) ?? [];
     list.push(item);
     startupGroups.set(key, list);
   }
   const orderedGroups = [...startupGroups.entries()].sort(
-    ([a], [b]) => Number(a === otherName) - Number(b === otherName),
+    ([a], [b]) =>
+      Number(a === otherName) - Number(b === otherName) ||
+      Number(a === systemName) - Number(b === systemName),
   );
   // Groups start folded (管家 habit): the header carries a master switch
   // and the status line; expanding shows the per-entry detail. Searching
@@ -223,21 +346,65 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
               `共 ${view.startupCount} 项，其中 ${view.startupEnabledCount} 项已开启。`,
             )}
           />
-          <label className="search-field">
-            <Search size={14} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("Filter by name or path…", "按名称或路径筛选…")}
-            />
-          </label>
+          <div className="perm-startup-bar">
+            <div className="perm-filter" role="tablist" aria-label={t("Status filter", "状态筛选")}>
+              {(
+                [
+                  ["all", "All", "全部"],
+                  ["enabled", "Enabled", "已启用"],
+                  ["disabled", "Disabled", "已禁用"],
+                  ["leftover", "Leftover", "残留"],
+                ] as const
+              ).map(([id, en, zh]) => (
+                <button
+                  key={id}
+                  role="tab"
+                  aria-selected={startupFilter === id}
+                  className={`perm-filter-tab ${startupFilter === id ? "is-active" : ""} ${
+                    id === "leftover" && counts.leftover > 0 ? "has-leftover" : ""
+                  }`}
+                  onClick={() => setStartupFilter(id)}
+                >
+                  {t(en, zh)}
+                  <b>{counts[id]}</b>
+                </button>
+              ))}
+            </div>
+            <div className="perm-startup-tools">
+              <label className="perm-system-toggle">
+                <Toggle
+                  checked={showSystem}
+                  onChange={setShowSystem}
+                  label={t("Show system items", "显示系统项")}
+                />
+                <span>{t("Show system items", "显示系统项")}</span>
+              </label>
+              <label className="search-field">
+                <Search size={14} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t("Filter by name or path…", "按名称或路径筛选…")}
+                />
+              </label>
+            </div>
+          </div>
           {orderedGroups.map(([software, items]) => {
-            const onCount = items.filter((item) => item.enabled).length;
+            const onCount = items.filter((item) => item.enabled && !isLeftover(item)).length;
             const allOn = onCount === items.length;
             const open = isGroupOpen(software);
             const groupIds = items.map((item) => item.id);
+            const leftovers = items.filter(isLeftover);
+            const sources = [...new Set(items.map((item) => item.source))];
+            const triggers = [...new Set(items.map((item) => item.trigger ?? "unknown"))];
+            const groupSigChip = signatureChip(groupSignature(items), t);
             return (
-              <div key={software} className={`perm-group-card ${open ? "is-open" : ""}`}>
+              <div
+                key={software}
+                className={`perm-group-card ${open ? "is-open" : ""} ${
+                  leftovers.length > 0 && leftovers.length === items.length ? "is-leftover" : ""
+                }`}
+              >
                 <h4 className="perm-group" onClick={() => toggleGroupOpen(software)}>
                   {items.find((item) => item.icon)?.icon ? (
                     <img className="perm-group-icon" src={softwareIcon(items)} alt="" />
@@ -247,6 +414,30 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
                     </span>
                   )}
                   <span className="perm-group-name">{software}</span>
+                  <span className="perm-group-chips">
+                    {leftovers.length > 0 ? (
+                      <span className="perm-sig is-leftover">
+                        {t(`${leftovers.length} leftover`, `${leftovers.length} 个残留`)}
+                      </span>
+                    ) : null}
+                    {sources.map((source) => {
+                      const n = items.filter((item) => item.source === source).length;
+                      return (
+                        <span className="perm-src-chip" key={source}>
+                          {t(SOURCE_KIND[source]?.[0] ?? source, SOURCE_KIND[source]?.[1] ?? source)}
+                          {n > 1 ? <i>×{n}</i> : null}
+                        </span>
+                      );
+                    })}
+                    {triggers.map((trigger) => (
+                      <span className="perm-src-chip" key={trigger}>
+                        {t(TRIGGER_LABEL[trigger]?.[0] ?? "—", TRIGGER_LABEL[trigger]?.[1] ?? "—")}
+                      </span>
+                    ))}
+                    {groupSigChip ? (
+                      <span className={`perm-sig ${groupSigChip[1]}`}>{groupSigChip[0]}</span>
+                    ) : null}
+                  </span>
                   <b className={allOn ? "is-all" : onCount === 0 ? "is-none" : "is-part"}>
                     {allOn
                       ? t("All on", "全部开启")
@@ -286,38 +477,130 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
                 </h4>
                 {open ? (
                   <div className="perm-rows">
-                    {items.map((item) => (
-                      <div
-                        className={`settings-row ${workspace.busyId === item.id ? "is-busy" : ""}`}
-                        key={item.id}
-                      >
-                        <div className="perm-row perm-row-noicon">
-                          <div>
-                            <span>{item.name}</span>
-                            <small title={item.command}>
-                              {item.sourceLabel} · {scopeLabel(item.scope, t)}
-                              {item.command ? ` · ${shortPath(item.command, 72)}` : ""}
-                            </small>
+                    {items.map((item) => {
+                      const [statusText, statusTone] = statusChip(item, t);
+                      const sigChip = signatureChip(item.signature ?? "unknown", t);
+                      const reveal = rowRevealPath(item);
+                      return (
+                        <div
+                          className={`settings-row ${
+                            workspace.busyId === item.id ? "is-busy" : ""
+                          } ${isLeftover(item) ? "is-leftover-row" : ""}`}
+                          key={item.id}
+                        >
+                          <div className="perm-row perm-row-noicon">
+                            <div>
+                              <span>
+                                {item.name}{" "}
+                                <em className={`perm-row-tag ${statusTone}`}>{statusText}</em>
+                              </span>
+                              <small title={item.command}>
+                                {item.sourceLabel} · {scopeLabel(item.scope, t)}
+                                {item.command ? ` · ${shortPath(item.command, 72)}` : ""}
+                              </small>
+                              <small className="perm-row-full" title={item.command}>
+                                {item.command || t("(no command line)", "（无命令行记录）")}
+                              </small>
+                            </div>
+                          </div>
+                          <div className="perm-row-actions">
+                            {sigChip ? (
+                              <span
+                                className={`perm-sig ${sigChip[1]}`}
+                                title={item.signer ?? undefined}
+                              >
+                                {sigChip[0]}
+                              </span>
+                            ) : null}
+                            {isLeftover(item) ? (
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                icon={<Trash2 size={13} />}
+                                disabled={workspace.busyId !== null}
+                                onClick={() => setRemovingIds([item.id])}
+                              >
+                                {t("Delete entry", "删除启动项")}
+                              </Button>
+                            ) : null}
+                            {reveal ? (
+                              <IconButton
+                                label={t("Open its folder", "打开所在文件夹")}
+                                onClick={() => void api.revealPath(reveal).catch(() => {})}
+                              >
+                                <FolderOpen size={15} />
+                              </IconButton>
+                            ) : null}
+                            <Toggle
+                              checked={item.enabled}
+                              disabled={workspace.busyId !== null}
+                              onChange={(next) => void workspace.toggleStartup(item.id, next)}
+                              label={`${item.name} ${item.enabled ? "disable" : "enable"}`}
+                            />
                           </div>
                         </div>
-                        <Toggle
-                          checked={item.enabled}
+                      );
+                    })}
+                    {leftovers.length > 0 && leftovers.length < items.length ? (
+                      <div className="perm-group-leftover-bar">
+                        <AlertTriangle size={13} />
+                        <span>
+                          {t(
+                            `${leftovers.length} leftover entries in this group — their programs are gone.`,
+                            `该组有 ${leftovers.length} 个残留项：程序已不存在，只剩启动配置。`,
+                          )}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="danger"
                           disabled={workspace.busyId !== null}
-                          onChange={(next) => void workspace.toggleStartup(item.id, next)}
-                          label={`${item.name} ${item.enabled ? "disable" : "enable"}`}
-                        />
+                          onClick={() => setRemovingIds(leftovers.map((item) => item.id))}
+                        >
+                          {t(
+                            `Delete ${leftovers.length} leftover(s)`,
+                            `删除 ${leftovers.length} 个残留项`,
+                          )}
+                        </Button>
                       </div>
-                    ))}
+                    ) : null}
                   </div>
                 ) : null}
               </div>
             );
           })}
           {startup.length === 0 ? (
-            <p className="perm-empty">{t("No matches.", "没有匹配的项目。")}</p>
+            <p className="perm-empty">
+              {counts.all === 0
+                ? t("No matches.", "没有匹配的项目。")
+                : t("Nothing here under this filter.", "当前筛选下没有项目。")}
+            </p>
           ) : null}
         </section>
       ) : null}
+
+      <ConfirmDialog
+        open={removingIds !== null}
+        tone="danger"
+        icon={<Trash2 size={24} />}
+        title={t("Delete startup entries?", "删除启动项？")}
+        message={t(
+          `Squid removes only the autostart registration (${removingIds?.length ?? 0} item(s)); no program files are touched.`,
+          `Squid 只删除启动配置（共 ${removingIds?.length ?? 0} 项），不会动任何程序文件。`,
+        )}
+        note={t(
+          "Registry values are deleted; Startup-folder shortcuts are removed; tasks are unscheduled; leftover services are set to disabled.",
+          "注册表值将被删除；启动文件夹的快捷方式会被移除；计划任务会被注销；残留服务会改为禁用。",
+        )}
+        confirmLabel={t("Delete", "删除")}
+        cancelLabel={t("Cancel", "取消")}
+        busy={workspace.busyId !== null}
+        onClose={() => setRemovingIds(null)}
+        onConfirm={async () => {
+          if (!removingIds) return;
+          await workspace.removeStartup(removingIds);
+          setRemovingIds(null);
+        }}
+      />
 
       {workspace.tab === "extensions" ? (
         <section className="settings-section">

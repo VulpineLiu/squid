@@ -158,6 +158,7 @@ pub fn run() {
             permissions::open_full_disk_access_settings,
             manage::manage_scan,
             manage::startup_set_enabled,
+            manage::startup_remove_entry,
             manage::advanced_scan,
             manage::advanced_set_enabled,
             manage::extension_set_registered,

@@ -376,6 +376,12 @@ pub fn large_files(
             if !meta.is_file() || meta.len() < min_bytes {
                 continue;
             }
+            // The page files are system-managed and permanently locked:
+            // listing them only teaches users that deleting C:\pagefile.sys
+            // fails. hiberfil.sys stays — it has a real, actionable switch.
+            if is_pagefile(&path) {
+                continue;
+            }
             if let Some(wanted) = class {
                 if file_class(&path) != wanted {
                     continue;
@@ -402,6 +408,29 @@ pub fn large_files(
         bytes: Bytes(emitted),
     });
     Ok(found)
+}
+
+/// The virtual-memory page files. They sit at a volume root, are held open by
+/// the kernel and cannot be deleted from Explorer, so a large-file sweep must
+/// not offer them. `hiberfil.sys` deliberately stays: turning hibernation off
+/// is a real, actionable way to free that space.
+fn is_pagefile(path: &Path) -> bool {
+    // Only the volume-root copies are the system's; a photo named
+    // pagefile.sys inside a folder stays listed. `C:\pagefile.sys` has
+    // parent `C:\`, whose own parent is none.
+    let at_root = path
+        .parent()
+        .and_then(|parent| parent.parent())
+        .map_or(true, |grand| grand.as_os_str().is_empty());
+    if !at_root {
+        return false;
+    }
+    path.file_name()
+        .map(|name| {
+            let name = name.to_string_lossy();
+            name.eq_ignore_ascii_case("pagefile.sys") || name.eq_ignore_ascii_case("swapfile.sys")
+        })
+        .unwrap_or(false)
 }
 
 /// System churn a large-file sweep should not crawl through.
@@ -553,5 +582,19 @@ mod tests {
         assert!(shown + node.folded_size.as_u64() > 0);
         assert!(!node.complete);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn page_files_hide_only_at_the_volume_root() {
+        // Paths are matched lexically; nothing has to exist on disk.
+        assert!(is_pagefile(std::path::Path::new(r"C:\pagefile.sys")));
+        assert!(is_pagefile(std::path::Path::new(r"C:\swapfile.sys")));
+        assert!(is_pagefile(std::path::Path::new(r"D:\PAGEFILE.SYS")));
+        // hiberfil stays listed — it has an actionable switch (关闭休眠).
+        assert!(!is_pagefile(std::path::Path::new(r"C:\hiberfil.sys")));
+        // A file that merely carries the name inside a folder is still shown.
+        assert!(!is_pagefile(std::path::Path::new(
+            r"C:\Users\me\pagefile.sys"
+        )));
     }
 }

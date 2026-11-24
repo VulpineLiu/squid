@@ -121,6 +121,7 @@ export const api = {
   manageScan: () => invoke<ManageView>("manage_scan"),
   startupSetEnabled: (id: string, enabled: boolean) =>
     invoke<number>("startup_set_enabled", { id, enabled }),
+  startupRemoveEntry: (id: string) => invoke<number>("startup_remove_entry", { id }),
   advancedScan: () => invoke<AdvancedScanResult>("advanced_scan"),
   advancedSetEnabled: (id: string, enabled: boolean) =>
     invoke<void>("advanced_set_enabled", { id, enabled }),

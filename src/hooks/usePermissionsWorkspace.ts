@@ -27,6 +27,8 @@ export interface PermissionsWorkspace {
   toggleStartup: (id: string, enabled: boolean) => Promise<void>;
   /** 电脑管家's master switch: flip every entry of one software group. */
   toggleStartupGroup: (ids: string[], enabled: boolean) => Promise<void>;
+  /** Delete leftover autostart registrations (config only, never files). */
+  removeStartup: (ids: string[]) => Promise<void>;
   toggleAdvanced: (id: string, enabled: boolean) => Promise<void>;
   toggleExtension: (id: string, registered: boolean) => Promise<void>;
   addRule: (hwnd: number, matcher: "exact" | "contains") => Promise<void>;
@@ -169,6 +171,35 @@ export function usePermissionsWorkspace(active: boolean): PermissionsWorkspace {
     [push, scan],
   );
 
+  const removeStartup = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      setBusyId(ids[0]);
+      setError(null);
+      const failures: string[] = [];
+      let removed = 0;
+      try {
+        for (const id of ids) {
+          try {
+            await api.startupRemoveEntry(id);
+            removed += 1;
+          } catch (reason) {
+            failures.push(messageFrom(reason));
+          }
+        }
+        await scan();
+      } finally {
+        setBusyId(null);
+      }
+      if (removed > 0) push(`已删除 ${removed} 个残留启动项`, "success");
+      if (failures.length > 0) {
+        setError(failures[0]);
+        push(failures[0], "danger");
+      }
+    },
+    [push, scan],
+  );
+
   const toggleAdvanced = useCallback(
     async (id: string, enabled: boolean) => {
       setBusyId(id);
@@ -293,6 +324,7 @@ export function usePermissionsWorkspace(active: boolean): PermissionsWorkspace {
     refreshWindows,
     toggleStartup,
     toggleStartupGroup,
+    removeStartup,
     toggleAdvanced,
     toggleExtension,
     addRule,

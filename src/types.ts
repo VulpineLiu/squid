@@ -472,6 +472,18 @@ export interface StartupItem {
   enabled: boolean;
   /** Attributed to a real product; false lands in the 其他软件 group. */
   named: boolean;
+  /** The binary this row really launches (`.lnk` resolved); "" when unknown. */
+  target?: string;
+  /** False = the program is gone: a 残留项 that can be removed. */
+  targetExists?: boolean;
+  /** When it fires: `boot` | `logon` | `background` | `unknown`. */
+  trigger?: string;
+  /** Microsoft-signed or under %SystemRoot%; hideable 系统组件 bucket. */
+  systemItem?: boolean;
+  /** `microsoft` | `vendor` | `unsigned` | `invalid` | `unknown`. */
+  signature?: string;
+  /** Signer subject when the binary carries a certificate. */
+  signer?: string | null;
 }
 
 export interface ShellExtension {

@@ -137,6 +137,19 @@ pub struct StartupView {
     enabled: bool,
     /// Attributed to a real software product (drives the 其他软件 bucket).
     named: bool,
+    /// The binary this row really launches (lnk resolved); empty when unknown.
+    target: String,
+    /// False = the target is gone: a 残留项 the UI can offer to delete.
+    target_exists: bool,
+    /// `boot` | `logon` | `background` | `unknown`.
+    trigger: String,
+    /// Microsoft-signed or under %SystemRoot% — the hideable 系统组件 bucket.
+    system_item: bool,
+    /// Signature verdict of `target`: `microsoft` | `vendor` | `unsigned` |
+    /// `invalid` | `unknown`.
+    signature: String,
+    /// Signer subject when the binary carries a certificate.
+    signer: Option<String>,
 }
 
 impl From<&StartupEntry> for StartupView {
@@ -152,6 +165,12 @@ impl From<&StartupEntry> for StartupView {
             scope: entry.scope.clone(),
             enabled: entry.enabled,
             named: entry.named,
+            target: entry.target.clone(),
+            target_exists: entry.target_exists,
+            trigger: entry.trigger.clone(),
+            system_item: entry.system_item,
+            signature: entry.signature.clone(),
+            signer: entry.signer.clone(),
         }
     }
 }
@@ -325,6 +344,28 @@ pub async fn startup_set_enabled(
         .cloned()
         .ok_or_else(|| "请先重新扫描启动项".to_string())?;
     tauri::async_runtime::spawn_blocking(move || permissions::set_startup_enabled(&entry, enabled))
+        .await
+        .map_err(|error| error.to_string())??;
+    let fresh = tauri::async_runtime::spawn_blocking(permissions::scan_startup_entries)
+        .await
+        .map_err(|error| error.to_string())?;
+    let enabled_count = fresh.iter().filter(|entry| entry.enabled).count();
+    *ManageState::lock(&manage.startup)? = fresh;
+    Ok(enabled_count)
+}
+
+/// Delete one autostart registration — aimed at 残留项 whose program is gone.
+/// Only the config (registry value / shortcut / task) is removed, never files;
+/// services are disabled instead of uninstalled. Returns the new enabled count.
+#[tauri::command]
+pub async fn startup_remove_entry(app: AppHandle, id: String) -> Result<usize, String> {
+    let manage = app.state::<ManageState>();
+    let entry = ManageState::lock(&manage.startup)?
+        .iter()
+        .find(|entry| entry.id == id)
+        .cloned()
+        .ok_or_else(|| "请先重新扫描启动项".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || permissions::remove_startup_entry(&entry))
         .await
         .map_err(|error| error.to_string())??;
     let fresh = tauri::async_runtime::spawn_blocking(permissions::scan_startup_entries)
