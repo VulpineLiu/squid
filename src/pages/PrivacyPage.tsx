@@ -41,7 +41,14 @@ interface SpecGroup {
   locked: string | null;
 }
 
-export function PrivacyPage() {
+export function PrivacyPage({
+  embedded = false,
+  onBadge,
+}: {
+  /** Rendered inside 系统维护 hub: page title hides, trace count flows up. */
+  embedded?: boolean;
+  onBadge?: (value: string | null) => void;
+} = {}) {
   const { t, lang } = useI18n();
   const { push } = useToast();
   const [items, setItems] = useState<CleanupItem[]>([]);
@@ -109,6 +116,12 @@ export function PrivacyPage() {
 
   const pickedBytes = [...picked].reduce((sum, index) => sum + (items[index]?.onDisk ?? 0), 0);
 
+  // Hub badge: trace groups found by the auto-scan, or null when clean.
+  useEffect(() => {
+    if (!embedded || !onBadge) return;
+    onBadge(groups.length > 0 ? `${groups.length} 类痕迹` : null);
+  }, [embedded, groups.length, onBadge]);
+
   const clean = async () => {
     if (!scanId || picked.size === 0) return;
     setCleaning(true);
@@ -129,14 +142,16 @@ export function PrivacyPage() {
   };
 
   return (
-    <div className="page privacy-page">
-      <PageHeader
-        title={t("Privacy cleaning", "隐私清理")}
-        description={t(
-          "History and traces leave the machine for good — this page never uses the Recycle Bin, but every run is written to History.",
-          "历史与痕迹「删了就回不来」：本页删除不进回收站（浏览器 profile 半恢复反而更糟），但同样逐条写入历史记录审计。",
-        )}
-      />
+    <div className={`page privacy-page ${embedded ? "is-embedded" : ""}`}>
+      {embedded ? null : (
+        <PageHeader
+          title={t("Privacy cleaning", "隐私清理")}
+          description={t(
+            "History and traces leave the machine for good — this page never uses the Recycle Bin, but every run is written to History.",
+            "历史与痕迹「删了就回不来」：本页删除不进回收站（浏览器 profile 半恢复反而更糟），但同样逐条写入历史记录审计。",
+          )}
+        />
+      )}
       {error ? <InlineError message={error} onDismiss={() => setError(null)} /> : null}
 
       <section className="privacy-grid">

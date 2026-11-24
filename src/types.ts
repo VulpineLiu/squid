@@ -5,13 +5,8 @@ export type PageId =
   | "applications"
   | "permissions"
   | "widget"
-  | "storage"
-  | "duplicates"
-  | "large-files"
   | "system"
   | "maintenance"
-  | "privacy"
-  | "optimization"
   | "history"
   | "settings";
 

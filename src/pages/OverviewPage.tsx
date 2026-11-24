@@ -73,12 +73,15 @@ export function OverviewPage({
   cleanup,
   purge,
   onNavigate,
+  onOpenSpaceTab,
 }: {
   bootstrap: Bootstrap;
   snapshot: SystemSnapshot | null;
   cleanup: ScanWorkspace;
   purge: ScanWorkspace;
   onNavigate: (page: PageId) => void;
+  /** Deep-link into a 空间清理 hub tab (重复文件 / 大文件). */
+  onOpenSpaceTab?: (tab: "junk" | "dups" | "big") => void;
 }) {
   const { t, lang } = useI18n();
   const volumes = snapshot?.volumes ?? [];
@@ -437,12 +440,15 @@ export function OverviewPage({
             </span>
             <ChevronRight size={17} />
           </button>
-          <button className="quick-card tone-indigo" onClick={() => onNavigate("storage")}>
+          <button
+            className="quick-card tone-indigo"
+            onClick={() => onOpenSpaceTab?.("big")}
+          >
             <span className="quick-icon">
-              <Boxes size={22} />
+              <HardDrive size={22} />
             </span>
             <span className="quick-copy">
-              <strong>{t("Explore storage", "浏览存储空间")}</strong>
+              <strong>{t("Large files", "大文件")}</strong>
               <small>{t("See what is taking up space", "查看空间都被什么占用")}</small>
             </span>
             <ChevronRight size={17} />

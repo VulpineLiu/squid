@@ -27,7 +27,14 @@ const RISK_CHIP: Record<MaintenanceTask["risk"], [string, string, string]> = {
   slow: ["is-slow", "较慢", "Slow"],
 };
 
-export function MaintenancePage() {
+export function MaintenancePage({
+  embedded = false,
+  onBadge,
+}: {
+  /** Rendered inside 系统维护 hub: page title hides, task count flows up. */
+  embedded?: boolean;
+  onBadge?: (value: string | null) => void;
+} = {}) {
   const { t, lang } = useI18n();
   const { push } = useToast();
   const [tasks, setTasks] = useState<MaintenanceTask[]>([]);
@@ -37,6 +44,10 @@ export function MaintenancePage() {
   const [result, setResult] = useState<MaintenanceResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const job = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (embedded && onBadge) onBadge(tasks.length > 0 ? `${tasks.length} 项` : null);
+  }, [embedded, onBadge, tasks.length]);
 
   useEffect(() => {
     let alive = true;
@@ -96,14 +107,16 @@ export function MaintenancePage() {
   );
 
   return (
-    <div className="page maintenance-page">
-      <PageHeader
-        title={t("System maintenance", "系统维护")}
-        description={t(
-          "One-click repairs for the everyday complaints. Every command comes from a fixed whitelist — nothing here accepts free-form input.",
-          "常见故障一键修复。所有命令来自固定白名单，可显示原始输出；同类任务互斥执行。",
-        )}
-      />
+    <div className={`page maintenance-page ${embedded ? "is-embedded" : ""}`}>
+      {embedded ? null : (
+        <PageHeader
+          title={t("System maintenance", "系统维护")}
+          description={t(
+            "One-click repairs for the everyday complaints. Every command comes from a fixed whitelist — nothing here accepts free-form input.",
+            "常见故障一键修复。所有命令来自固定白名单，可显示原始输出；同类任务互斥执行。",
+          )}
+        />
+      )}
       {error ? <InlineError message={error} onDismiss={() => setError(null)} /> : null}
 
       <div className="maint-summary">

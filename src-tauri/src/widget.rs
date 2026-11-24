@@ -125,19 +125,30 @@ pub fn lower_window(app: &AppHandle) {
     }
 }
 
-/// Win+D proof, Pulsar-style heartbeat: if the shell put the wanted widget
-/// away, bring it back within a beat and repaint it once (the transparent
-/// webview can stay blank after a cloak round-trip).
+/// Desktop residency (Windows): heartbeat that both counters Win+D and
+/// guards the docked position.
+///
+/// Two jobs, one loop:
+/// 1. If the shell put the widget away (Win+D / 显示桌面), bring it back
+///    within a beat and repaint once (as before).
+/// 2. Position guard: compare the window's actual position with where the
+///    prefs say it belongs (docked corner, or the remembered drag point).
+///    Any mismatch re-docks and re-parks the widget. This catches *every*
+///    way the window can end up mid-desktop: an RDP peer connecting
+///    disconnects the console session and Windows re-lays-out top-level
+///    windows on the next local unlock, a resolution switch, or another
+///    program nudging it. The previous fix only watched the monitor size —
+///    an RDP round-trip keeps the console resolution constant, so the
+///    re-layout went unnoticed. A grace window suppresses re-docking while
+///    the user is dragging (position still moving between ticks; the drag
+///    persists `position` through widget_set, after which the expected spot
+///    *is* the new location, so the guard never fights the pointer).
 #[cfg(windows)]
 pub fn spawn_desktop_watch(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
-        // Last desktop size the widget was parked against. An RDP logon
-        // rebuilds the console display device and Windows repositions
-        // top-level windows by that older, smaller geometry; when the native
-        // resolution returns the widget lands mid-desktop instead of its
-        // corner. Tracking the size re-docks it on every such shift.
-        let mut last_screen: Option<(u32, u32)> = None;
+        let mut last_pos: Option<(i32, i32)> = None;
+        let mut grace = std::time::Instant::now();
         loop {
             std::thread::sleep(std::time::Duration::from_millis(1_500));
             let Some(state) = app.try_state::<WidgetState>() else {
@@ -161,22 +172,24 @@ pub fn spawn_desktop_watch(app: &AppHandle) {
             };
             let Ok(hwnd) = window.hwnd() else { continue };
             let raw: *mut std::ffi::c_void = hwnd.0.cast();
-            let screen = window
-                .primary_monitor()
-                .ok()
-                .flatten()
-                .map(|m| (m.size().width, m.size().height));
-            if screen.is_some() && screen != last_screen {
-                let first = last_screen.is_some();
-                last_screen = screen;
-                // The very first observation only records the baseline; after
-                // that every change (RDP in, RDP out, hot-plug, resolution
-                // switch) re-docks and re-parks the widget.
-                if first {
-                    place_window(&app, &prefs);
-                    desktop_layer::lower(raw);
+            // ── position guard ────────────────────────────────────────────
+            let position = window.outer_position().ok().map(|p| (p.x, p.y));
+            if let Some(pos) = position {
+                if last_pos != Some(pos) {
+                    // The window just moved: someone (the user, most likely)
+                    // is working on it. Re-check shortly instead of yanking
+                    // it mid-drag; the loop's cadence doubles as the grace.
+                    last_pos = Some(pos);
+                    grace = std::time::Instant::now() + std::time::Duration::from_millis(3_500);
+                } else if std::time::Instant::now() >= grace {
+                    let settled = is_settled(&window, &prefs);
+                    if !settled {
+                        place_window(&app, &prefs);
+                        desktop_layer::lower(raw);
+                    }
                 }
             }
+            // ── Win+D recovery ────────────────────────────────────────────
             let mut took_down = false;
             if !desktop_layer::shell_hidden(raw, &mut took_down) {
                 continue;
@@ -194,6 +207,25 @@ pub fn spawn_desktop_watch(app: &AppHandle) {
             }
         }
     });
+}
+
+/// Whether the widget currently sits where the prefs say it belongs
+/// (tolerating a couple of pixels of DPI rounding). False when the geometry
+/// cannot be queried — a failed query re-docks rather than strands.
+#[cfg(windows)]
+fn is_settled(window: &tauri::WebviewWindow, prefs: &WidgetPrefs) -> bool {
+    let Ok(Some(monitor)) = window.primary_monitor() else {
+        return false;
+    };
+    let Ok(pos) = window.outer_position() else {
+        return false;
+    };
+    let outer = window
+        .outer_size()
+        .map(|s| (s.width as i32, s.height as i32))
+        .unwrap_or((350, 620));
+    let want = dock_position((monitor.size().width, monitor.size().height), outer, prefs);
+    (pos.x - want.0).abs() <= 2 && (pos.y - want.1).abs() <= 2
 }
 
 #[cfg(not(windows))]

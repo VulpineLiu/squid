@@ -9,7 +9,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as apiClient from "../lib/api";
 import { useI18n } from "../i18n";
@@ -142,7 +142,14 @@ function DupGroupCard({
   );
 }
 
-export function DuplicateFilesPage() {
+export function DuplicateFilesPage({
+  embedded = false,
+  onBadge,
+}: {
+  /** Rendered inside 空间清理 hub: page title hides, stats flow to onBadge. */
+  embedded?: boolean;
+  onBadge?: (value: string | null) => void;
+} = {}) {
   const { t, lang } = useI18n();
   const { push } = useToast();
   const workspace = useDuplicatesWorkspace();
@@ -186,15 +193,23 @@ export function DuplicateFilesPage() {
   // stops counting toward what the page offers to reclaim.
   const visibleWasted = groups.reduce((sum, g) => sum + g.size * (g.copies.length - 1), 0);
 
+  // Hub badge: confirmed groups after ignores, or null before a scan.
+  useEffect(() => {
+    if (!embedded || !onBadge) return;
+    onBadge(groups.length > 0 ? `${groups.length} 组 · ${formatBytes(visibleWasted)}` : null);
+  }, [embedded, groups.length, onBadge, visibleWasted]);
+
   return (
-    <div className="page dup-page">
-      <PageHeader
-        title={t("Duplicate files", "重复文件")}
-        description={t(
-          "Byte-identical copies proven by a three-stage hash funnel. Deletions land in the Recycle Bin.",
-          "大小分组 → 头中尾采样 → 全量校验，三级漏斗逐字节确认。删除全部走回收站，可撤销。",
-        )}
-      />
+    <div className={`page dup-page ${embedded ? "is-embedded" : ""}`}>
+      {embedded ? null : (
+        <PageHeader
+          title={t("Duplicate files", "重复文件")}
+          description={t(
+            "Byte-identical copies proven by a three-stage hash funnel. Deletions land in the Recycle Bin.",
+            "大小分组 → 头中尾采样 → 全量校验，三级漏斗逐字节确认。删除全部走回收站，可撤销。",
+          )}
+        />
+      )}
       {workspace.error ? <InlineError message={workspace.error} onDismiss={workspace.clearError} /> : null}
 
       <section className="dup-config">

@@ -6,7 +6,14 @@ import { messageFrom } from "../lib/format";
 import { Button, InlineError, PageHeader, Toggle, useToast } from "../components/ui";
 import type { TweakState } from "../types";
 
-export function OptimizationPage() {
+export function OptimizationPage({
+  embedded = false,
+  onBadge,
+}: {
+  /** Rendered inside 系统维护 hub: page title hides, changed count flows up. */
+  embedded?: boolean;
+  onBadge?: (value: string | null) => void;
+} = {}) {
   const { t, lang } = useI18n();
   const { push } = useToast();
   const [states, setStates] = useState<TweakState[]>([]);
@@ -40,6 +47,12 @@ export function OptimizationPage() {
 
   const changed = states.filter((state) => state.recorded).length;
 
+  // Hub badge: how many tweaks have been flipped so far (null when none).
+  useEffect(() => {
+    if (!embedded || !onBadge) return;
+    onBadge(changed > 0 ? `已更改 ${changed} 项` : null);
+  }, [changed, embedded, onBadge]);
+
   const restoreAll = async () => {
     setBusy("__all__");
     try {
@@ -59,19 +72,21 @@ export function OptimizationPage() {
   };
 
   return (
-    <div className="page optimize-page">
-      <PageHeader
-        title={t("System optimisation", "系统优化")}
-        description={t(
-          "A small, curated set of reversible switches. The first write records the system's original value; one button puts every change back.",
-          "少而稳的可逆开关目录。首次修改前记录系统原值，顶部一键「恢复全部默认」。每一项都先在真机验证后才会上架。",
-        )}
-        actions={
-          <Button variant="secondary" icon={<RotateCcw size={14} />} disabled={busy !== null || changed === 0} onClick={() => void restoreAll()}>
-            {t("Restore all defaults", "恢复全部默认")}
-          </Button>
-        }
-      />
+    <div className={`page optimize-page ${embedded ? "is-embedded" : ""}`}>
+      {embedded ? null : (
+        <PageHeader
+          title={t("System optimisation", "系统优化")}
+          description={t(
+            "A small, curated set of reversible switches. The first write records the system's original value; one button puts every change back.",
+            "少而稳的可逆开关目录。首次修改前记录系统原值，顶部一键「恢复全部默认」。每一项都先在真机验证后才会上架。",
+          )}
+          actions={
+            <Button variant="secondary" icon={<RotateCcw size={14} />} disabled={busy !== null || changed === 0} onClick={() => void restoreAll()}>
+              {t("Restore all defaults", "恢复全部默认")}
+            </Button>
+          }
+        />
+      )}
       {error ? <InlineError message={error} onDismiss={() => setError(null)} /> : null}
 
       <section className="optimize-group">
@@ -84,6 +99,19 @@ export function OptimizationPage() {
               ? t(`${changed} changed · revertable`, `已更改 ${changed} 项 · 可随时恢复`)
               : t("Nothing changed yet", "尚未更改任何项")}
           </span>
+          {/* Embedded (维护 hub): the page header — and with it the restore
+              button — is hidden, so the group head carries it instead. */}
+          {embedded ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<RotateCcw size={13} />}
+              disabled={busy !== null || changed === 0}
+              onClick={() => void restoreAll()}
+            >
+              {t("Restore all defaults", "恢复全部默认")}
+            </Button>
+          ) : null}
         </div>
         <ul className="optimize-list">
           {states.map((state) => (

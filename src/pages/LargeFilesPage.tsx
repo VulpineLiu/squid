@@ -10,7 +10,7 @@ import {
   ShieldAlert,
   Trash2,
 } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as apiClient from "../lib/api";
 import { subscribeJobProgress } from "../lib/api";
 import { useI18n } from "../i18n";
@@ -51,7 +51,14 @@ const CLASS_ICON: Record<LargeFile["class"], typeof HardDrive> = {
 /** 休眠判定沿用清理页口径：180 天无修改即值得标记。 */
 const DORMANT_SECS = 180 * 86_400;
 
-export function LargeFilesPage() {
+export function LargeFilesPage({
+  embedded = false,
+  onBadge,
+}: {
+  /** Rendered inside 空间清理 hub: page title hides, stats flow to onBadge. */
+  embedded?: boolean;
+  onBadge?: (value: string | null) => void;
+} = {}) {
   const { t, lang } = useI18n();
   const { push } = useToast();
   const [files, setFiles] = useState<LargeFile[] | null>(null);
@@ -113,6 +120,16 @@ export function LargeFilesPage() {
     .reduce((sum, file) => sum + file.size, 0) ?? 0;
   const pickedCount = picked.size;
 
+  // Hub badge: found files, or null before a scan.
+  useEffect(() => {
+    if (!embedded || !onBadge) return;
+    onBadge(
+      visible && visible.length > 0
+        ? `${formatCount(visible.length)} 个 · ${formatBytes(totalBytes)}`
+        : null,
+    );
+  }, [embedded, onBadge, totalBytes, visible]);
+
   const toggle = (path: string) => {
     setPicked((current) => {
       const next = new Set(current);
@@ -146,14 +163,16 @@ export function LargeFilesPage() {
   const now = Date.now();
 
   return (
-    <div className="page bigfiles-page">
-      <PageHeader
-        title={t("Large files", "大文件")}
-        description={t(
-          "Everything heavy across your drives, with dormancy and lock hints before anything goes to the Recycle Bin.",
-          "全盘范围的大文件清单，附休眠与占用提示；删除同样进回收站、可撤销。",
-        )}
-      />
+    <div className={`page bigfiles-page ${embedded ? "is-embedded" : ""}`}>
+      {embedded ? null : (
+        <PageHeader
+          title={t("Large files", "大文件")}
+          description={t(
+            "Everything heavy across your drives, with dormancy and lock hints before anything goes to the Recycle Bin.",
+            "全盘范围的大文件清单，附休眠与占用提示；删除同样进回收站、可撤销。",
+          )}
+        />
+      )}
       {error ? <InlineError message={error} onDismiss={() => setError(null)} /> : null}
 
       <section className="bigfiles-config">

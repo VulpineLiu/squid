@@ -8054,3 +8054,59 @@ html.widget-mode body {
   font-size: var(--nex-text-3xs);
   white-space: nowrap;
 }
+
+/* ── Hub pages（空间清理/系统维护 三页签容器，方案①②）────────────── */
+
+.hub-page .hub-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 18px 0 4px;
+}
+
+.hub-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border: 1px solid var(--nex-line);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-sm);
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.hub-tab b {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--nex-cream);
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.hub-tab.is-active {
+  border-color: color-mix(in oklab, var(--nex-accent) 35%, transparent);
+  background: color-mix(in oklab, var(--nex-accent) 8%, #fff);
+  color: #2b2620;
+  font-weight: var(--nex-weight-semibold);
+}
+
+.hub-tab.is-active b {
+  background: color-mix(in oklab, var(--nex-accent) 14%, #fff);
+  color: var(--nex-accent);
+}
+
+/* Embedded panels keep their DOM alive (display toggle) so scans, picks
+   and running repairs survive tab switches; the nesting padding collapses. */
+.hub-pane > .page.is-embedded {
+  padding: 0;
+}
+
+.space-embedded-head {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}

@@ -454,12 +454,17 @@ export function SpacePage({
   bootstrap,
   deleteMode,
   onHistory,
+  embedded = false,
+  onBadge,
 }: {
   cleanup: ScanWorkspace;
   purge: ScanWorkspace;
   bootstrap: Bootstrap;
   deleteMode: DeleteMode;
   onHistory: () => void;
+  /** Rendered inside 空间清理 hub: page title hides, stats flow to onBadge. */
+  embedded?: boolean;
+  onBadge?: (value: string | null) => void;
 }) {
   const { t, lang, bin } = useI18n();
   const { push } = useToast();
@@ -507,6 +512,21 @@ export function SpacePage({
 
   // Default checking is seeded at scan time by the workspaces' selection
   // policy (App.tsx spaceDefaults): daily groups on, opt-in groups off.
+
+  // Hub badge: live count/size of the scan result, or null before one lands.
+  useEffect(() => {
+    if (!embedded || !onBadge) return;
+    const items = (cleanup.result?.items.length ?? 0) + (purge.result?.items.length ?? 0);
+    if (items === 0) {
+      onBadge(null);
+      return;
+    }
+    let total = 0;
+    for (const source of [cleanup, purge]) {
+      for (const item of source.result?.items ?? []) total += item.onDisk;
+    }
+    onBadge(`${t(`${formatCount(items)} items`, `${formatCount(items)} 项`)} · ${formatBytes(total)}`);
+  }, [cleanup.result, embedded, onBadge, purge.result, t]);
 
   const entries = useMemo<Entry[]>(() => {
     const all: Entry[] = [];
@@ -1003,7 +1023,21 @@ export function SpacePage({
   }
 
   return (
-    <div className="page">
+    <div className={`page ${embedded ? "is-embedded" : ""}`}>
+      {embedded ? (
+        <div className="space-embedded-head">
+          <Button
+            variant={cleanup.result || purge.result ? "secondary" : "primary"}
+            icon={<ScanSearch size={15} />}
+            onClick={() => void runScan()}
+            disabled={scanning || deleting}
+          >
+            {cleanup.result || purge.result
+              ? t("Rescan", "重新扫描")
+              : t("Start scan", "开始扫描")}
+          </Button>
+        </div>
+      ) : (
       <div className="space-head">
         <div>
           <div className="eyebrow">{t("Space cleaning", "空间清理")}</div>
@@ -1028,6 +1062,7 @@ export function SpacePage({
             : t("Start scan", "开始扫描")}
         </Button>
       </div>
+      )}
 
       <div className="space-config">
         <span className="space-config-label">
@@ -1137,6 +1172,13 @@ export function SpacePage({
               "尚未扫描。点击「开始扫描」，Squid 会检查已知缓存位置，并自动发现本机各处的项目构建目录。",
             )}
           </span>
+          {/* Embedded: the head button is hidden inside the hub, so the
+              empty stage carries its own entry point. */}
+          {embedded ? (
+            <Button variant="primary" icon={<ScanSearch size={15} />} onClick={() => void runScan()}>
+              {t("Start scan", "开始扫描")}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
