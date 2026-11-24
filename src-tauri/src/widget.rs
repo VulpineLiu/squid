@@ -131,42 +131,67 @@ pub fn lower_window(app: &AppHandle) {
 #[cfg(windows)]
 pub fn spawn_desktop_watch(app: &AppHandle) {
     let app = app.clone();
-    std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_millis(1_500));
-        let Some(state) = app.try_state::<WidgetState>() else {
-            continue;
-        };
-        let prefs = state.current();
-        // A panel the user switched off (master switch, or every panel off —
-        // sync_window hides the empty shell then) is never resurrected; the
-        // watchdog only ever counters the shell's doing.
-        let wanted = prefs.enabled
-            && (prefs.panel_run
-                || prefs.panel_cpu
-                || prefs.panel_network
-                || prefs.panel_disk
-                || prefs.panel_storage);
-        if !wanted {
-            continue;
-        }
-        let Some(window) = app.get_webview_window(WIDGET_LABEL) else {
-            continue;
-        };
-        let Ok(hwnd) = window.hwnd() else { continue };
-        let raw: *mut std::ffi::c_void = hwnd.0.cast();
-        let mut took_down = false;
-        if !desktop_layer::shell_hidden(raw, &mut took_down) {
-            continue;
-        }
-        let _ = window.unminimize();
-        let _ = window.show();
-        desktop_layer::lower(raw);
-        // When the shell actively took the window down, Show() clears the
-        // cloak but the composed page can come back blank; one cheap reload
-        // makes it honest again. A plain hidden window (mid-startup) just
-        // needed showing.
-        if took_down {
-            let _ = window.eval("location.reload()");
+    std::thread::spawn(move || {
+        // Last desktop size the widget was parked against. An RDP logon
+        // rebuilds the console display device and Windows repositions
+        // top-level windows by that older, smaller geometry; when the native
+        // resolution returns the widget lands mid-desktop instead of its
+        // corner. Tracking the size re-docks it on every such shift.
+        let mut last_screen: Option<(u32, u32)> = None;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(1_500));
+            let Some(state) = app.try_state::<WidgetState>() else {
+                continue;
+            };
+            let prefs = state.current();
+            // A panel the user switched off (master switch, or every panel off —
+            // sync_window hides the empty shell then) is never resurrected; the
+            // watchdog only ever counters the shell's doing.
+            let wanted = prefs.enabled
+                && (prefs.panel_run
+                    || prefs.panel_cpu
+                    || prefs.panel_network
+                    || prefs.panel_disk
+                    || prefs.panel_storage);
+            if !wanted {
+                continue;
+            }
+            let Some(window) = app.get_webview_window(WIDGET_LABEL) else {
+                continue;
+            };
+            let Ok(hwnd) = window.hwnd() else { continue };
+            let raw: *mut std::ffi::c_void = hwnd.0.cast();
+            let screen = window
+                .primary_monitor()
+                .ok()
+                .flatten()
+                .map(|m| (m.size().width, m.size().height));
+            if screen.is_some() && screen != last_screen {
+                let first = last_screen.is_some();
+                last_screen = screen;
+                // The very first observation only records the baseline; after
+                // that every change (RDP in, RDP out, hot-plug, resolution
+                // switch) re-docks and re-parks the widget.
+                if first {
+                    place_window(&app, &prefs);
+                    desktop_layer::lower(raw);
+                }
+            }
+            let mut took_down = false;
+            if !desktop_layer::shell_hidden(raw, &mut took_down) {
+                continue;
+            }
+            let _ = window.unminimize();
+            let _ = window.show();
+            desktop_layer::lower(raw);
+            // When the shell actively took the window down, Show() clears the
+            // cloak but the composed page can come back blank; one cheap reload
+            // makes it honest again. A plain hidden window (mid-startup) just
+            // needed showing.
+            if took_down {
+                place_window(&app, &prefs);
+                let _ = window.eval("location.reload()");
+            }
         }
     });
 }
@@ -289,9 +314,36 @@ fn save_prefs(state: &WidgetState) -> Result<(), String> {
     fs::write(path, text).map_err(|error| error.to_string())
 }
 
+/// Where the widget belongs on a screen of `screen` pixels, all in physical
+/// pixels: the remembered drag position clamped into the monitor (an
+/// unplugged-secondary position can not hide it off-screen), or the
+/// configured corner. Pure so the re-dock maths stays testable headless.
+fn dock_position(screen: (u32, u32), outer: (i32, i32), prefs: &WidgetPrefs) -> (i32, i32) {
+    let margin = 16;
+    if let Some((x, y)) = prefs.position {
+        (
+            x.clamp(0, (screen.0 as i32 - outer.0).max(0)),
+            y.clamp(0, (screen.1 as i32 - outer.1).max(0)),
+        )
+    } else {
+        let x = match prefs.corner.as_str() {
+            "top-left" | "bottom-left" => margin,
+            _ => screen.0 as i32 - outer.0 - margin,
+        };
+        let y = match prefs.corner.as_str() {
+            "bottom-left" | "bottom-right" => screen.1 as i32 - outer.1 - margin,
+            _ => margin,
+        };
+        (x, y)
+    }
+}
+
 /// Dock to a screen corner (widget width ~350px) or restore the remembered
-/// drag position. Called on creation and whenever the corner changes. All
-/// math is in physical pixels — the webview reports `outerPosition` there.
+/// drag position. Called on creation, whenever the corner changes, and
+/// whenever the heartbeat sees the desktop geometry shift (RDP connect/
+/// disconnect rewrites the console's display: the widget would otherwise sit
+/// at the small virtual screen's corner, stranded mid-desktop after the
+/// native resolution comes back).
 fn place_window(app: &AppHandle, prefs: &WidgetPrefs) {
     let Some(window) = app.get_webview_window(WIDGET_LABEL) else {
         return;
@@ -299,30 +351,12 @@ fn place_window(app: &AppHandle, prefs: &WidgetPrefs) {
     let Ok(Some(monitor)) = window.primary_monitor() else {
         return;
     };
-    let size = monitor.size();
+    let screen = (monitor.size().width, monitor.size().height);
     let outer = window
         .outer_size()
         .map(|s| (s.width as i32, s.height as i32))
         .unwrap_or((350, 620));
-    let margin = 16;
-    let pos = if let Some((x, y)) = prefs.position {
-        // Clamp into the monitor so an unplugged-secondary position can not
-        // hide the widget off-screen.
-        (
-            x.clamp(0, (size.width as i32 - outer.0).max(0)),
-            y.clamp(0, (size.height as i32 - outer.1).max(0)),
-        )
-    } else {
-        let x = match prefs.corner.as_str() {
-            "top-left" | "bottom-left" => margin,
-            _ => size.width as i32 - outer.0 - margin,
-        };
-        let y = match prefs.corner.as_str() {
-            "bottom-left" | "bottom-right" => size.height as i32 - outer.1 - margin,
-            _ => margin,
-        };
-        (x, y)
-    };
+    let pos = dock_position(screen, outer, prefs);
     let _ = window.set_position(tauri::PhysicalPosition::new(pos.0, pos.1));
 }
 
@@ -520,7 +554,42 @@ pub fn toggle_from_tray(app: &AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{WidgetPatch, WidgetPrefs};
+    use super::{dock_position, WidgetPatch, WidgetPrefs};
+
+    #[test]
+    fn corner_dock_follows_the_screen_size() {
+        // This is the RDP story in miniature: the same top-right preference
+        // must land on the corner of whatever screen exists now, never at a
+        // stale pixel offset from an earlier, smaller session.
+        let prefs = WidgetPrefs {
+            corner: "top-right".into(),
+            ..WidgetPrefs::default()
+        };
+        let big = dock_position((2560, 1440), (350, 620), &prefs);
+        assert_eq!(big, (2560 - 350 - 16, 16));
+        let small = dock_position((1280, 720), (350, 620), &prefs);
+        assert_eq!(small, (1280 - 350 - 16, 16));
+        let left = WidgetPrefs {
+            corner: "bottom-left".into(),
+            ..WidgetPrefs::default()
+        };
+        assert_eq!(dock_position((2560, 1440), (350, 620), &left), (16, 804));
+    }
+
+    #[test]
+    fn dragged_position_survives_but_stays_on_screen() {
+        let prefs = WidgetPrefs {
+            position: Some((1200, 300)),
+            ..WidgetPrefs::default()
+        };
+        assert_eq!(dock_position((2560, 1440), (350, 620), &prefs), (1200, 300));
+        // A remembered spot from a bigger unplugged monitor is clamped back
+        // into the current desktop instead of being lost or hidden.
+        assert_eq!(
+            dock_position((1280, 720), (350, 620), &prefs),
+            (1280 - 350, 720 - 620)
+        );
+    }
 
     #[test]
     fn prefs_round_trip_uses_camel_case_keys() {
