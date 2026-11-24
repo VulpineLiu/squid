@@ -2,10 +2,13 @@ import {
   AlertTriangle,
   AppWindow,
   Boxes,
+  Bot,
   Check,
   ChevronDown,
   Code2,
+  CopyX,
   DownloadCloud,
+  EyeOff,
   FileWarning,
   Globe2,
   Languages,
@@ -119,6 +122,30 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbZh: "应用升级后留下的安装包，需要时会自动重新下载",
     icon: DownloadCloud,
     tone: "green",
+  },
+  duplicates: {
+    en: "Duplicate files",
+    zh: "重复文件",
+    blurbEn: "Byte-identical copies confirmed by full hashing",
+    blurbZh: "全量哈希确认的完全相同文件",
+    icon: CopyX,
+    tone: "orange",
+  },
+  "ai-tools": {
+    en: "AI tools & models",
+    zh: "AI 工具与模型",
+    blurbEn: "Local models and caches that re-download on demand",
+    blurbZh: "本地模型与缓存；模型删除后需重新下载",
+    icon: Bot,
+    tone: "violet",
+  },
+  privacy: {
+    en: "Privacy traces",
+    zh: "隐私痕迹",
+    blurbEn: "History and traces removed without a recycle bin",
+    blurbZh: "历史与痕迹；删除不进回收站",
+    icon: EyeOff,
+    tone: "slate",
   },
 };
 
@@ -300,6 +327,8 @@ export function ProgressCard({
       plan: ["Finding application leftovers", "正在查找应用残留"],
       storage: ["Measuring folders", "正在测量文件夹"],
       files: ["Finding the largest files", "正在查找大文件"],
+      bigfiles: ["Scanning every drive for large files", "正在遍历所有磁盘查找大文件"],
+      duplicates: ["Hashing duplicates (3-stage funnel)", "正在哈希校验重复文件（三级漏斗）"],
       orphans: ["Finding unused leftovers", "正在查找孤立残留"],
     };
     const pair = labels[progress.phase];

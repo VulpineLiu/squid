@@ -3,7 +3,9 @@ import {
   Boxes,
   ChevronDown,
   CircleGauge,
+  CopyX,
   Eraser,
+  FileArchive,
   History,
   LayoutDashboard,
   MonitorSmartphone,
@@ -32,7 +34,9 @@ import { useToast } from "./components/ui";
 import { SetupPanel } from "./components/SetupPanel";
 import appIconUrl from "../src-tauri/icons/128x128.png";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
+import { DuplicateFilesPage } from "./pages/DuplicateFilesPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { LargeFilesPage } from "./pages/LargeFilesPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PermissionsPage } from "./pages/PermissionsPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -92,6 +96,18 @@ const NAV_GROUPS: {
         icon: Boxes,
       },
       {
+        id: "duplicates",
+        labelEn: "Duplicate files",
+        labelZh: "重复文件",
+        icon: CopyX,
+      },
+      {
+        id: "large-files",
+        labelEn: "Large files",
+        labelZh: "大文件",
+        icon: FileArchive,
+      },
+      {
         id: "system",
         labelEn: "Real-time monitor",
         labelZh: "实时监控",
@@ -120,6 +136,11 @@ const PAGE_TITLES: Record<PageId, [string, string]> = {
   permissions: ["Permissions", "权限管理"],
   widget: ["Desktop widget", "桌面小工具"],
   storage: ["Storage", "存储空间"],
+  duplicates: ["Duplicate files", "重复文件"],
+  "large-files": ["Large files", "大文件"],
+  maintenance: ["System maintenance", "系统维护"],
+  privacy: ["Privacy cleaning", "隐私清理"],
+  optimization: ["System optimisation", "系统优化"],
   system: ["Real-time monitor", "实时监控"],
   history: ["History", "历史记录"],
   settings: ["Settings", "设置"],
@@ -357,6 +378,8 @@ export default function App() {
         {page === "permissions" ? <PermissionsPage workspace={permissions} /> : null}
         {page === "widget" ? <WidgetPage /> : null}
         {page === "storage" ? <StoragePage bootstrap={bootstrap} /> : null}
+        {page === "duplicates" ? <DuplicateFilesPage /> : null}
+        {page === "large-files" ? <LargeFilesPage /> : null}
         {page === "system" ? (
           <SystemPage
             snapshot={system.snapshot}

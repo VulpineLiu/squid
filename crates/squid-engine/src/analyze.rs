@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 use squid_core::fs;
-use squid_core::progress::{CancelToken, Progress};
+use squid_core::progress::{CancelToken, Event, Progress};
 use squid_core::Bytes;
 use std::path::{Path, PathBuf};
 
@@ -306,6 +306,117 @@ pub fn largest_files(
     found.sort_by_key(|entry| std::cmp::Reverse(entry.size()));
     found.truncate(limit);
     Ok(found)
+}
+
+/// Type buckets the large-file page filters on (extension → class).
+/// Anything not listed lands in the catch-all "other".
+pub fn file_class(path: &Path) -> &'static str {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "ts" | "m2ts" => "video",
+        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" | "zst" => "archive",
+        "exe" | "msi" | "msp" | "appx" | "msix" | "dmg" | "pkg" | "deb" | "rpm" | "appimage" => {
+            "installer"
+        }
+        "iso" | "img" | "vhd" | "vhdx" | "vmdk" | "qcow2" | "wim" | "esd" => "image",
+        _ => "other",
+    }
+}
+
+/// Large files across several roots with a byte threshold and optional
+/// type-class filter. Streams `Metered` (folders walked / bytes found);
+/// returns every hit at or above `min_bytes` — the UI counts them all,
+/// "共 214 个" honesty beats a capped top-list.
+pub fn large_files(
+    roots: &[PathBuf],
+    min_bytes: u64,
+    class: Option<&str>,
+    cancel: &CancelToken,
+    progress: &Progress,
+) -> squid_core::Result<Vec<FileEntry>> {
+    let mut found: Vec<FileEntry> = Vec::new();
+    let mut stack: Vec<(PathBuf, usize)> = roots
+        .iter()
+        .filter(|root| root.is_dir())
+        .map(|root| (root.clone(), 0usize))
+        .collect();
+    let mut visited = 0usize;
+    let mut emitted = 0u64;
+    progress.phase("bigfiles", "scanning for large files");
+    while let Some((dir, depth)) = stack.pop() {
+        cancel.check()?;
+        visited += 1;
+        if visited % 256 == 0 {
+            progress.publish(Event::Metered {
+                files: visited as u64,
+                bytes: Bytes(emitted),
+            });
+        }
+        if depth > 24 {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.is_dir() {
+                if !is_mountpoint(&path) && !skip_infra(&entry.file_name().to_string_lossy()) {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            if !meta.is_file() || meta.len() < min_bytes {
+                continue;
+            }
+            if let Some(wanted) = class {
+                if file_class(&path) != wanted {
+                    continue;
+                }
+            }
+            emitted += meta.len();
+            let modified_ms = meta
+                .modified()
+                .or_else(|_| meta.created())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64);
+            found.push(FileEntry {
+                path,
+                logical: Bytes(meta.len()),
+                allocated: Bytes(allocated_of(&meta)),
+                modified_ms,
+            });
+        }
+    }
+    found.sort_by_key(|entry| std::cmp::Reverse(entry.size()));
+    progress.publish(Event::Metered {
+        files: visited as u64,
+        bytes: Bytes(emitted),
+    });
+    Ok(found)
+}
+
+/// System churn a large-file sweep should not crawl through.
+fn skip_infra(name: &str) -> bool {
+    const SKIP: &[&str] = &[
+        "$recycle.bin",
+        "system volume information",
+        "windows",
+        "program files",
+        "program files (x86)",
+        "node_modules",
+        ".git",
+    ];
+    let lower = name.to_lowercase();
+    SKIP.iter().any(|wanted| lower == *wanted)
 }
 
 #[cfg(unix)]

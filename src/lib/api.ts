@@ -5,9 +5,11 @@ import type {
   Bootstrap,
   DeleteMode,
   DeleteResult,
+  DupsResult,
   ExploreResult,
   HistorySession,
   JobProgress,
+  LargeFile,
   LargestFile,
   ManageView,
   PageId,
@@ -61,6 +63,23 @@ export const api = {
     invoke<ScanResult>("purge_scan", { jobId, roots, minAgeDays, force }),
   purgeDelete: (jobId: string, scanId: string, selected: number[], mode: DeleteMode) =>
     invoke<DeleteResult>("purge_delete", { jobId, scanId, selected, mode }),
+  duplicatesScan: (jobId: string, roots: string[] = [], minSize: number | null = null) =>
+    invoke<DupsResult>("duplicates_scan", { jobId, roots, minSize }),
+  duplicatesDelete: (
+    jobId: string,
+    scanId: string,
+    // (group index, copy indexes to delete) — the keep decision is the UI's.
+    selections: [number, number[]][],
+    mode: DeleteMode,
+  ) => invoke<DeleteResult>("duplicates_delete", { jobId, scanId, selections, mode }),
+  largeFilesScan: (
+    jobId: string,
+    roots: string[] = [],
+    minBytes: number | null = null,
+    fileClass: string | null = null,
+  ) => invoke<LargeFile[]>("large_files_scan", { jobId, roots, minBytes, class: fileClass }),
+  largeFilesDelete: (jobId: string, paths: string[], mode: DeleteMode) =>
+    invoke<DeleteResult>("large_files_delete", { jobId, paths, mode }),
   appsScan: (jobId: string) => invoke<AppsResult>("apps_scan", { jobId }),
   appPlan: (jobId: string, appKey: string) => invoke<PlanResult>("app_plan", { jobId, appKey }),
   appUninstall: (jobId: string, planId: string, selected: number[], mode: DeleteMode) =>

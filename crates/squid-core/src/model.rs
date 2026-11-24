@@ -20,10 +20,16 @@ pub enum Category {
     LanguagePacks,
     Leftovers,
     UpdateInstallers,
+    /// Duplicate-file scan results (its own page, streamed group by group).
+    Duplicates,
+    /// AI tool caches and local model files (Ollama, HuggingFace, …).
+    AiTools,
+    /// Privacy traces: browser history, recent items, clipboard, activity.
+    Privacy,
 }
 
 impl Category {
-    pub const ALL: [Category; 10] = [
+    pub const ALL: [Category; 13] = [
         Category::SystemJunk,
         Category::AppCaches,
         Category::BrowserCaches,
@@ -34,6 +40,9 @@ impl Category {
         Category::LanguagePacks,
         Category::Leftovers,
         Category::UpdateInstallers,
+        Category::Duplicates,
+        Category::AiTools,
+        Category::Privacy,
     ];
 
     pub fn id(self) -> &'static str {
@@ -48,6 +57,9 @@ impl Category {
             Category::LanguagePacks => "languages",
             Category::Leftovers => "leftovers",
             Category::UpdateInstallers => "update-installers",
+            Category::Duplicates => "duplicates",
+            Category::AiTools => "ai",
+            Category::Privacy => "privacy",
         }
     }
 
@@ -63,6 +75,9 @@ impl Category {
             Category::LanguagePacks => "Unneeded Languages",
             Category::Leftovers => "Uninstaller Leftovers",
             Category::UpdateInstallers => "Update Installers",
+            Category::Duplicates => "Duplicate Files",
+            Category::AiTools => "AI Tools & Models",
+            Category::Privacy => "Privacy Traces",
         }
     }
 
@@ -81,6 +96,9 @@ impl Category {
             Category::LanguagePacks => "Speech and localization data for languages you do not use",
             Category::Leftovers => "Data belonging to apps that are no longer installed",
             Category::UpdateInstallers => "Installer packages apps keep after a successful update",
+            Category::Duplicates => "Byte-identical files confirmed by a three-stage hash funnel",
+            Category::AiTools => "Local model weights and caches that re-download when needed",
+            Category::Privacy => "History and traces that disappear without a recycle bin",
         }
     }
 
@@ -109,6 +127,9 @@ impl Category {
             "update-installer" | "update-installers" | "upgrades" | "upgrade-packages" => {
                 Category::UpdateInstallers
             }
+            "duplicate" | "duplicates" | "duplicate-files" => Category::Duplicates,
+            "ai" | "ai-tools" | "ai-models" | "models" => Category::AiTools,
+            "privacy" | "privacy-traces" | "private" => Category::Privacy,
             _ => return None,
         };
         Some(alias)

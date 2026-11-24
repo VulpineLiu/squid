@@ -36,6 +36,13 @@ pub enum Event {
         files: u64,
         bytes: Bytes,
     },
+    /// A finished work unit streamed as soon as it is confirmed, shaped by
+    /// the producing engine (duplicate groups land while the scan still
+    /// runs — MangoDisk's lesson that results beat progress bars).
+    Group {
+        kind: &'static str,
+        payload: serde_json::Value,
+    },
     Deleted {
         path: PathBuf,
         freed: Bytes,

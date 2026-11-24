@@ -19,5 +19,7 @@ walkdir.workspace = true
 globset.workspace = true
 crossbeam-channel.workspace = true
 chrono.workspace = true
+sha2.workspace = true
+filetime.workspace = true
 dirs.workspace = true
 libc.workspace = true

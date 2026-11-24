@@ -6,7 +6,12 @@ export type PageId =
   | "permissions"
   | "widget"
   | "storage"
+  | "duplicates"
+  | "large-files"
   | "system"
+  | "maintenance"
+  | "privacy"
+  | "optimization"
   | "history"
   | "settings";
 
@@ -21,7 +26,10 @@ export type Category =
   | "trash"
   | "language-packs"
   | "leftovers"
-  | "update-installers";
+  | "update-installers"
+  | "duplicates"
+  | "ai-tools"
+  | "privacy";
 export type ItemKind = "path" | "contents" | "file";
 export type LockReason =
   | "app-running"
@@ -74,7 +82,15 @@ export interface DeleteResult {
 export interface JobProgress {
   jobId: string;
   kind: string;
-  event: "phase" | "tick" | "note" | "warning" | "deleted" | "bucket" | "metered";
+  event:
+    | "phase"
+    | "tick"
+    | "note"
+    | "warning"
+    | "deleted"
+    | "bucket"
+    | "metered"
+    | "group";
   phase: string | null;
   detail: string | null;
   done: number | null;
@@ -291,6 +307,55 @@ export interface LargestFile {
   logical: number;
   allocated: number;
   modified_ms: number | null;
+}
+
+// ---- duplicate files (重复文件) ------------------------------------------
+
+export interface DupCopy {
+  /** Display spelling; `~` folded for the home folder. */
+  path: string;
+  mtimeMs: number;
+  /** Why this copy may not be deleted (protected user asset), when it may not. */
+  locked: string | null;
+}
+
+export interface DupGroup {
+  size: number;
+  copies: DupCopy[];
+  /** Index the UI marks 「保留」 by default. */
+  keep: number;
+  /** At least one copy sits in a protected personal folder. */
+  personal: boolean;
+}
+
+export interface DupReport {
+  groups: DupGroup[];
+  walked: number;
+  sameSize: number;
+  sampleHits: number;
+  confirmedGroups: number;
+  confirmedFiles: number;
+  wasted: number;
+}
+
+export interface DupsResult {
+  scanId: string;
+  report: DupReport;
+  elapsedMs: number;
+}
+
+// ---- large files (大文件) -------------------------------------------------
+
+export interface LargeFile {
+  path: string;
+  displayPath: string;
+  size: number;
+  modifiedMs: number;
+  class: "video" | "archive" | "installer" | "image" | "other";
+  /** A cloud-sync folder sits above this file — there may be a copy online. */
+  cloudHint: boolean;
+  /** Disk image: something (Hyper-V/WSL) may hold it open. */
+  maybeMounted: boolean;
 }
 
 export interface LedgerEntry {

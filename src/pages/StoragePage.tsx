@@ -13,7 +13,7 @@ import {
   ScanSearch,
   TimerReset,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as apiClient from "../lib/api";
 import { useI18n } from "../i18n";
@@ -27,6 +27,7 @@ import {
 } from "../lib/format";
 import type { Bootstrap, SpaceInsight, StorageNode } from "../types";
 import { useStorageWorkspace } from "../hooks/useStorageWorkspace";
+import { Treemap, type TreemapItem } from "../components/Treemap";
 import {
   Button,
   InlineError,
@@ -59,6 +60,19 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
   const [pathInput, setPathInput] = useState("");
   const [manualPath, setManualPath] = useState(false);
   const [insights, setInsights] = useState<SpaceInsight[] | null>(null);
+  // D4: list ⇄ squarified treemap over the same measured tree (no re-scan).
+  const [view, setView] = useState<"list" | "map">("list");
+  const [mapWidth, setMapWidth] = useState(860);
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (view !== "map" || !mapRef.current) return;
+    const node = mapRef.current;
+    const measure = () => setMapWidth(Math.max(node.clientWidth, 320));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [view]);
 
   // A⑤: hidden space hogs measured quietly once per page visit.
   useEffect(() => {
@@ -92,6 +106,27 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
     : 1;
   const visibleShare = children.reduce((sum, child) => sum + nodeSize(child), 0);
   const rest = percent(visibleShare, nodeTotal);
+
+  // Treemap wants flat weighted cells, biggest-tone-darkest.
+  const treemapItems: TreemapItem[] = useMemo(() => {
+    if (!workspace.node || children.length === 0) return [];
+    const biggest = Math.max(nodeSize(children[0]), 1);
+    const cells: TreemapItem[] = children.map((child, index) => ({
+      id: String(index),
+      label: basename(child.path),
+      value: nodeSize(child),
+      tone: Math.min(1, Math.sqrt(nodeSize(child) / biggest)),
+    }));
+    if (workspace.node.folded > 0 && nodeSize(workspace.node) - visibleShare > 0) {
+      cells.push({
+        id: "rest",
+        label: t("Other folders", "其他文件夹"),
+        value: nodeSize(workspace.node) - visibleShare,
+        tone: 0.08,
+      });
+    }
+    return cells;
+  }, [children, t, visibleShare, workspace.node]);
 
   const explore = (path?: string | null) => {
     setManualPath(false);
@@ -240,6 +275,25 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
 
             {children.length > 0 ? (
               <>
+                <div className="storage-viewseg" role="group">
+                  <button
+                    type="button"
+                    className={view === "list" ? "is-active" : ""}
+                    onClick={() => setView("list")}
+                  >
+                    {t("List", "列表")}
+                  </button>
+                  <button
+                    type="button"
+                    className={view === "map" ? "is-active" : ""}
+                    onClick={() => setView("map")}
+                  >
+                    {t("Treemap", "矩形图")}
+                  </button>
+                  <span className="storage-viewseg-note">
+                    {t("Sunburst coming later", "旭日图（后期）")}
+                  </span>
+                </div>
                 <div className="storage-map" aria-label={t("Folder distribution", "文件夹占比")}>
                   {children.map((child, index) => (
                     <span
@@ -264,6 +318,25 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
                   </p>
                 ) : null}
 
+                {view === "map" ? (
+                  <div className="storage-treemap" ref={mapRef}>
+                    <Treemap
+                      width={mapWidth}
+                      height={360}
+                      items={treemapItems}
+                      onSelect={(id) => {
+                        const child = children.find((_, index) => String(index) === id);
+                        if (child?.isDir) drill(child);
+                      }}
+                    />
+                    <p className="storage-treemap-hint">
+                      {t(
+                        "Click a block to drill into that folder (shares the same measurement cache; nothing re-scans). Darker = bigger share.",
+                        "点击矩形 = 下钻该目录（与列表共用同一份测量缓存，不重新扫描）；颜色越深占比越大。",
+                      )}
+                    </p>
+                  </div>
+                ) : (
                 <div className="storage-children">
                   {children.map((child, index) => {
                     const share = percent(nodeSize(child), nodeTotal);
@@ -340,6 +413,7 @@ export function StoragePage({ bootstrap }: { bootstrap: Bootstrap }) {
                     </div>
                   ) : null}
                 </div>
+                )}
               </>
             ) : (
               <div className="empty-inline">

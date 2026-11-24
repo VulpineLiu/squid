@@ -64,6 +64,8 @@ enum Command {
     Uninstall(UninstallArgs),
     /// Deep clean: node_modules, build folders, disk images, stale archives
     Purge(PurgeArgs),
+    /// Find byte-identical duplicate files (three-stage hash funnel)
+    Dupes(DupesArgs),
     /// Open the interface: disk map, system meters, cleanup, history
     State,
     /// One-shot system snapshot (scripts, dotfiles, cron)
@@ -139,6 +141,18 @@ struct PurgeArgs {
     /// Age filter in days (default from settings)
     #[arg(long)]
     min_age: Option<u64>,
+}
+
+#[derive(Args, Debug)]
+struct DupesArgs {
+    /// Where to look; defaults to your user folders on every drive
+    paths: Vec<String>,
+    /// Size floor in bytes (default 1 MiB)
+    #[arg(long)]
+    min_size: Option<u64>,
+    /// How many groups to print
+    #[arg(long, default_value_t = 20)]
+    top: usize,
 }
 
 #[derive(Args, Debug)]
@@ -374,6 +388,7 @@ fn run() -> Result<i32> {
         Some(Command::Clean(args)) => cmd_clean(args, cli.json),
         Some(Command::Uninstall(args)) => cmd_uninstall(args, cli.json),
         Some(Command::Purge(args)) => cmd_purge(args, cli.json),
+        Some(Command::Dupes(args)) => cmd_dupes(args, cli.json),
         Some(Command::Status(args)) => cmd_status(args, cli.json),
         Some(Command::Analyze(args)) => cmd_analyze(args, cli.json),
         Some(Command::History(args)) => cmd_history(args, cli.json),
@@ -594,7 +609,10 @@ fn with_progress<T>(
                             ),
                         );
                     }
-                    Event::Bucket { .. } | Event::Metered { .. } | Event::Done(_) => {}
+                    Event::Bucket { .. }
+                    | Event::Metered { .. }
+                    | Event::Group { .. }
+                    | Event::Done(_) => {}
                 }
             }
             if stop_now {
@@ -1141,6 +1159,75 @@ fn cmd_purge(args: PurgeArgs, json: bool) -> Result<i32> {
 }
 
 // ---------------------------------------------------------------------- status
+
+fn cmd_dupes(args: DupesArgs, json: bool) -> Result<i32> {
+    use squid_engine::duplicates;
+    let roots: Vec<PathBuf> = if args.paths.is_empty() {
+        duplicates::default_roots()
+    } else {
+        args.paths.iter().map(|path| paths::expand(path)).collect()
+    };
+    heading("Duplicate files");
+    let report = with_progress("dupes", move |_engine, progress, cancel| {
+        duplicates::scan(
+            &roots,
+            args.min_size.unwrap_or(duplicates::DEFAULT_MIN_SIZE),
+            progress,
+            cancel,
+        )
+    })?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(0);
+    }
+    shout(
+        "90",
+        &format!(
+            "  funnel: {} walked → {} same-size → {} confirmed files in {} groups",
+            squid_core::bytes::format_thousands(report.walked),
+            squid_core::bytes::format_thousands(report.same_size),
+            squid_core::bytes::format_thousands(report.confirmed_files),
+            squid_core::bytes::format_thousands(report.confirmed_groups),
+        ),
+    );
+    for group in report.groups.iter().take(args.top) {
+        let waste = group.size * (group.copies.len() as u64 - 1);
+        shout(
+            "36",
+            &format!(
+                "  {} {} copies · {} each (wastes {})",
+                bullet(),
+                group.copies[0]
+                    .path
+                    .rsplit(['\\', '/'])
+                    .next()
+                    .unwrap_or("?"),
+                squid_core::Bytes(group.size).human(),
+                squid_core::Bytes(waste).human(),
+            ),
+        );
+        for copy in &group.copies {
+            shout("90", &format!("    · {}", copy.path));
+        }
+    }
+    if report.groups.len() > args.top {
+        shout(
+            "90",
+            &format!(
+                "  … {} more groups (--top N to see them)",
+                report.groups.len() - args.top
+            ),
+        );
+    }
+    shout(
+        "90",
+        &format!(
+            "  total waste {}\n  nothing deleted — the app offers these with recycle-bin undo",
+            squid_core::Bytes(report.wasted).human_long(),
+        ),
+    );
+    Ok(0)
+}
 
 fn cmd_status(args: StatusArgs, json: bool) -> Result<i32> {
     let mut sampler = squid_stats::Sampler::new();

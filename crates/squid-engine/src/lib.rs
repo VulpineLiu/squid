@@ -15,6 +15,7 @@ pub mod analyze;
 pub mod assets;
 pub mod clean;
 pub mod delete;
+pub mod duplicates;
 pub mod insights;
 pub mod purge;
 pub mod uninstall;
@@ -80,6 +81,15 @@ impl Engine {
 
     pub fn platform(&self) -> &dyn Platform {
         self.platform.as_ref()
+    }
+
+    /// An engine whose safety policy lets an unprivileged run reach files
+    /// on any existing volume. Built for the duplicate-file delete path:
+    /// byte-confirmed copies of the user's own files, deleted to the
+    /// recycle bin, everywhere the scan looked. All other guardrails stay.
+    pub fn with_volume_wide_safety(mut self) -> Engine {
+        self.safety = self.safety.clone().with_all_volumes();
+        self
     }
 
     pub fn settings(&self) -> &Settings {

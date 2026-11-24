@@ -135,6 +135,9 @@ impl Strings {
                 C::LanguagePacks => "多余语言包",
                 C::Leftovers => "卸载残留",
                 C::UpdateInstallers => "升级安装包",
+                C::Duplicates => "重复文件",
+                C::AiTools => "AI 工具与模型",
+                C::Privacy => "隐私痕迹",
                 C::Trash => self.bin(),
             },
         })
