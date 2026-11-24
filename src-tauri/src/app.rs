@@ -1588,10 +1588,18 @@ pub fn reveal_path(app: AppHandle, path: String) -> Result<(), String> {
     }
     #[cfg(windows)]
     {
-        crate::process::command("explorer.exe")
-            .arg(format!("/select,{}", target.display()))
-            .status()
-            .map_err(|error| error.to_string())?;
+        use std::os::windows::process::CommandExt;
+        // Explorer only understands `/select,"C:\path with space\x"` — the
+        // quotes must sit *inside* the argument, around the path. Handing
+        // the whole `/select,<path>` as one argument let Rust wrap it in
+        // one pair of quotes, Explorer failed to parse it and opened its
+        // default folder instead (定位 jumped to the wrong directory as
+        // soon as the path contained a space, e.g. Package Cache).
+        // `raw_arg` writes the argument verbatim, producing the exact
+        // command line Explorer documents.
+        let mut cmd = crate::process::command("explorer.exe");
+        cmd.raw_arg(format!("/select,\"{}\"", target.display()));
+        cmd.status().map_err(|error| error.to_string())?;
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
