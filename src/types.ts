@@ -366,6 +366,26 @@ export interface MaintenanceResult {
   durationMs: number;
 }
 
+// ---- optimisation tweaks (系统优化) --------------------------------------
+
+export interface TweakState {
+  id: string;
+  titleZh: string;
+  titleEn: string;
+  detailZh: string;
+  detailEn: string;
+  risk: "safe" | "notice";
+  hive: string;
+  key: string;
+  value: string;
+  kind: "dword" | "string" | "none-means-zero";
+  on: string;
+  restartHint: boolean;
+  enabled: boolean;
+  unreadable: boolean;
+  recorded: boolean;
+}
+
 // ---- large files (大文件) -------------------------------------------------
 
 export interface LargeFile {
@@ -485,6 +505,27 @@ export interface PopupRuleItem {
   closed: number;
   /** data-URL PNG of the rule's exe, filled by manage_scan. */
   icon?: string | null;
+}
+
+// ---- advanced startup (进阶启动项) ---------------------------------------
+
+export interface AdvancedEntry {
+  id: string;
+  kind: "winlogon" | "appinit" | "ifeo" | "bho";
+  name: string;
+  command: string;
+  location: string;
+  scope: string;
+  enabled: boolean;
+  signature: "microsoft" | "vendor" | "unsigned" | "invalid" | "unknown";
+  signer: string | null;
+  warning: string | null;
+}
+
+export interface AdvancedScanResult {
+  entries: AdvancedEntry[];
+  /** Auto-start services, in the ordinary startup shape (shared toggle). */
+  extras: StartupItem[];
 }
 
 export interface ManageView {

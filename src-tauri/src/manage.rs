@@ -335,6 +335,94 @@ pub async fn startup_set_enabled(
     Ok(enabled_count)
 }
 
+// ---- 进阶启动项 (advanced startup) ----------------------------------------
+
+/// One advanced row for the UI: registry hooks with signature trust, plus
+/// the hidden-task / auto-service tails merged from the ordinary scan.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvancedView {
+    id: String,
+    kind: String,
+    name: String,
+    command: String,
+    location: String,
+    scope: String,
+    enabled: bool,
+    signature: String,
+    signer: Option<String>,
+    warning: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvancedScanView {
+    entries: Vec<AdvancedView>,
+    /// Hidden scheduled tasks and automatic services, in the ordinary
+    /// startup shape so their toggles reuse `startup_set_enabled`.
+    extras: Vec<StartupView>,
+}
+
+#[tauri::command]
+pub async fn advanced_scan(app: AppHandle) -> Result<AdvancedScanView, String> {
+    let manage = app.state::<ManageState>();
+    let (entries, startup) = tauri::async_runtime::spawn_blocking(|| {
+        (
+            squid_platform::advanced::scan_advanced(),
+            permissions::scan_startup_entries(),
+        )
+    })
+    .await
+    .map_err(|error| format!("进阶扫描失败：{error}"))?;
+    // Cache the ordinary scan so the extras' toggles can find their entries.
+    *ManageState::lock(&manage.startup)? = startup.clone();
+    let extras: Vec<StartupView> = startup
+        .iter()
+        .filter(|entry| {
+            // Only the corners the plain list does not already show:
+            // hidden-by-default vendor tasks (source marks) and services.
+            entry.source == "service"
+        })
+        .map(StartupView::from)
+        .collect();
+    Ok(AdvancedScanView {
+        entries: entries
+            .iter()
+            .map(|entry| AdvancedView {
+                id: entry.id.clone(),
+                kind: entry.kind.clone(),
+                name: entry.name.clone(),
+                command: entry.command.clone(),
+                location: entry.location.clone(),
+                scope: entry.scope.clone(),
+                enabled: entry.enabled,
+                signature: entry.signature.clone(),
+                signer: entry.signer.clone(),
+                warning: entry.warning.clone(),
+            })
+            .collect(),
+        extras,
+    })
+}
+
+#[tauri::command]
+pub async fn advanced_set_enabled(app: AppHandle, id: String, enabled: bool) -> Result<(), String> {
+    let manage = app.state::<ManageState>();
+    // Advanced rows carry their whole state in the id + a fresh scan match.
+    let entry = tauri::async_runtime::spawn_blocking(squid_platform::advanced::scan_advanced)
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .ok_or_else(|| "该进阶项已不存在，请重新扫描".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        squid_platform::advanced::set_advanced_enabled(&entry, enabled)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(())
+}
+
 /// Unregister / restore a context-menu handler. Removal keeps the entry in
 /// `manage.json`, which is both the restore recipe and the audit trail.
 #[tauri::command]

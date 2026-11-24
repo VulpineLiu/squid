@@ -926,6 +926,104 @@ pub async fn maintenance_run(
     Ok(outcome)
 }
 
+/// Privacy traces scan: rows never pre-selected, running browsers locked.
+#[tauri::command]
+pub async fn privacy_scan(app: AppHandle, job_id: String) -> Result<ScanView, String> {
+    let token = app.state::<AppState>().begin(&job_id)?;
+    let progress = Progress::new();
+    let reporter =
+        ProgressReporter::start(app.clone(), job_id.clone(), "privacy", progress.clone());
+    let started = Instant::now();
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        let engine = Engine::new();
+        let items = squid_engine::privacy::collect(&engine, &token);
+        Ok::<ScanReport, squid_core::SquidError>(ScanReport {
+            items,
+            scanned_at_ms: 0,
+            ..Default::default()
+        })
+    })
+    .await
+    .map_err(|error| format!("Privacy scan failed: {error}"))?;
+    reporter.finish();
+    app.state::<AppState>().finish(&job_id);
+    let report = task.map_err(|error| error.to_string())?;
+    let view = scan_view(
+        job_id.clone(),
+        &report,
+        started.elapsed().as_millis() as u64,
+    );
+    app.state::<AppState>()
+        .scans
+        .lock()
+        .map_err(|_| "The scan cache is unavailable.".to_string())?
+        .insert(job_id, report);
+    Ok(view)
+}
+
+/// Privacy deletes are permanent by design (a bin-restored browser profile
+/// is broken worse than a clean one) but land in the same history ledger.
+#[tauri::command]
+pub async fn privacy_delete(
+    app: AppHandle,
+    job_id: String,
+    scan_id: String,
+    selected: Vec<usize>,
+) -> Result<DeleteResultView, String> {
+    let token = app.state::<AppState>().begin(&job_id)?;
+    let mut report = app
+        .state::<AppState>()
+        .scans
+        .lock()
+        .map_err(|_| "The scan cache is unavailable.".to_string())?
+        .get(&scan_id)
+        .cloned()
+        .ok_or_else(|| "This scan has expired. Run it again.".to_string())?;
+    select_indices(&mut report, &selected)?;
+    let items = report.items;
+    let progress = Progress::new();
+    let reporter = ProgressReporter::start(app.clone(), job_id.clone(), "delete", progress.clone());
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        let engine = Engine::new();
+        let job = DeleteJob::new(items, DeleteMode::Permanent, "Squid · Privacy");
+        delete::execute(&engine, &job, &progress, &token)
+    })
+    .await
+    .map_err(|error| format!("Privacy clean failed: {error}"))?;
+    reporter.finish();
+    app.state::<AppState>().finish(&job_id);
+    let outcome = task.map_err(|error| error.to_string())?;
+    if let Ok(mut scans) = app.state::<AppState>().scans.lock() {
+        scans.remove(&scan_id);
+    }
+    Ok(DeleteResultView::from_outcome(outcome))
+}
+
+/// Optimisation tweaks: catalog + live state; writes record the original.
+#[tauri::command]
+pub async fn tweaks_states() -> Result<Vec<squid_engine::tweaks::TweakState>, String> {
+    tauri::async_runtime::spawn_blocking(squid_engine::tweaks::states)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn tweaks_set(
+    id: String,
+    enabled: bool,
+) -> Result<squid_engine::tweaks::TweakState, String> {
+    tauri::async_runtime::spawn_blocking(move || squid_engine::tweaks::set(&id, enabled))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn tweaks_restore_all() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(squid_engine::tweaks::restore_all)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 #[derive(Clone, serde::Serialize)]
 pub struct AppEntry {
     #[serde(flatten)]

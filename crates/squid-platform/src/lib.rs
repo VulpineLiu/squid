@@ -10,6 +10,7 @@ use squid_core::progress::CancelToken;
 use squid_core::{AppInfo, Bytes, Volume};
 use std::path::{Path, PathBuf};
 
+pub mod advanced;
 pub mod apps;
 pub mod console;
 pub mod currency;

@@ -49,19 +49,28 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
           id: "startup" as const,
           label: t("Startup items", "开机启动项"),
           count: view?.startupCount ?? 0,
+          fresh: false,
         },
         {
           id: "extensions" as const,
           label: t("Context menus", "右键菜单"),
           count: view?.extensions.length ?? 0,
+          fresh: false,
+        },
+        {
+          id: "advanced" as const,
+          label: t("Advanced startup", "进阶启动项"),
+          count: workspace.advanced?.entries.length ?? 0,
+          fresh: true,
         },
         {
           id: "popup" as const,
           label: t("Popup blocker", "弹窗拦截"),
           count: view?.rules.length ?? 0,
+          fresh: false,
         },
       ],
-    [t, view],
+    [t, view, workspace.advanced],
   );
 
   if (!view && workspace.scanning) {
@@ -382,6 +391,112 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
           </div>
           {extCategories.length === 0 ? (
             <p className="perm-empty">{t("No matches.", "没有匹配的项目。")}</p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {workspace.tab === "advanced" ? (
+        <section className="settings-section perm-advanced">
+          <div className="perm-adv-note">
+            {t(
+              "Advanced rows can break boot or logon if changed carelessly — Squid only displays them here, every change records its original value, and nothing is auto-disabled.",
+              "进阶区的项目改错了可能影响系统行为——默认只展示不勾选，每一项带数字签名与位置说明；改动会原样记录，可逐项恢复。",
+            )}
+          </div>
+          {workspace.advancedScanning && !workspace.advanced ? (
+            <div className="perm-loading">
+              <RefreshCw size={18} className="perm-spin" />
+              <span>
+                {t(
+                  "Reading Winlogon / IFEO / BHO and verifying signatures…",
+                  "正在读取 Winlogon / IFEO / BHO 并核验数字签名…",
+                )}
+              </span>
+            </div>
+          ) : null}
+          {workspace.advanced && workspace.advanced.entries.length === 0 ? (
+            <p className="perm-empty">
+              {t(
+                "No third-party Winlogon hooks, AppInit DLLs, IFEO debuggers or BHOs found — the machine is clean.",
+                "没有发现第三方 Winlogon 挂钩、AppInit DLL、IFEO 调试器或 BHO——系统很干净。",
+              )}
+            </p>
+          ) : null}
+          {workspace.advanced
+            ? (["winlogon", "appinit", "ifeo", "bho"] as const).map((kind) => {
+                const rows = workspace.advanced!.entries.filter((entry) => entry.kind === kind);
+                if (rows.length === 0) return null;
+                const titles: Record<string, [string, string]> = {
+                  winlogon: ["Winlogon hooks", "Winlogon 与登录链"],
+                  appinit: ["AppInit DLL injection", "AppInit_DLLs 全局注入"],
+                  ifeo: ["IFEO debuggers (can hijack any program)", "IFEO 调试器（可劫持任意程序启动）"],
+                  bho: ["Browser helper objects", "浏览器加载项 BHO"],
+                };
+                return (
+                  <div className="perm-adv-group" key={kind}>
+                    <SectionTitle
+                      title={t(titles[kind][0], titles[kind][1])}
+                      subtitle={t(`${rows.length} item(s)`, `发现 ${rows.length} 项`)}
+                    />
+                    {rows.map((entry) => (
+                      <div className="perm-adv-row" key={entry.id}>
+                        <span className={`perm-sig is-${entry.signature}`} title={entry.signer ?? undefined}>
+                          {entry.signature === "microsoft"
+                            ? t("Microsoft signed", "微软签名")
+                            : entry.signature === "vendor"
+                              ? t("Signed by", "已知厂商")
+                              : entry.signature === "unsigned"
+                                ? t("Not signed", "无数字签名")
+                                : entry.signature === "invalid"
+                                  ? t("Signature invalid", "签名无效")
+                                  : t("Signature n/a", "无签名信息")}
+                        </span>
+                        <div className="perm-adv-main">
+                          <b>{entry.name}</b>
+                          <small title={entry.command}>{shortPath(entry.command, 90)}</small>
+                          <small className="perm-adv-loc">{entry.location}</small>
+                          {entry.warning ? (
+                            <small className="perm-adv-warn">{entry.warning}</small>
+                          ) : null}
+                        </div>
+                        <Toggle
+                          checked={entry.enabled}
+                          disabled={workspace.busyId !== null}
+                          onChange={(next) => void workspace.toggleAdvanced(entry.id, next)}
+                          label={entry.name}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                );
+              })
+          : null}
+          {workspace.advanced && workspace.advanced.extras.length > 0 ? (
+            <div className="perm-adv-group">
+              <SectionTitle
+                title={t("Automatic services", "服务（自动启动）")}
+                subtitle={t(
+                  "Services set to start automatically — toggling uses the same rights as Task Manager.",
+                  "设置为自动启动的服务；开关与任务管理器同一套权限。",
+                )}
+              />
+              {workspace.advanced.extras.map((entry) => (
+                <div className="perm-adv-row" key={entry.id}>
+                  <span className="perm-scope">{scopeLabel(entry.scope, t)}</span>
+                  <div className="perm-adv-main">
+                    <b>{entry.displayName || entry.name}</b>
+                    <small title={entry.command}>{shortPath(entry.command, 90)}</small>
+                    <small className="perm-adv-loc">{entry.sourceLabel}</small>
+                  </div>
+                  <Toggle
+                    checked={entry.enabled}
+                    disabled={workspace.busyId !== null}
+                    onChange={(next) => void workspace.toggleStartup(entry.id, next)}
+                    label={entry.name}
+                  />
+                </div>
+              ))}
+            </div>
           ) : null}
         </section>
       ) : null}

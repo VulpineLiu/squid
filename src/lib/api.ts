@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppsResult,
+  AdvancedScanResult,
   Bootstrap,
   DeleteMode,
   DeleteResult,
@@ -24,6 +25,7 @@ import type {
   SettingsView,
   SpaceInsight,
   SystemSnapshot,
+  TweakState,
   UndoResult,
   UpdateCheckResult,
   UpdateProgress,
@@ -85,6 +87,12 @@ export const api = {
   maintenanceTasks: () => invoke<MaintenanceTask[]>("maintenance_tasks"),
   maintenanceRun: (jobId: string, task: string) =>
     invoke<MaintenanceResult>("maintenance_run", { jobId, task }),
+  privacyScan: (jobId: string) => invoke<ScanResult>("privacy_scan", { jobId }),
+  privacyDelete: (jobId: string, scanId: string, selected: number[]) =>
+    invoke<DeleteResult>("privacy_delete", { jobId, scanId, selected }),
+  tweaksStates: () => invoke<TweakState[]>("tweaks_states"),
+  tweaksSet: (id: string, enabled: boolean) => invoke<TweakState>("tweaks_set", { id, enabled }),
+  tweaksRestoreAll: () => invoke<string[]>("tweaks_restore_all"),
   appsScan: (jobId: string) => invoke<AppsResult>("apps_scan", { jobId }),
   appPlan: (jobId: string, appKey: string) => invoke<PlanResult>("app_plan", { jobId, appKey }),
   appUninstall: (jobId: string, planId: string, selected: number[], mode: DeleteMode) =>
@@ -112,6 +120,9 @@ export const api = {
   manageScan: () => invoke<ManageView>("manage_scan"),
   startupSetEnabled: (id: string, enabled: boolean) =>
     invoke<number>("startup_set_enabled", { id, enabled }),
+  advancedScan: () => invoke<AdvancedScanResult>("advanced_scan"),
+  advancedSetEnabled: (id: string, enabled: boolean) =>
+    invoke<void>("advanced_set_enabled", { id, enabled }),
   extensionSetRegistered: (id: string, registered: boolean) =>
     invoke<void>("extension_set_registered", { id, registered }),
   popupList: () => invoke<PopupWindowItem[]>("popup_list"),

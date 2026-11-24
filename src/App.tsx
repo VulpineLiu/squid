@@ -5,6 +5,7 @@ import {
   CircleGauge,
   CopyX,
   Eraser,
+  EyeOff,
   FileArchive,
   History,
   LayoutDashboard,
@@ -12,6 +13,7 @@ import {
   RefreshCw,
   Settings,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Wrench,
 } from "lucide-react";
@@ -39,8 +41,10 @@ import { DuplicateFilesPage } from "./pages/DuplicateFilesPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { LargeFilesPage } from "./pages/LargeFilesPage";
 import { MaintenancePage } from "./pages/MaintenancePage";
+import { OptimizationPage } from "./pages/OptimizationPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PermissionsPage } from "./pages/PermissionsPage";
+import { PrivacyPage } from "./pages/PrivacyPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SpacePage } from "./pages/SpacePage";
 import { StoragePage } from "./pages/StoragePage";
@@ -132,6 +136,18 @@ const NAV_GROUPS: {
         labelEn: "Desktop widget",
         labelZh: "桌面小工具",
         icon: MonitorSmartphone,
+      },
+      {
+        id: "privacy",
+        labelEn: "Privacy cleaning",
+        labelZh: "隐私清理",
+        icon: EyeOff,
+      },
+      {
+        id: "optimization",
+        labelEn: "System optimisation",
+        labelZh: "系统优化",
+        icon: SlidersHorizontal,
       },
     ],
   },
@@ -294,13 +310,16 @@ export default function App() {
       "space",
       "applications",
       "permissions",
+      "maintenance",
       "storage",
+      "duplicates",
+      "large-files",
       "system",
       "widget",
       "history",
       "settings",
     ];
-    // Ctrl/Cmd+1..9 map in navigation order.
+    // Ctrl/Cmd+1..9 map to the first nine pages in order; 0 opens the widget.
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
       const index = event.key === "0" ? 9 : Number(event.key) - 1;
@@ -393,6 +412,8 @@ export default function App() {
         {page === "duplicates" ? <DuplicateFilesPage /> : null}
         {page === "large-files" ? <LargeFilesPage /> : null}
         {page === "maintenance" ? <MaintenancePage /> : null}
+        {page === "privacy" ? <PrivacyPage /> : null}
+        {page === "optimization" ? <OptimizationPage /> : null}
         {page === "system" ? (
           <SystemPage
             snapshot={system.snapshot}

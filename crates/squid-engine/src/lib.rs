@@ -19,7 +19,9 @@ pub mod delete;
 pub mod duplicates;
 pub mod insights;
 pub mod maintenance;
+pub mod privacy;
 pub mod purge;
+pub mod tweaks;
 pub mod uninstall;
 pub mod updates;
 
