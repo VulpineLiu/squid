@@ -344,6 +344,28 @@ export interface DupsResult {
   elapsedMs: number;
 }
 
+// ---- system maintenance (系统维护) ---------------------------------------
+
+export interface MaintenanceTask {
+  id: string;
+  titleEn: string;
+  titleZh: string;
+  detailEn: string;
+  detailZh: string;
+  risk: "safe" | "admin" | "slow";
+  budgetSecs: number;
+  estimate: string;
+}
+
+export interface MaintenanceResult {
+  task: string;
+  ok: boolean;
+  steps: string[];
+  failedStep: string | null;
+  outputTail: string;
+  durationMs: number;
+}
+
 // ---- large files (大文件) -------------------------------------------------
 
 export interface LargeFile {

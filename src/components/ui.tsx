@@ -329,6 +329,7 @@ export function ProgressCard({
       files: ["Finding the largest files", "正在查找大文件"],
       bigfiles: ["Scanning every drive for large files", "正在遍历所有磁盘查找大文件"],
       duplicates: ["Hashing duplicates (3-stage funnel)", "正在哈希校验重复文件（三级漏斗）"],
+      maintenance: ["Running the repair commands", "正在执行修复命令"],
       orphans: ["Finding unused leftovers", "正在查找孤立残留"],
     };
     const pair = labels[progress.phase];

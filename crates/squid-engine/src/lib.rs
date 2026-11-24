@@ -11,12 +11,14 @@
 //! Engines never call `std::fs::remove_*` directly; that keeps the audit trail
 //! and the safety net impossible to bypass.
 
+pub mod ai;
 pub mod analyze;
 pub mod assets;
 pub mod clean;
 pub mod delete;
 pub mod duplicates;
 pub mod insights;
+pub mod maintenance;
 pub mod purge;
 pub mod uninstall;
 pub mod updates;

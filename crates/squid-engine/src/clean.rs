@@ -172,6 +172,28 @@ pub fn scan(
         }
     }
 
+    // AI 工具与模型 (E1): local model weights (never pre-checked) plus the
+    // genuinely disposable Electron/update caches the desktop AI apps keep.
+    // Always on unless the caller filtered categories down to something else.
+    let ai_wanted =
+        options.categories.is_empty() || options.categories.contains(&Category::AiTools);
+    if ai_wanted {
+        progress.phase("ai", "collecting local AI models and caches");
+        for item in crate::ai::collect(engine, cancel) {
+            if seen.contains_key(&item.path) {
+                continue;
+            }
+            let mut item = item;
+            if engine.is_whitelisted(&item.path) {
+                item = item.locked(LockReason::Whitelisted);
+            } else if let Some(reason) = engine.block_reason(&item) {
+                item = item.locked(LockReason::Protected).with_note(reason);
+            }
+            seen.insert(item.path.clone(), report.items.len());
+            report.items.push(item);
+        }
+    }
+
     // User-asset rows (B4): pinned directories shown as locked, explained
     // rows so "why can't I clean my WeChat files?" never becomes a mystery.
     let assets_wanted =

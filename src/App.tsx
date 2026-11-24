@@ -13,6 +13,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAppsWorkspace } from "./hooks/useAppsWorkspace";
@@ -37,6 +38,7 @@ import { ApplicationsPage } from "./pages/ApplicationsPage";
 import { DuplicateFilesPage } from "./pages/DuplicateFilesPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { LargeFilesPage } from "./pages/LargeFilesPage";
+import { MaintenancePage } from "./pages/MaintenancePage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PermissionsPage } from "./pages/PermissionsPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -82,6 +84,12 @@ const NAV_GROUPS: {
         labelEn: "Permissions",
         labelZh: "权限管理",
         icon: ShieldCheck,
+      },
+      {
+        id: "maintenance",
+        labelEn: "System maintenance",
+        labelZh: "系统维护",
+        icon: Wrench,
       },
     ],
   },
@@ -194,8 +202,12 @@ const SPACE_OPTIONAL_CATEGORIES = [
   "developer",
 ];
 
-/** 空间清理 defaults: daily groups pre-checked, opt-in groups untouched. */
-function spaceDefaults(item: { category: string }): boolean {
+/** 空间清理 defaults: daily groups pre-checked, opt-in groups untouched.
+ * AI is the exception that proves the rule — its caches come pre-checked
+ * from the backend, its models never do, so the item's own `selected`
+ * flag speaks there. */
+function spaceDefaults(item: { category: string; selected: boolean }): boolean {
+  if (item.category === "ai-tools") return item.selected;
   return !SPACE_OPTIONAL_CATEGORIES.includes(item.category);
 }
 
@@ -380,6 +392,7 @@ export default function App() {
         {page === "storage" ? <StoragePage bootstrap={bootstrap} /> : null}
         {page === "duplicates" ? <DuplicateFilesPage /> : null}
         {page === "large-files" ? <LargeFilesPage /> : null}
+        {page === "maintenance" ? <MaintenancePage /> : null}
         {page === "system" ? (
           <SystemPage
             snapshot={system.snapshot}

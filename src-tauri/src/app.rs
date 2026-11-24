@@ -29,6 +29,9 @@ use tauri::{AppHandle, Emitter, Manager};
 pub struct AppState {
     jobs: Mutex<HashMap<String, CancelToken>>,
     scans: Mutex<HashMap<String, ScanReport>>,
+    /// Confirmed duplicate groups from the last `duplicates_scan`, keyed by
+    /// scan id — deletes may only name (group, copy) indices from it.
+    dup_scans: Mutex<HashMap<String, squid_engine::duplicates::DupReport>>,
     plans: Mutex<HashMap<String, UninstallPlan>>,
     apps: Mutex<Vec<AppInfo>>,
     sampler: Mutex<Sampler>,
@@ -56,7 +59,8 @@ impl AppState {
     /// Any successful delete invalidates cached storage sizes (Mole bumps its
     /// cache schema whenever deletion semantics change what totals mean).
     fn invalidate_storage_cache(&self) {
-        self.clean_epoch.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.clean_epoch
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn begin(&self, job_id: &str) -> Result<CancelToken, String> {
@@ -216,6 +220,21 @@ fn emit_progress(app: &AppHandle, job_id: &str, kind: &str, event: Event) {
             detail: None,
             done: Some(files),
             total: Some(bytes.as_u64()),
+            subject: None,
+            freed: None,
+        },
+        Event::Group {
+            kind: unit,
+            payload,
+        } => ProgressView {
+            job_id: job_id.into(),
+            kind: kind.into(),
+            event: "group".into(),
+            phase: None,
+            // `dup:{json}` — one confirmed work unit, streamed live.
+            detail: Some(format!("{unit}:{payload}")),
+            done: None,
+            total: None,
             subject: None,
             freed: None,
         },
@@ -626,6 +645,285 @@ pub async fn purge_delete(
     }
     app.state::<AppState>().invalidate_storage_cache();
     Ok(DeleteResultView::from_outcome(outcome))
+}
+
+/// One duplicate-file scan: three-stage funnel, groups streamed live.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DupsView {
+    scan_id: String,
+    report: squid_engine::duplicates::DupReport,
+    elapsed_ms: u64,
+}
+
+#[tauri::command]
+pub async fn duplicates_scan(
+    app: AppHandle,
+    job_id: String,
+    roots: Vec<String>,
+    min_size: Option<u64>,
+) -> Result<DupsView, String> {
+    let token = app.state::<AppState>().begin(&job_id)?;
+    let progress = Progress::new();
+    let reporter =
+        ProgressReporter::start(app.clone(), job_id.clone(), "duplicates", progress.clone());
+    let started = Instant::now();
+    let roots: Vec<PathBuf> = if roots.is_empty() {
+        squid_engine::duplicates::default_roots()
+    } else {
+        roots.into_iter().map(|root| paths::expand(&root)).collect()
+    };
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        squid_engine::duplicates::scan(
+            &roots,
+            min_size.unwrap_or(squid_engine::duplicates::DEFAULT_MIN_SIZE),
+            &progress,
+            &token,
+        )
+    })
+    .await
+    .map_err(|error| format!("Duplicate scan failed: {error}"))?;
+    reporter.finish();
+    app.state::<AppState>().finish(&job_id);
+    let report = task.map_err(|error| error.to_string())?;
+    let view = DupsView {
+        scan_id: job_id.clone(),
+        report,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    };
+    app.state::<AppState>()
+        .dup_scans
+        .lock()
+        .map_err(|_| "The scan cache is unavailable.".to_string())?
+        .insert(job_id, view.report.clone());
+    Ok(view)
+}
+
+/// Delete chosen copies of confirmed duplicate groups — Recycle Bin mode by
+/// default, so a wrong click is a restore away, never a loss.
+#[tauri::command]
+pub async fn duplicates_delete(
+    app: AppHandle,
+    job_id: String,
+    scan_id: String,
+    selections: Vec<(usize, Vec<usize>)>,
+    mode: DeleteMode,
+) -> Result<DeleteResultView, String> {
+    let token = app.state::<AppState>().begin(&job_id)?;
+    let report = app
+        .state::<AppState>()
+        .dup_scans
+        .lock()
+        .map_err(|_| "The scan cache is unavailable.".to_string())?
+        .get(&scan_id)
+        .cloned()
+        .ok_or_else(|| "This scan has expired. Run it again.".to_string())?;
+    let items = report.items_for(&selections);
+    if items.is_empty() {
+        app.state::<AppState>().finish(&job_id);
+        return Err("没有可删除的副本（每组至少保留一份）".into());
+    }
+    let progress = Progress::new();
+    let reporter = ProgressReporter::start(app.clone(), job_id.clone(), "delete", progress.clone());
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        let engine = Engine::new().with_volume_wide_safety();
+        let job = DeleteJob::new(items, mode, "Squid · Duplicates");
+        delete::execute(&engine, &job, &progress, &token)
+    })
+    .await
+    .map_err(|error| format!("Duplicate delete failed: {error}"))?;
+    reporter.finish();
+    app.state::<AppState>().finish(&job_id);
+    let outcome = task.map_err(|error| error.to_string())?;
+    app.state::<AppState>().invalidate_storage_cache();
+    Ok(DeleteResultView::from_outcome(outcome))
+}
+
+/// Large-file sweep across drives with a threshold and optional type class.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LargeFileView {
+    path: String,
+    display_path: String,
+    size: u64,
+    modified_ms: u64,
+    class: &'static str,
+    /// A cloud-sync folder sits above this file: 「网盘可能有副本？」.
+    cloud_hint: bool,
+    /// Disk-image extension that something (Hyper-V/WSL) may hold open.
+    maybe_mounted: bool,
+}
+
+fn cloud_hint(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    [
+        "onedrive",
+        "\\wps cloud",
+        "iclouddrive",
+        "google drive",
+        "googledrive",
+        "dropbox",
+        "坚果云",
+        "syncthing",
+        "baidunetdisk",
+        "wuying",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+#[tauri::command]
+pub async fn large_files_scan(
+    app: AppHandle,
+    job_id: String,
+    roots: Vec<String>,
+    min_bytes: Option<u64>,
+    class: Option<String>,
+) -> Result<Vec<LargeFileView>, String> {
+    let token = app.state::<AppState>().begin(&job_id)?;
+    let progress = Progress::new();
+    let reporter =
+        ProgressReporter::start(app.clone(), job_id.clone(), "bigfiles", progress.clone());
+    let mut roots: Vec<PathBuf> = roots.into_iter().map(|root| paths::expand(&root)).collect();
+    if roots.is_empty() {
+        roots = squid_engine::duplicates::default_roots();
+    }
+    let class = class.filter(|value| value != "all");
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        analyze::large_files(
+            &roots,
+            min_bytes.unwrap_or(100 * 1024 * 1024),
+            class.as_deref(),
+            &token,
+            &progress,
+        )
+    })
+    .await
+    .map_err(|error| format!("Large file scan failed: {error}"))?;
+    reporter.finish();
+    app.state::<AppState>().finish(&job_id);
+    let files = task.map_err(|error| error.to_string())?;
+    Ok(files
+        .iter()
+        .map(|file| {
+            let display = file.path.display().to_string();
+            let image = matches!(squid_engine::analyze::file_class(&file.path), "image");
+            LargeFileView {
+                path: display.clone(),
+                display_path: paths::pretty(&file.path),
+                size: file.size().as_u64(),
+                modified_ms: file.modified_ms.unwrap_or(0),
+                class: squid_engine::analyze::file_class(&file.path),
+                cloud_hint: cloud_hint(&display),
+                maybe_mounted: image,
+            }
+        })
+        .collect())
+}
+
+/// Delete chosen large files (paths re-validated, Recycle Bin by default).
+#[tauri::command]
+pub async fn large_files_delete(
+    app: AppHandle,
+    job_id: String,
+    paths: Vec<String>,
+    mode: DeleteMode,
+) -> Result<DeleteResultView, String> {
+    let token = app.state::<AppState>().begin(&job_id)?;
+    if paths.is_empty() {
+        app.state::<AppState>().finish(&job_id);
+        return Err("没有选中任何文件".into());
+    }
+    let items: Vec<CleanupItem> = paths
+        .iter()
+        .map(|raw| {
+            let path = PathBuf::from(raw);
+            let size = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+            let anchor = path
+                .ancestors()
+                .nth(2)
+                .map(|dir| dir.to_path_buf())
+                .unwrap_or_else(paths::home_dir);
+            let mut item = CleanupItem::new(
+                path.clone(),
+                ItemKind::File,
+                Category::SystemJunk,
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            )
+            .with_rule("large-files")
+            .with_anchors(std::iter::once(anchor));
+            item.size = Bytes(size);
+            item.allocated = Bytes(size);
+            item.file_count = 1;
+            item
+        })
+        .collect();
+    let progress = Progress::new();
+    let reporter = ProgressReporter::start(app.clone(), job_id.clone(), "delete", progress.clone());
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        let engine = Engine::new().with_volume_wide_safety();
+        let job = DeleteJob::new(items, mode, "Squid · Large Files");
+        delete::execute(&engine, &job, &progress, &token)
+    })
+    .await
+    .map_err(|error| format!("Large file delete failed: {error}"))?;
+    reporter.finish();
+    app.state::<AppState>().finish(&job_id);
+    let outcome = task.map_err(|error| error.to_string())?;
+    app.state::<AppState>().invalidate_storage_cache();
+    Ok(DeleteResultView::from_outcome(outcome))
+}
+
+/// Maintenance tasks live behind a single global lock key in the jobs map:
+/// two repairs racing (SFC while the audio service restarts) can invalidate
+/// each other's assumptions, so the second click is refused, not queued.
+const MAINTENANCE_LOCK: &str = "maintenance";
+
+#[tauri::command]
+pub async fn maintenance_tasks() -> Result<Vec<squid_engine::maintenance::MaintenanceTask>, String>
+{
+    Ok(squid_engine::maintenance::tasks())
+}
+
+#[tauri::command]
+pub async fn maintenance_run(
+    app: AppHandle,
+    job_id: String,
+    task: String,
+) -> Result<squid_engine::maintenance::MaintenanceResult, String> {
+    let state = app.state::<AppState>();
+    if job_id.trim().is_empty() {
+        return Err("A job identifier is required.".into());
+    }
+    // One token under both keys: the mutual-exclusion lock and the caller's
+    // cancel handle always point at the same flag.
+    let token = CancelToken::new();
+    {
+        let mut jobs = AppState::lock(&state.jobs)?;
+        if jobs.contains_key(MAINTENANCE_LOCK) {
+            return Err("另一个维护任务正在进行，请先等待它结束。".into());
+        }
+        jobs.insert(MAINTENANCE_LOCK.to_string(), token.clone());
+        jobs.insert(job_id.clone(), token.clone());
+    }
+    let progress = Progress::new();
+    let reporter =
+        ProgressReporter::start(app.clone(), job_id.clone(), "maintenance", progress.clone());
+    let task_id = task.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        squid_engine::maintenance::run(&task_id, &progress, &token)
+    })
+    .await
+    .map_err(|error| format!("维护任务中断：{error}"));
+    reporter.finish();
+    if let Ok(mut jobs) = state.jobs.lock() {
+        jobs.remove(MAINTENANCE_LOCK);
+        jobs.remove(&job_id);
+    }
+    let outcome = result?.map_err(|error| error.to_string())?;
+    Ok(outcome)
 }
 
 #[derive(Clone, serde::Serialize)]

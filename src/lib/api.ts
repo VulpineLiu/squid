@@ -11,6 +11,8 @@ import type {
   JobProgress,
   LargeFile,
   LargestFile,
+  MaintenanceResult,
+  MaintenanceTask,
   ManageView,
   PageId,
   PermissionStatus,
@@ -80,6 +82,9 @@ export const api = {
   ) => invoke<LargeFile[]>("large_files_scan", { jobId, roots, minBytes, class: fileClass }),
   largeFilesDelete: (jobId: string, paths: string[], mode: DeleteMode) =>
     invoke<DeleteResult>("large_files_delete", { jobId, paths, mode }),
+  maintenanceTasks: () => invoke<MaintenanceTask[]>("maintenance_tasks"),
+  maintenanceRun: (jobId: string, task: string) =>
+    invoke<MaintenanceResult>("maintenance_run", { jobId, task }),
   appsScan: (jobId: string) => invoke<AppsResult>("apps_scan", { jobId }),
   appPlan: (jobId: string, appKey: string) => invoke<PlanResult>("app_plan", { jobId, appKey }),
   appUninstall: (jobId: string, planId: string, selected: number[], mode: DeleteMode) =>

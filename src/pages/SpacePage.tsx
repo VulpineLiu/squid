@@ -109,6 +109,7 @@ const RULE_NAMES: Record<string, [string, string]> = {
   "update-installers-scan": ["Other update packages", "其他升级安装包"],
   "purge-artifacts": ["Build artefacts", "项目构建产物"],
   "user-assets": ["Your own files (locked)", "您的个人文件（受保护）"],
+  "ai-cache": ["AI app caches & update payloads", "AI 应用缓存与更新包"],
 };
 
 function ruleName(ruleId: string, lang: "zh" | "en"): string {
@@ -119,10 +120,14 @@ function ruleName(ruleId: string, lang: "zh" | "en"): string {
 }
 
 /* Flat rule id → a normalised cluster key. Update installers cluster per
- * app ("<app> · <file>" labels) so the list matches how people think. */
+ * app ("<app> · <file>" labels) so the list matches how people think;
+ * HuggingFace repos share one rule id but deserve one 清理点 each. */
 function clusterKey(item: CleanupItem): string {
   if (item.ruleId.startsWith("update-installers")) {
     return `update:${item.label.split(" · ")[0] ?? item.label}`;
+  }
+  if (item.ruleId === "ai-huggingface") {
+    return `hf:${item.label}`;
   }
   return item.ruleId;
 }
@@ -136,6 +141,10 @@ function clusterLabel(item: CleanupItem, lang: "zh" | "en"): string {
   if (item.ruleId.startsWith("update-installers")) {
     const app = item.label.split(" · ")[0] ?? item.label;
     return lang === "zh" ? `${app} 升级包` : `${app} installers`;
+  }
+  // AI model clusters carry a human label already ("Ollama · qwen3/8b").
+  if (item.ruleId.startsWith("ai-ollama-") || item.ruleId === "ai-huggingface") {
+    return item.label;
   }
   return ruleName(item.ruleId, lang);
 }
