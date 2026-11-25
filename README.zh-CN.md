@@ -316,7 +316,7 @@ scripts/publish-release.sh --notes /path/to/release-notes.md
 
 完整发布流程、签名和清单格式见 [`docs/RELEASE.md`](docs/RELEASE.md)。
 
-GitHub 仓库只推送 `main` 等源码分支，不推送 `releases`。发布脚本只向 origin 推送更新分支；GitHub 上的源码镜像继续使用 origin 的发布通道。
+GitHub 仓库只保留源码分支（当前为 `main`），不承载 `releases`。同步使用 `scripts/sync-github.sh`；该脚本会从 GitHub 历史中剔除发布安装包，因此 GitHub 的提交哈希与 origin 不同。GitHub 上的源码镜像继续使用 origin 的发布通道。
 
 ## 平台状态
 

@@ -336,7 +336,7 @@ The publish script rebuilds the `releases` branch with `squid-update.json`, both
 
 See [`docs/RELEASE.md`](docs/RELEASE.md) for the full release, signing, and manifest process.
 
-The GitHub repository receives source branches such as `main` only. It never receives `releases`; the publish script pushes the update branch to origin, and GitHub clones keep using that origin channel.
+The GitHub repository receives source branches such as `main` only. It never receives `releases`; sync it with `scripts/sync-github.sh`, which strips release installers from GitHub history and therefore rewrites commit hashes. GitHub clones keep using the origin update channel.
 
 ## Platform status
 

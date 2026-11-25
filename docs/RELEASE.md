@@ -8,7 +8,8 @@ There are two remotes:
 - `origin` is the canonical repository and the update channel. It carries the
   orphan `releases` branch.
 - GitHub is a public source mirror. It receives `main` only and must never
-  receive `releases`.
+  receive `releases`. Its history is rewritten to drop `release/`, `*.dmg` and
+  `*.exe`, so its commit hashes differ from origin.
 
 ## Artifact names
 
@@ -130,13 +131,17 @@ scripts/publish-release.sh --dry-run --key ~/.config/squid-release/release.ed255
 scripts/publish-release.sh --no-push --key ~/.config/squid-release/release.ed25519
 ```
 
-The script pushes `releases` to `origin` only. Push the source mirror
-separately, and never push the release branch to GitHub:
+The script pushes `releases` to `origin` only. Push the source mirror with the
+sync script, which strips release installers from GitHub history:
 
 ```bash
 git push origin main
-git push github main
+scripts/sync-github.sh
 ```
+
+Do not run `git push github main` from the working repository: its history still
+contains the release installers, and the GitHub mirror has a different commit
+graph.
 
 The branch contains:
 
