@@ -103,7 +103,13 @@ function GroupIcon({
   );
 }
 
-export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace }) {
+export function PermissionsPage({
+  workspace,
+  platform,
+}: {
+  workspace: PermissionsWorkspace;
+  platform?: string;
+}) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
@@ -114,9 +120,8 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
   const [removingIds, setRemovingIds] = useState<string[] | null>(null);
   const view = workspace.view;
 
-  const tabs = useMemo(
-    () =>
-      [
+  const tabs = useMemo(() => {
+    const all = [
         {
           id: "startup" as const,
           label: t("Startup items", "开机启动项"),
@@ -141,9 +146,11 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
           count: view?.rules.length ?? 0,
           fresh: false,
         },
-      ],
-    [t, view, workspace.advanced],
-  );
+      ];
+    // Context menus, advanced autostart hooks and the popup blocker are
+    // Windows shell surfaces; macOS only has login/background startup items.
+    return platform === "windows" ? all : all.filter((item) => item.id === "startup");
+  }, [platform, t, view, workspace.advanced]);
 
   if (!view && workspace.scanning) {
     return (

@@ -41,7 +41,7 @@ import {
   useToast,
 } from "../components/ui";
 
-type SettingsTab = "general" | "cleanup" | "security" | "updates" | "about";
+export type SettingsTab = "general" | "cleanup" | "security" | "updates" | "about";
 
 const SETTINGS_TABS: {
   id: SettingsTab;
@@ -62,6 +62,7 @@ export function SettingsPage({
   flow,
   autoCheck,
   security,
+  initialTab = "general",
   onSettingsChange,
   onLanguageChange,
   onAutoCheckChange,
@@ -71,13 +72,14 @@ export function SettingsPage({
   flow: UpdateFlow;
   autoCheck: boolean;
   security: SecurityWorkspace;
+  initialTab?: SettingsTab;
   onSettingsChange: (settings: SettingsView) => void;
   onLanguageChange: (language: Language) => Promise<void>;
   onAutoCheckChange: (enabled: boolean) => void;
 }) {
   const { t, lang, bin } = useI18n();
   const { push } = useToast();
-  const [tab, setTab] = useState<SettingsTab>("general");
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [whitelistInput, setWhitelistInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +91,12 @@ export function SettingsPage({
   // "did this pattern ever protect something real?".
   const [audit, setAudit] = useState<Map<string, boolean> | null>(null);
   const [auditing, setAuditing] = useState(false);
+
+  // The sidebar/topbar update prompt opens Settings on its Updates section;
+  // a later plain Settings click asks for General and lands there.
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
 
   const runAudit = useCallback(async () => {
     setAuditing(true);

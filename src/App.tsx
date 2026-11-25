@@ -39,7 +39,7 @@ import { MaintenanceHubPage, type MaintTab } from "./pages/MaintenanceHubPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PermissionsPage } from "./pages/PermissionsPage";
 import { SecurityPage } from "./pages/SecurityPage";
-import { SettingsPage } from "./pages/SettingsPage";
+import { SettingsPage, type SettingsTab } from "./pages/SettingsPage";
 import { SpaceHubPage, type SpaceTab } from "./pages/SpaceHubPage";
 import { SystemPage } from "./pages/SystemPage";
 import { WidgetPage } from "./pages/WidgetPage";
@@ -52,6 +52,7 @@ const NAV_GROUPS: {
     labelEn: string;
     labelZh: string;
     icon: typeof LayoutDashboard;
+    windowsOnly?: boolean;
   }[];
 }[] = [
   {
@@ -81,6 +82,7 @@ const NAV_GROUPS: {
         labelEn: "System maintenance",
         labelZh: "系统维护",
         icon: Wrench,
+        windowsOnly: true,
       },
     ],
   },
@@ -221,6 +223,7 @@ export default function App() {
   // tab; the selection resets on every navigate so a later click re-arms it.
   const [spaceTab, setSpaceTab] = useState<SpaceTab>("junk");
   const [maintTab, setMaintTab] = useState<MaintTab>("repair");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [autostart, setAutostart] = useState(false);
   // A process row can ask "where did this come from"; the monitor opens the
   // process tab already filtered to that path.
@@ -332,7 +335,7 @@ export default function App() {
   }, [security]);
 
   useEffect(() => {
-    const order: PageId[] = [
+    const order: PageId[] = ([
       "overview",
       "space",
       "applications",
@@ -342,12 +345,15 @@ export default function App() {
       "system",
       "widget",
       "history",
-    ];
+    ] as PageId[]).filter(
+      (id) => id !== "maintenance" || bootstrap?.platform === "windows",
+    );
     // Ctrl/Cmd+1..9 follow the sidebar; 0 opens settings.
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
       if (event.key === "0") {
         event.preventDefault();
+        setSettingsTab("general");
         setPage("settings");
         return;
       }
@@ -358,7 +364,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [bootstrap?.platform]);
 
   const changeLanguage = useCallback(
     async (nextLanguage: Language) => {
@@ -396,6 +402,11 @@ export default function App() {
     }
   }, [push]);
 
+  const openSettings = useCallback((tab: SettingsTab = "general") => {
+    setSettingsTab(tab);
+    setPage("settings");
+  }, []);
+
   if (bootError) return <BootstrapError message={bootError} />;
   if (!bootstrap || !settings) return <LoadingScreen />;
 
@@ -411,6 +422,7 @@ export default function App() {
         bootstrap={bootstrap}
         page={page}
         setPage={setPage}
+        onOpenSettings={openSettings}
         updateVersion={activeUpdate?.availableVersion ?? null}
         security={security.status}
       >
@@ -440,12 +452,19 @@ export default function App() {
         {page === "applications" ? (
           <ApplicationsPage workspace={apps} onHistory={() => setPage("history")} />
         ) : null}
-        {page === "permissions" ? <PermissionsPage workspace={permissions} /> : null}
+        {page === "permissions" ? (
+          <PermissionsPage workspace={permissions} platform={bootstrap.platform} />
+        ) : null}
         {page === "security" ? (
           <SecurityPage security={security} onOpenStartup={() => setPage("permissions")} />
         ) : null}
         {page === "widget" ? <WidgetPage /> : null}
-        {page === "maintenance" ? <MaintenanceHubPage initialTab={maintTab} /> : null}
+        {page === "maintenance" ? (
+          <MaintenanceHubPage
+            initialTab={maintTab}
+            platform={bootstrap.platform}
+          />
+        ) : null}
         {page === "system" ? (
           <SystemPage
             snapshot={system.snapshot}
@@ -465,6 +484,7 @@ export default function App() {
             flow={update}
             autoCheck={autoCheck}
             security={security}
+            initialTab={settingsTab}
             onSettingsChange={setSettings}
             onLanguageChange={changeLanguage}
             onAutoCheckChange={changeAutoCheck}
@@ -498,6 +518,7 @@ function AppChrome({
   bootstrap,
   page,
   setPage,
+  onOpenSettings,
   updateVersion,
   security,
   children,
@@ -505,6 +526,7 @@ function AppChrome({
   bootstrap: Bootstrap;
   page: PageId;
   setPage: (page: PageId) => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
   updateVersion: string | null;
   security: SecurityStatus | null;
   children: ReactNode;
@@ -530,7 +552,11 @@ function AppChrome({
               <span className="nav-group-label">
                 {lang === "zh" ? group.labelZh : group.labelEn}
               </span>
-              {group.items.map((item) => {
+              {group.items
+                .filter(
+                  (item) => !item.windowsOnly || bootstrap.platform === "windows",
+                )
+                .map((item) => {
                 const Icon = item.icon;
                 return (
                   <button
@@ -549,7 +575,7 @@ function AppChrome({
                     ) : null}
                   </button>
                 );
-              })}
+                })}
             </div>
           ))}
         </nav>
@@ -558,9 +584,7 @@ function AppChrome({
           {updateVersion ? (
             <button
               className="sidebar-update"
-              onClick={() => {
-                setPage("settings");
-              }}
+              onClick={() => onOpenSettings("updates")}
             >
               <span>
                 <Sparkles size={15} />
@@ -581,7 +605,7 @@ function AppChrome({
           </button>
           <button
             className={`nav-item ${page === "settings" ? "is-active" : ""}`}
-            onClick={() => setPage("settings")}
+            onClick={() => onOpenSettings("general")}
           >
             <Settings size={18} />
             <span>{t("Settings", "设置")}</span>
@@ -607,7 +631,10 @@ function AppChrome({
               {t("Local & private", "本地与私密")}
             </span>
             {updateVersion ? (
-              <button className="topbar-update" onClick={() => setPage("settings")}>
+              <button
+                className="topbar-update"
+                onClick={() => onOpenSettings("updates")}
+              >
                 <Sparkles size={13} />
                 {t("Update", "更新")} {updateVersion}
               </button>

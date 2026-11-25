@@ -1,7 +1,7 @@
 import { EyeOff, SlidersHorizontal, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
-import { PageHeader } from "../components/ui";
+import { EmptyState, PageHeader } from "../components/ui";
 import { MaintenancePage } from "./MaintenancePage";
 import { PrivacyPage } from "./PrivacyPage";
 import { OptimizationPage } from "./OptimizationPage";
@@ -18,13 +18,38 @@ const TABS: { id: MaintTab; icon: typeof Wrench; en: string; zh: string }[] = [
   { id: "optimize", icon: SlidersHorizontal, en: "System optimisation", zh: "系统优化" },
 ];
 
-export function MaintenanceHubPage({ initialTab = "repair" }: { initialTab?: MaintTab }) {
+export function MaintenanceHubPage({
+  initialTab = "repair",
+  platform,
+}: {
+  initialTab?: MaintTab;
+  platform?: string;
+}) {
   const { t } = useI18n();
   const [tab, setTab] = useState<MaintTab>(initialTab);
   useEffect(() => setTab(initialTab), [initialTab]);
   const [badges, setBadges] = useState<Partial<Record<MaintTab, string | null>>>({});
   const report = (id: MaintTab) => (value: string | null) =>
     setBadges((current) => (current[id] === value ? current : { ...current, [id]: value }));
+
+  // Repairs, privacy traces and optimisation switches are all Windows
+  // registry / command surfaces. Say so instead of offering buttons that
+  // can only answer "not available on this platform".
+  if (platform !== "windows") {
+    return (
+      <div className="page hub-page">
+        <PageHeader title={t("System maintenance", "系统维护")} />
+        <EmptyState
+          icon={<Wrench size={30} />}
+          title={t("Windows only", "目前仅支持 Windows")}
+          description={t(
+            "Repairs, privacy traces and optimisation switches rely on Windows services and the registry. macOS keeps the security scan, startup items and cleanup tools.",
+            "一键修复、隐私清理与系统优化依赖 Windows 服务与注册表。macOS 版保留安全扫描、启动项与清理工具。",
+          )}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="page hub-page">
