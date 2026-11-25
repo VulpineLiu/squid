@@ -5002,6 +5002,16 @@ select:focus-visible,
   font-weight: var(--nex-weight-semibold);
 }
 
+/* 其他软件 gets a neutral apps-grid glyph: the bucket carries no product
+   identity, so borrowing a member's icon (ChatGPT's tile, say) mislabels it. */
+.perm-group-icon-neutral {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8e4da;
+  color: #8d949e;
+}
+
 .perm-group b {
   color: #909fad;
   font-size: var(--nex-text-3xs);

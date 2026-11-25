@@ -3,6 +3,7 @@ import {
   BellRing,
   ChevronRight,
   FolderOpen,
+  LayoutGrid,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -28,11 +29,6 @@ import {
 
 function scopeLabel(scope: string, t: (en: string, zh: string) => string): string {
   return scope === "machine" ? t("All users", "所有用户") : t("Current user", "当前用户");
-}
-
-// The icon shared by a software group: the first entry that carries one.
-function softwareIcon(items: StartupItem[]): string {
-  return items.find((item) => item.icon)?.icon ?? "";
 }
 
 // A row whose program binary no longer exists on disk — the config survived
@@ -74,6 +70,35 @@ function RowIcon({ icon, label }: { icon: string | null | undefined; label: stri
   ) : (
     <span className="perm-row-icon perm-row-icon-fallback" aria-hidden="true">
       {label.trim().slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+// 其他软件 carries no real product identity, so it never rides a member's
+// icon (ChatGPT's blue tile labelled 其他软件 read as a bug). A neutral
+// apps-grid glyph says "a pile of things we could not attribute".
+function GroupIcon({
+  software,
+  items,
+  neutral,
+}: {
+  software: string;
+  items: { icon: string | null }[];
+  neutral: boolean;
+}) {
+  if (neutral) {
+    return (
+      <span className="perm-group-icon perm-group-icon-neutral" aria-hidden="true">
+        <LayoutGrid size={16} />
+      </span>
+    );
+  }
+  const icon = items.find((item) => item.icon)?.icon;
+  return icon ? (
+    <img className="perm-group-icon" src={icon} alt="" />
+  ) : (
+    <span className="perm-group-icon perm-group-icon-fallback" aria-hidden="true">
+      {software.trim().slice(0, 1).toUpperCase()}
     </span>
   );
 }
@@ -380,13 +405,7 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
                 }`}
               >
                 <h4 className="perm-group" onClick={() => toggleGroupOpen(software)}>
-                  {items.find((item) => item.icon)?.icon ? (
-                    <img className="perm-group-icon" src={softwareIcon(items)} alt="" />
-                  ) : (
-                    <span className="perm-group-icon perm-group-icon-fallback" aria-hidden="true">
-                      {software.trim().slice(0, 1).toUpperCase()}
-                    </span>
-                  )}
+                  <GroupIcon software={software} items={items} neutral={software === otherName} />
                   <span className="perm-group-name">{software}</span>
                   {leftovers.length > 0 ? (
                     <span className="perm-sig is-leftover">
@@ -594,13 +613,7 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
             return (
               <div key={software} className={`perm-group-card ${open ? "is-open" : ""}`}>
                 <h4 className="perm-group" onClick={() => toggleExtGroupOpen(software)}>
-                  {items.find((entry) => entry.icon)?.icon ? (
-                    <img className="perm-group-icon" src={items.find((e) => e.icon)!.icon!} alt="" />
-                  ) : (
-                    <span className="perm-group-icon perm-group-icon-fallback" aria-hidden="true">
-                      {software.trim().slice(0, 1).toUpperCase()}
-                    </span>
-                  )}
+                  <GroupIcon software={software} items={items} neutral={software === otherName} />
                   <span className="perm-group-name">{software}</span>
                   <b className={allOn ? "is-all" : onCount === 0 ? "is-none" : "is-part"}>
                     {allOn

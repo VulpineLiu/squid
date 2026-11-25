@@ -582,6 +582,30 @@ mod windows {
             || trimmed.starts_with(r"\\")
     }
 
+    /// Store packages deny version-info reads to plain users, but their
+    /// install folder *is* the product identity: `…\WindowsApps\
+    /// OpenAI.ChatGPT_1.2025_x64__w269v…\ChatGPT.exe` → "ChatGPT". Without
+    /// this every packaged app (ChatGPT, Terminal, Notepad) sinks into
+    /// 其他软件 even though the folder spells the product name out.
+    fn windows_store_product(path: &str) -> Option<String> {
+        const MARK: &str = "\\windowsapps\\";
+        let lowered = path.to_lowercase().replace('/', "\\");
+        let at = lowered.find(MARK)? + MARK.len();
+        // The scan lower-cases only to *locate* the folder; the slice from
+        // the original path keeps the real casing (`OpenAI.ChatGPT_…`).
+        let original = path.replace('/', "\\");
+        let package = original[at..].split('\\').next()?;
+        let family = package.split('_').next()?;
+        let product = match family.split_once('.') {
+            // `Publisher.Product` — the product half is what users say.
+            Some((_, product)) if !product.trim().is_empty() => product,
+            Some((publisher, _)) => publisher,
+            None => family,
+        };
+        let product = product.trim();
+        (!product.is_empty()).then(|| product.to_string())
+    }
+
     /// Resolve `display_name` (and the software icon) for every scanned
     /// entry, once per binary. Also settles `target` / `target_exists`: the
     /// binary the row really runs, and whether it is still on disk (a missing
@@ -621,6 +645,12 @@ mod windows {
             // software product when the binary carries real human strings;
             // everything else falls into the 其他软件 bucket.
             entry.named = description.is_some() || product.is_some();
+            if !entry.named {
+                if let Some(product) = windows_store_product(&probed) {
+                    entry.display_name = product;
+                    entry.named = true;
+                }
+            }
             entry.icon = icon;
         }
     }
@@ -2365,9 +2395,38 @@ mod windows {
         use super::{
             approved_enabled, clean_module_path, exe_from_command, friendly_program_name, has_cjk,
             is_placeholder_label, module_folder_name, parse_csv_line, split_run_path,
-            task_settings_enabled, write_approved, CURRENT_VERSION,
+            task_settings_enabled, windows_store_product, write_approved, CURRENT_VERSION,
         };
         use winreg::RegKey;
+
+        #[test]
+        fn store_packages_are_attributed_by_their_package_folder() {
+            // MSIX installs deny version-info reads, so the folder is the
+            // only honest product name: these must escape 其他软件.
+            assert_eq!(
+                windows_store_product(
+                    r"C:\Program Files\WindowsApps\OpenAI.ChatGPT_1.2025.10.0_x64__w269v8zz8d6vy\ChatGPT.exe"
+                )
+                .as_deref(),
+                Some("ChatGPT")
+            );
+            assert_eq!(
+                windows_store_product(
+                    r"C:\PROGRAM FILES\WINDOWSAPPS\Microsoft.WindowsTerminal_1.21\wt.exe"
+                )
+                .as_deref(),
+                Some("WindowsTerminal")
+            );
+        }
+
+        #[test]
+        fn ordinary_paths_have_no_store_product() {
+            assert_eq!(
+                windows_store_product(r"D:\Program Files\Tencent\Weixin\Weixin.exe"),
+                None
+            );
+            assert_eq!(windows_store_product("Weixin.exe"), None);
+        }
 
         #[test]
         fn toggle_round_trips_through_the_approved_marker() {
