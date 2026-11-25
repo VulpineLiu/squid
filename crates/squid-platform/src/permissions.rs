@@ -636,6 +636,7 @@ mod windows {
     /// one is a 残留项).
     fn decorate_display_names(entries: &mut [StartupEntry]) {
         let vendors = vendor_icon_map();
+        let products = product_icon_map();
         let mut cache: std::collections::HashMap<String, SoftwareInfo> = Default::default();
         for entry in entries {
             let Some(exe) = exe_from_command(&entry.command) else {
@@ -656,11 +657,16 @@ mod windows {
                 .or_insert_with(|| {
                     let (description, product, _company) = version_strings(&probed);
                     let usable = |text: Option<String>| text.filter(|t| !is_placeholder_label(t));
-                    (
-                        usable(description),
-                        usable(product),
-                        software_icon(&probed, &vendors),
-                    )
+                    let (description, product) = (usable(description), usable(product));
+                    // A stub's own PE strings name the product it serves;
+                    // hand that label to the icon lookup so the uninstall
+                    // registry can point at the real binary's icon.
+                    let label = product
+                        .as_deref()
+                        .or(description.as_deref())
+                        .map(clean_module_name);
+                    let icon = software_icon(&probed, &vendors, &products, label.as_deref());
+                    (description, product, icon)
                 })
                 .clone();
             entry.display_name =
@@ -823,13 +829,100 @@ mod windows {
         map
     }
 
+    /// Lower-case product identity of a PE label: cut parenthetical
+    /// editions ("WeChat (64-bit)") and trim, so a stub's FileDescription
+    /// can be matched against uninstall-registry keys.
+    fn clean_module_name(text: &str) -> String {
+        text.split(['(', '（', '[', '【'])
+            .next()
+            .unwrap_or(text)
+            .trim()
+            .to_lowercase()
+    }
+
+    /// Product name → `DisplayIcon` from the uninstall registry. Stubs that
+    /// ship no icon resources carry the product in their PE strings
+    /// (`WemeetUpdateSvc.exe` says "腾讯会议", `WXWorkUpgrader.exe` says
+    /// "WXWorkService"); this map turns that claim into the real binary's
+    /// icon. Keyed by both the cleaned `DisplayName` and the DisplayIcon
+    /// file stem so either form finds its product. Built once per scan.
+    fn product_icon_map() -> std::collections::HashMap<String, (String, u16)> {
+        const UNINSTALLS: [&str; 3] = [
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        ];
+        let mut map: std::collections::HashMap<String, (String, u16)> = Default::default();
+        for hive in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+            for base in UNINSTALLS {
+                let Ok(root) = RegKey::predef(hive).open_subkey_with_flags(base, KEY_READ) else {
+                    continue;
+                };
+                for name in root.enum_keys().filter_map(Result::ok) {
+                    let Ok(app) = root.open_subkey_with_flags(&name, KEY_READ) else {
+                        continue;
+                    };
+                    let Some(spec): Option<String> = app.get_value("DisplayIcon").ok() else {
+                        continue;
+                    };
+                    let Some((path, index)) = parse_display_icon(&spec) else {
+                        continue;
+                    };
+                    if !Path::new(&path).exists() {
+                        continue;
+                    }
+                    if let Ok(display) = app.get_value::<String, _>("DisplayName") {
+                        let key = clean_module_name(&display);
+                        if !key.is_empty() {
+                            map.entry(key).or_insert_with(|| (path.clone(), index));
+                        }
+                    }
+                    let stem = Path::new(&path)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_lowercase())
+                        .unwrap_or_default();
+                    if !stem.is_empty() {
+                        map.entry(stem).or_insert_with(|| (path.clone(), index));
+                    }
+                }
+            }
+        }
+        map
+    }
+
+    /// Registry key for a stub's claimed product: exact first, then the
+    /// longest alias that stretches to it ("wxworkservice" → the `wxwork`
+    /// stem). Aliases shorter than four characters never stretch, so
+    /// generic words cannot borrow an unrelated tile.
+    fn product_icon_spec<'a>(
+        label: &str,
+        products: &'a std::collections::HashMap<String, (String, u16)>,
+    ) -> Option<&'a (String, u16)> {
+        if let Some(found) = products.get(label) {
+            return Some(found);
+        }
+        products
+            .iter()
+            .filter(|(key, _)| {
+                key.len() >= 4 && (label.starts_with(key.as_str()) || key.starts_with(label))
+            })
+            .max_by(|(left, _), (right, _)| left.len().cmp(&right.len()))
+            .map(|(_, spec)| spec)
+    }
+
     /// Startup-list icon with the vendor fallbacks the generic extraction
     /// lacks: real resources first, then App Paths, then the uninstall
-    /// registry's DisplayIcon for the same folder, then a sibling file.
-    /// `None` (a neutral placeholder in the UI) beats a misleading tile.
+    /// registry's DisplayIcon for the same folder, then the DisplayIcon of
+    /// the *named* product (a stub's PE strings say which app it belongs to
+    /// — 腾讯会议's updater lives alone in `Tencent\UpdateSvr\` and ships no
+    /// icon, while the real `WeMeetApp.exe` is one DisplayIcon away), then a
+    /// sibling file. `None` (a neutral placeholder in the UI) beats a
+    /// misleading tile.
     fn software_icon(
         path: &str,
         vendors: &std::collections::HashMap<String, (String, u16)>,
+        products: &std::collections::HashMap<String, (String, u16)>,
+        product_label: Option<&str>,
     ) -> Option<Vec<u8>> {
         if has_icon_resources(path) {
             return exe_icon_png(path, 0);
@@ -848,6 +941,13 @@ mod windows {
         if let Some((spec, index)) = vendors.get(dir_key.trim_end_matches('\\')) {
             if let Some(icon) = exe_icon_png(spec, *index) {
                 return Some(icon);
+            }
+        }
+        if let Some(label) = product_label {
+            if let Some((spec, index)) = product_icon_spec(&label.to_lowercase(), products) {
+                if let Some(icon) = exe_icon_png(spec, *index) {
+                    return Some(icon);
+                }
             }
         }
         if let Some((spec, index)) = file.parent().and_then(sibling_icon_spec) {
@@ -2519,9 +2619,10 @@ mod windows {
     #[cfg(test)]
     mod tests {
         use super::{
-            approved_enabled, attribute_vendor_suites, clean_module_path, exe_from_command,
-            friendly_program_name, has_cjk, is_component_role_label, is_placeholder_label,
-            module_folder_name, parse_csv_line, split_run_path, suite_path, task_settings_enabled,
+            approved_enabled, attribute_vendor_suites, clean_module_name, clean_module_path,
+            exe_from_command, friendly_program_name, has_cjk, is_component_role_label,
+            is_placeholder_label, module_folder_name, parse_csv_line, product_icon_map,
+            product_icon_spec, split_run_path, suite_path, task_settings_enabled,
             windows_store_product, write_approved, StartupEntry, CURRENT_VERSION,
         };
         use winreg::RegKey;
@@ -2587,6 +2688,73 @@ mod windows {
                 None,
                 "a loose file in Program Files has no suite"
             );
+        }
+
+        #[test]
+        fn clean_module_names_drop_editions_and_case() {
+            assert_eq!(clean_module_name("WeChat (64-bit)"), "wechat");
+            assert_eq!(clean_module_name("腾讯会议（企业版） "), "腾讯会议");
+            assert_eq!(clean_module_name("  WXWorkService "), "wxworkservice");
+        }
+
+        #[test]
+        fn a_stub_borrows_its_products_icon_by_label() {
+            // Two shapes of the same problem: 腾讯会议's stub says exactly
+            // what the uninstall `DisplayName` says, 企业微信's says
+            // "WXWorkService" while the registry keys are 企业微信 /
+            // `wxwork.exe`. The first matches by name, the second must
+            // stretch to the longest alias.
+            let products = product_icon_map();
+            let Some(wechat) = products.get("企业微信").or_else(|| products.get("wxwork"))
+            else {
+                eprintln!("skipping: 企业微信 not installed");
+                return;
+            };
+            assert!(
+                product_icon_spec("wxworkservice", &products).is_some_and(|found| found == wechat),
+                "the upgrader label did not resolve to the product icon"
+            );
+            // Too-short keys never stretch, or "ab" would own everything;
+            // a label stretching *down* to a shorter alias is the rule.
+            let mut tiny: std::collections::HashMap<String, (String, u16)> = Default::default();
+            tiny.insert("ab".into(), ("unrelated.exe".into(), 0));
+            tiny.insert("wemeet".into(), wechat.clone());
+            assert!(product_icon_spec("wemeetupd", &tiny).is_some_and(|found| found == wechat));
+            assert!(product_icon_spec("zeta", &tiny).is_none());
+        }
+
+        #[test]
+        fn the_live_scan_icons_the_stubbin_updaters() {
+            // 腾讯会议 keeps `WemeetUpdateSvc.exe` alone in
+            // `Tencent\UpdateSvr\` with zero icon resources, and 企业微信's
+            // `WXWorkUpgrader.exe` is the same trick; both used to render a
+            // grey initial tile in the startup groups. Skips off those boxes.
+            let meetings = std::path::Path::new(r"C:\Program Files (x86)\Tencent\UpdateSvr");
+            let wechat = std::path::Path::new(r"D:\Program Files (x86)\WXWork");
+            if !meetings.exists() && !wechat.exists() {
+                eprintln!("skipping: no Tencent updater stubs on this machine");
+                return;
+            }
+            let entries = super::scan_startup();
+            let stubs: Vec<_> = entries
+                .iter()
+                .filter(|entry| {
+                    entry.target.to_lowercase().contains("wemeetupdatesvc")
+                        || entry.target.to_lowercase().contains("wxworkupgrader")
+                })
+                .collect();
+            assert!(
+                !stubs.is_empty(),
+                "the updater stubs vanished from the scan"
+            );
+            for stub in &stubs {
+                assert!(
+                    stub.icon.is_some(),
+                    "{} has no icon: {:?}",
+                    stub.name,
+                    stub.target
+                );
+            }
         }
 
         #[test]
