@@ -2054,6 +2054,7 @@ mod tests {
                 publisher: None,
                 installed_ms: None,
                 display_icon: None,
+                ..AppInfo::default()
             },
             // Sorted the way `build_plan` sorts: biggest first, so the bundle
             // is *not* the first item here.
@@ -2378,8 +2379,12 @@ mod tests {
             screen.contains("12.0 GB"),
             "the row and the header should both read 12.0 GB:\n{screen}"
         );
+        // The bug this guards: the 1 TiB logical size leaking into the row
+        // or the header. Assert the file's *own* inflated numbers are gone —
+        // never "no TB anywhere": the host's real volumes (6 TB NAS drives)
+        // legitimately print TB in the disk panel and made this flaky.
         assert!(
-            !screen.contains("TB"),
+            !screen.contains("1.0 TB") && !screen.contains("1 TiB") && !screen.contains("1024 GB"),
             "a sparse file must not inflate the total past the physical disk:\n{screen}"
         );
     }

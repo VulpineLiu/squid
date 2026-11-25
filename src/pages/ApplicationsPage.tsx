@@ -2,16 +2,18 @@ import {
   AppWindow,
   ChevronRight,
   FolderOpen,
+  Hammer,
   PackageX,
   Play,
   Search,
+  ShieldAlert,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
-import { formatBytes, formatCount, shortPath } from "../lib/format";
+import { formatBytes, formatCount, messageFrom, shortPath } from "../lib/format";
 import type { AppInfo, DeleteMode } from "../types";
 import type { AppsWorkspace } from "../hooks/useAppsWorkspace";
 import {
@@ -28,53 +30,21 @@ import {
   useToast,
 } from "../components/ui";
 
-const iconCache = new Map<string, string | null>();
-const iconRequests = new Map<string, Promise<string | null>>();
+/* 卸载增强: package-manager provenance as a chip. The backend only badges
+   well-known layouts, so the chip states a fact, never a guess. */
+const SOURCE_BADGES: Record<string, [string, string]> = {
+  winget: ["winget", "winget"],
+  scoop: ["scoop", "scoop"],
+  Chocolatey: ["Chocolatey", "Chocolatey"],
+  "Microsoft Store": ["Store", "Microsoft Store"],
+  Toolbox: ["Toolbox", "JetBrains Toolbox"],
+};
 
-function loadAppIcon(app: AppInfo): Promise<string | null> {
-  const key = app.bundle_id || app.path;
-  if (iconCache.has(key)) return Promise.resolve(iconCache.get(key) ?? null);
-  const existing = iconRequests.get(key);
-  if (existing) return existing;
-  const request = api
-    .appIcon(key)
-    .catch(() => null)
-    .then((icon) => {
-      iconCache.set(key, icon);
-      iconRequests.delete(key);
-      return icon;
-    });
-  iconRequests.set(key, request);
-  return request;
-}
-
-function AppGlyph({ app, large = false }: { app: AppInfo; large?: boolean }) {
-  const key = app.bundle_id || app.path;
-  const [icon, setIcon] = useState<string | null>(() => iconCache.get(key) ?? null);
-
-  useEffect(() => {
-    if (iconCache.has(key)) {
-      setIcon(iconCache.get(key) ?? null);
-      return;
-    }
-    let cancelled = false;
-    void loadAppIcon(app).then((next) => {
-      if (!cancelled) setIcon(next);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [app, key]);
-
-  const letter = app.name.trim().slice(0, 1).toUpperCase() || "?";
-  return (
-    <span
-      className={`app-glyph ${large ? "is-large" : ""} ${icon ? "has-icon" : ""}`}
-      aria-hidden="true"
-    >
-      {icon ? <img src={icon} alt="" /> : letter}
-    </span>
-  );
+function sourceBadge(source: string): [string, string] | null {
+  for (const [key, badge] of Object.entries(SOURCE_BADGES)) {
+    if (source.includes(key)) return badge;
+  }
+  return null;
 }
 
 function AppRow({
@@ -87,9 +57,13 @@ function AppRow({
   onSelect: () => void;
 }) {
   const { t } = useI18n();
+  const letter = app.name.trim().slice(0, 1).toUpperCase() || "?";
+  const badge = sourceBadge(app.source);
   return (
     <button className={`app-row ${selected ? "is-selected" : ""}`} onClick={onSelect}>
-      <AppGlyph app={app} />
+      <span className="app-glyph" aria-hidden="true">
+        {app.icon ? <img src={app.icon} alt="" /> : letter}
+      </span>
       <span className="app-row-copy">
         <span className="app-row-title">
           <strong>{app.name}</strong>
@@ -99,12 +73,24 @@ function AppRow({
               {t("Running", "运行中")}
             </span>
           ) : null}
+          {app.dead ? (
+            <span className="status-chip is-danger">
+              <ShieldAlert size={10} />
+              {t("Incomplete install", "安装不完整")}
+            </span>
+          ) : null}
+          {badge ? (
+            <span className="status-chip is-source" title={badge[1]}>
+              <Hammer size={10} />
+              {badge[0]}
+            </span>
+          ) : null}
         </span>
         <span>{app.bundle_id || shortPath(app.path, 45)}</span>
       </span>
       <span className="app-row-meta">
         <strong>{formatBytes(app.size)}</strong>
-        <small>{app.version ? `v${app.version}` : app.source}</small>
+        <small>{app.version ? `v${app.version}` : app.publisher || app.source}</small>
       </span>
       <ChevronRight size={16} />
     </button>
@@ -122,6 +108,7 @@ export function ApplicationsPage({
   const [query, setQuery] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [mode, setMode] = useState<DeleteMode>("trash");
+  const [recordBusy, setRecordBusy] = useState(false);
 
   const apps = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -133,6 +120,14 @@ export function ApplicationsPage({
         app.publisher?.toLowerCase().includes(needle),
     );
   }, [query, workspace.apps]);
+
+  // The scan carries icons; the plan's AppInfo does not, so look it up.
+  const planIcon = useMemo(() => {
+    const planApp = workspace.plan?.app;
+    if (!planApp) return null;
+    const key = planApp.bundle_id || planApp.path;
+    return workspace.apps.find((a) => (a.bundle_id || a.path) === key)?.icon ?? null;
+  }, [workspace.plan, workspace.apps]);
 
   const uninstall = async () => {
     const result = await workspace.uninstall(mode);
@@ -148,9 +143,28 @@ export function ApplicationsPage({
     }
   };
 
+  // 卸载增强: an 安装不完整 entry is only fully gone once its registry
+  // record goes too — otherwise Windows (and every scanner) still lists it.
+  const removeRecord = async () => {
+    const regKey = workspace.plan?.app.reg_key;
+    if (!regKey || recordBusy) return;
+    setRecordBusy(true);
+    try {
+      await api.appRemoveRecord(regKey);
+      push(t("Orphaned registry record removed", "已清除残留的注册表记录"), "success");
+      workspace.chooseApp(null);
+      await workspace.scan();
+    } catch (reason) {
+      push(messageFrom(reason), "danger");
+    } finally {
+      setRecordBusy(false);
+    }
+  };
+
   return (
     <div className="page apps-page">
       <PageHeader
+        eyebrow={t("Applications", "应用程序")}
         title={t("Uninstall completely", "卸载，干净彻底")}
         actions={
           <Button
@@ -245,7 +259,9 @@ export function ApplicationsPage({
             ) : workspace.plan ? (
               <>
                 <div className="plan-head">
-                  <AppGlyph app={workspace.plan.app} large />
+                  <span className="app-glyph is-large">
+                    {planIcon ? <img src={planIcon} alt="" /> : workspace.plan.app.name.slice(0, 1).toUpperCase()}
+                  </span>
                   <div>
                     <span className="plan-kicker">{t("Removal plan", "卸载方案")}</span>
                     <h2>{workspace.plan.app.name}</h2>
@@ -264,6 +280,32 @@ export function ApplicationsPage({
                     <PackageX size={17} />
                   </button>
                 </div>
+
+                {workspace.plan.app.dead ? (
+                  <div className="plan-dead-callout">
+                    <ShieldAlert size={16} />
+                    <div>
+                      <strong>{t("Incomplete install", "安装不完整")}</strong>
+                      <p>
+                        {t(
+                          "The program files are already gone; only its registry record and leftovers remain. Removing the record makes Windows stop listing it.",
+                          "程序本体已经不存在，只剩下注册表记录和残留文件。清除记录后，系统将不再列出这个应用。",
+                        )}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon={<PackageX size={14} />}
+                        disabled={recordBusy}
+                        onClick={() => void removeRecord()}
+                      >
+                        {recordBusy
+                          ? t("Cleaning…", "正在清理…")
+                          : t("Clean leftovers", "清理残留记录")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
 
                 {workspace.plan.warnings.length > 0 ? (
                   <div className="plan-warnings">
@@ -343,6 +385,12 @@ export function ApplicationsPage({
                   <ShieldCheck size={26} />
                 </span>
                 <h2>{t("Choose an application", "选择一个应用")}</h2>
+                <p>
+                  {t(
+                    "Squid will map its caches, settings and support files before offering to remove anything.",
+                    "Squid 会先整理应用的缓存、设置与支持文件，再让您决定是否移除。",
+                  )}
+                </p>
               </div>
             )}
           </aside>
@@ -352,6 +400,11 @@ export function ApplicationsPage({
       {!workspace.scanned && !workspace.scanning ? (
         <EmptyState
           icon={<AppWindow size={29} />}
+          title={t("See what is installed", "查看已安装的应用")}
+          description={t(
+            "Scan your applications to remove an app completely, including files that would otherwise stay behind.",
+            "扫描应用后可连同原本会遗留的文件一起移除。",
+          )}
           action={
             <Button
               variant="primary"

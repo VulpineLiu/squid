@@ -3,6 +3,7 @@ import { api, subscribeJobProgress } from "../lib/api";
 import { isCancelled, messageFrom } from "../lib/format";
 import type {
   Category,
+  CleanupItem,
   DeleteMode,
   DeleteResult,
   JobProgress,
@@ -15,11 +16,29 @@ function jobId(): string {
 
 export type ScanKind = "cleanup" | "purge";
 
+/** Seed the checkbox state of a fresh result: unlocked items the policy
+ * keeps win; without a policy the rule metadata (`item.selected`) speaks. */
+export function seedSelection(
+  items: CleanupItem[],
+  defaultFor?: (item: CleanupItem) => boolean,
+): Set<number> {
+  const picked = new Set<number>();
+  items.forEach((item, index) => {
+    if (item.lock) return;
+    if (defaultFor ? defaultFor(item) : item.selected) picked.add(index);
+  });
+  return picked;
+}
+
 export interface ScanWorkspace {
   kind: ScanKind;
   result: ScanResult | null;
   selected: Set<number>;
   progress: JobProgress | null;
+  /** Live measurement counters streamed during a scan (A①). */
+  stats: { files: number; bytes: number } | null;
+  /** Per-category totals streamed in as each bucket finishes (A②). */
+  buckets: Partial<Record<Category, { total: number; count: number }>>;
   scanning: boolean;
   deleting: boolean;
   error: string | null;
@@ -35,6 +54,8 @@ export interface ScanWorkspace {
   cancel: () => Promise<void>;
   toggleItem: (index: number) => void;
   toggleCategory: (category: Category) => void;
+  setCategorySelection: (category: Category, on: boolean) => void;
+  setIndexes: (indexes: number[], on: boolean) => void;
   deselect: (indexes: number[]) => void;
   selectAll: () => void;
   clearSelection: () => void;
@@ -43,10 +64,23 @@ export interface ScanWorkspace {
   reset: () => void;
 }
 
-export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
+export function useScanWorkspace(
+  kind: ScanKind,
+  /** Overrides the rule metadata's per-item default when a scan lands
+   * (空间清理 uses this to pre-check every daily group and leave opt-in
+   * groups untouched). Read through a ref, so a fresh closure per render is
+   * fine without restarting the hook. */
+  selectionPolicy?: (item: CleanupItem) => boolean,
+): ScanWorkspace {
+  const policyRef = useRef(selectionPolicy);
+  policyRef.current = selectionPolicy;
   const [result, setResult] = useState<ScanResult | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState<JobProgress | null>(null);
+  const [stats, setStats] = useState<{ files: number; bytes: number } | null>(null);
+  const [buckets, setBuckets] = useState<
+    Partial<Record<Category, { total: number; count: number }>>
+  >({});
   const [scanning, setScanning] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +102,28 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
       setError(null);
       setSummary(null);
       setProgress(null);
-      const stop = await subscribeJobProgress(id, setProgress);
+      setStats(null);
+      setBuckets({});
+      // Streamed side-band (A①②): `metered` carries running counters (kept
+      // out of `progress`, whose done/total mean "units done / units total"),
+      // `bucket` one finished category at a time (detail = "cat:count:total").
+      const stop = await subscribeJobProgress(id, (event) => {
+        if (event.event === "metered" && event.done !== null && event.total !== null) {
+          setStats({ files: event.done, bytes: event.total });
+          return;
+        }
+        setProgress(event);
+        if (event.event === "bucket" && event.detail) {
+          const [category, count, total] = event.detail.split(":");
+          setBuckets((current) => ({
+            ...current,
+            [category as Category]: {
+              count: Number(count) || 0,
+              total: Number(total) || 0,
+            },
+          }));
+        }
+      });
       try {
         const next =
           kind === "cleanup"
@@ -81,14 +136,7 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
               );
         if (activeJob.current !== id) return;
         setResult(next);
-        setSelected(
-          new Set(
-            next.items
-              .map((item, index) => ({ item, index }))
-              .filter(({ item }) => item.selected && !item.lock)
-              .map(({ index }) => index),
-          ),
-        );
+        setSelected(seedSelection(next.items, policyRef.current));
       } catch (reason) {
         if (!isCancelled(reason)) setError(messageFrom(reason));
       } finally {
@@ -96,6 +144,7 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
         if (activeJob.current === id) {
           setScanning(false);
           setProgress(null);
+          setStats(null);
           setCurrentJob(null);
         }
       }
@@ -149,6 +198,44 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
   }, [result]);
 
   const clearSelection = useCallback(() => setSelected(new Set()), []);
+
+  // Deterministic category state: the 空间清理 page uses this to leave the
+  // optional groups (升级安装包 / 项目产物 / 开发文件) unchecked after a
+  // scan, wherever the rule defaults happened to point.
+  const setCategorySelection = useCallback(
+    (category: Category, on: boolean) => {
+      if (!result) return;
+      const indexes = result.items
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.category === category && !item.lock)
+        .map(({ index }) => index);
+      if (indexes.length === 0) return;
+      setSelected((current) => {
+        const next = new Set(current);
+        for (const index of indexes) {
+          if (on) next.add(index);
+          else next.delete(index);
+        }
+        return next;
+      });
+    },
+    [result],
+  );
+
+  // Bulk tick/un-tick an explicit index set — the 空间清理 accordion uses
+  // this for whole 清理点 (rule clusters), which the category helpers
+  // cannot express because a cluster is smaller than a category.
+  const setIndexes = useCallback((indexes: number[], on: boolean) => {
+    if (indexes.length === 0) return;
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const index of indexes) {
+        if (on) next.add(index);
+        else next.delete(index);
+      }
+      return next;
+    });
+  }, []);
 
   const deselect = useCallback((indexes: number[]) => {
     if (indexes.length === 0) return;
@@ -219,6 +306,8 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
     result,
     selected,
     progress,
+    stats,
+    buckets,
     scanning,
     deleting,
     error,
@@ -230,6 +319,8 @@ export function useScanWorkspace(kind: ScanKind): ScanWorkspace {
     cancel,
     toggleItem,
     toggleCategory,
+    setCategorySelection,
+    setIndexes,
     deselect,
     selectAll,
     clearSelection,

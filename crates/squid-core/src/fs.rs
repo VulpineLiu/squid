@@ -30,6 +30,8 @@ pub struct SizeInfo {
     pub files: u64,
     pub dirs: u64,
     pub unreadable: u32,
+    /// Newest last-modified seen while walking (unix seconds). `0` = unknown.
+    pub newest_write: u64,
 }
 
 impl SizeInfo {
@@ -56,6 +58,7 @@ impl SizeInfo {
         self.files += other.files;
         self.dirs += other.dirs;
         self.unreadable += other.unreadable;
+        self.newest_write = self.newest_write.max(other.newest_write);
     }
 
     /// "12,431 files" style annotation for detail rows.
@@ -207,6 +210,7 @@ pub fn measure(path: &Path, kind: ItemKind) -> SizeInfo {
     if meta.file_type().is_symlink() {
         info.files += 1;
         info.logical += Bytes(meta.len());
+        info.newest_write = mtime_secs(&meta);
         return info;
     }
     match kind {
@@ -214,6 +218,7 @@ pub fn measure(path: &Path, kind: ItemKind) -> SizeInfo {
             info.files += 1;
             info.logical += Bytes(meta.len());
             info.allocated += Bytes(allocated_bytes(path, &meta));
+            info.newest_write = mtime_secs(&meta);
             return info;
         }
         ItemKind::Path | ItemKind::Contents => {}
@@ -222,6 +227,7 @@ pub fn measure(path: &Path, kind: ItemKind) -> SizeInfo {
         info.files += 1;
         info.logical += Bytes(meta.len());
         info.allocated += Bytes(allocated_bytes(path, &meta));
+        info.newest_write = mtime_secs(&meta);
         return info;
     }
 
@@ -251,6 +257,7 @@ pub fn measure(path: &Path, kind: ItemKind) -> SizeInfo {
                         info.files += 1;
                         info.logical += Bytes(meta.len());
                         info.allocated += Bytes(allocated_bytes(entry.path(), &meta));
+                        info.newest_write = info.newest_write.max(mtime_secs(&meta));
                     }
                     Err(_) => info.unreadable += 1,
                 }
@@ -259,6 +266,14 @@ pub fn measure(path: &Path, kind: ItemKind) -> SizeInfo {
         }
     }
     info
+}
+
+/// Last-modified as unix seconds; 0 when the platform withholds it.
+fn mtime_secs(meta: &Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|when| when.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |age| age.as_secs())
 }
 
 /// Measure many paths in parallel. `progress` receives completed units.
@@ -280,7 +295,7 @@ pub fn kind_of(path: &Path) -> crate::model::ItemKind {
 pub fn measure_all(
     targets: &[(PathBuf, ItemKind)],
     cancel: &CancelToken,
-    on_unit: impl Fn(usize, &SizeInfo) + Send + Sync,
+    on_unit: impl Fn(usize, usize, &SizeInfo) + Send + Sync,
 ) -> Vec<SizeInfo> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(measure_threads())
@@ -297,14 +312,18 @@ pub fn measure_all(
     let results: Vec<SizeInfo> = pool.install(|| {
         targets
             .par_iter()
-            .map(|(path, kind)| {
+            .enumerate()
+            .map(|(index, (path, kind))| {
                 if cancel.is_cancelled() {
                     cancelled.store(true, Ordering::Relaxed);
                     return SizeInfo::default();
                 }
                 let info = measure(path, *kind);
-                let idx = done.fetch_add(1, Ordering::Relaxed) as usize;
-                emit(idx, &info);
+                let completed = done.fetch_add(1, Ordering::Relaxed) as usize + 1;
+                // (target index, completed count): index identifies the unit —
+                // callbacks arrive in completion order under rayon — while the
+                // count drives monotonic progress bars.
+                emit(index, completed, &info);
                 info
             })
             .collect()
@@ -369,6 +388,7 @@ pub fn remove_item_with(
         files: 0,
         dirs: 0,
         unreadable: 0,
+        newest_write: 0,
     };
     Ok(freed.on_disk().max(Bytes::ZERO))
 }

@@ -1,24 +1,22 @@
 import {
   AppWindow,
-  Boxes,
   ChevronDown,
   CircleGauge,
   Eraser,
   History,
   LayoutDashboard,
-  Power,
+  MonitorSmartphone,
   RefreshCw,
   Settings,
   ShieldCheck,
   Sparkles,
-  WandSparkles,
+  Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAppsWorkspace } from "./hooks/useAppsWorkspace";
 import { usePermissionsWorkspace } from "./hooks/usePermissionsWorkspace";
 import { useScanWorkspace } from "./hooks/useScanWorkspace";
 import { useSecurityWorkspace } from "./hooks/useSecurityWorkspace";
-import { useStartupWorkspace } from "./hooks/useStartupWorkspace";
 import { useSystemSnapshot } from "./hooks/useSystemSnapshot";
 import { useUpdateFlow } from "./hooks/useUpdateFlow";
 import { detectLanguage, I18nProvider, useI18n } from "./i18n";
@@ -36,16 +34,15 @@ import { useToast } from "./components/ui";
 import { SetupPanel } from "./components/SetupPanel";
 import brandMarkUrl from "../src-tauri/icons/brand-mark.svg";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
-import { CleanupPage } from "./pages/CleanupPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { MaintenanceHubPage, type MaintTab } from "./pages/MaintenanceHubPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PermissionsPage } from "./pages/PermissionsPage";
-import { PurgePage } from "./pages/PurgePage";
 import { SecurityPage } from "./pages/SecurityPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { StartupPage } from "./pages/StartupPage";
-import { StoragePage } from "./pages/StoragePage";
+import { SpaceHubPage, type SpaceTab } from "./pages/SpaceHubPage";
 import { SystemPage } from "./pages/SystemPage";
+import { WidgetPage } from "./pages/WidgetPage";
 
 const NAV_GROUPS: {
   labelEn: string;
@@ -63,14 +60,14 @@ const NAV_GROUPS: {
     items: [
       {
         id: "overview",
-        labelEn: "Overview",
-        labelZh: "概览",
+        labelEn: "Computer overview",
+        labelZh: "电脑概览",
         icon: LayoutDashboard,
       },
       {
-        id: "cleanup",
-        labelEn: "Daily cleanup",
-        labelZh: "日常清理",
+        id: "space",
+        labelEn: "Space cleaning",
+        labelZh: "空间清理",
         icon: Eraser,
       },
       {
@@ -80,37 +77,35 @@ const NAV_GROUPS: {
         icon: AppWindow,
       },
       {
-        id: "purge",
-        labelEn: "Deep Clean",
-        labelZh: "深度清理",
-        icon: WandSparkles,
+        id: "maintenance",
+        labelEn: "System maintenance",
+        labelZh: "系统维护",
+        icon: Wrench,
       },
+    ],
+  },
+  {
+    labelEn: "Protection",
+    labelZh: "安全",
+    items: [
       {
         id: "permissions",
         labelEn: "Permissions",
         labelZh: "权限管理",
         icon: ShieldCheck,
       },
-    ],
-  },
-  {
-    labelEn: "Protection",
-    labelZh: "保护",
-    items: [
-      { id: "security", labelEn: "Security", labelZh: "安全", icon: ShieldCheck },
-      { id: "startup", labelEn: "Startup items", labelZh: "启动项", icon: Power },
+      {
+        id: "security",
+        labelEn: "Security scan",
+        labelZh: "安全扫描",
+        icon: ShieldCheck,
+      },
     ],
   },
   {
     labelEn: "Insights",
     labelZh: "洞察",
     items: [
-      {
-        id: "storage",
-        labelEn: "Storage",
-        labelZh: "存储空间",
-        icon: Boxes,
-      },
       {
         id: "system",
         labelEn: "Real-time monitor",
@@ -119,26 +114,39 @@ const NAV_GROUPS: {
       },
     ],
   },
+  {
+    labelEn: "Desktop",
+    labelZh: "桌面",
+    items: [
+      {
+        id: "widget",
+        labelEn: "Desktop widget",
+        labelZh: "桌面小工具",
+        icon: MonitorSmartphone,
+      },
+    ],
+  },
 ];
 
-// Permissions manages Windows Run keys, shell extensions and popup rules; the
-// macOS equivalent is the Startup page, which reads LaunchAgents and login items.
-function navItemVisible(id: PageId, platform: string | undefined): boolean {
-  return id !== "permissions" || platform === "windows";
-}
-
 const PAGE_TITLES: Record<PageId, [string, string]> = {
-  overview: ["Overview", "概览"],
-  cleanup: ["Daily cleanup", "日常清理"],
+  overview: ["Computer overview", "电脑概览"],
+  space: ["Space cleaning", "空间清理"],
   applications: ["Uninstall apps", "应用卸载"],
-  purge: ["Deep Clean", "深度清理"],
   permissions: ["Permissions", "权限管理"],
-  storage: ["Storage", "存储空间"],
+  security: ["Security scan", "安全扫描"],
+  widget: ["Desktop widget", "桌面小工具"],
+  maintenance: ["System maintenance", "系统维护"],
   system: ["Real-time monitor", "实时监控"],
-  security: ["Security", "安全"],
-  startup: ["Startup items", "启动项"],
   history: ["History", "历史记录"],
   settings: ["Settings", "设置"],
+};
+
+/** Pages that no longer exist still arrive from old tray/notification payloads. */
+const LEGACY_PAGES: Record<string, PageId> = {
+  cleanup: "space",
+  purge: "space",
+  storage: "space",
+  startup: "permissions",
 };
 
 function BrandMark({ small = false }: { small?: boolean }) {
@@ -183,6 +191,21 @@ function BootstrapError({ message }: { message: string }) {
   );
 }
 
+const SPACE_OPTIONAL_CATEGORIES = [
+  "update-installers",
+  "project-artifacts",
+  "developer",
+];
+
+/** 空间清理 defaults: daily groups pre-checked, opt-in groups untouched.
+ * AI is the exception that proves the rule — its caches come pre-checked
+ * from the backend, its models never do, so the item's own `selected`
+ * flag speaks there. */
+function spaceDefaults(item: { category: string; selected: boolean }): boolean {
+  if (item.category === "ai-tools") return item.selected;
+  return !SPACE_OPTIONAL_CATEGORIES.includes(item.category);
+}
+
 export default function App() {
   const { push } = useToast();
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
@@ -194,26 +217,24 @@ export default function App() {
   const [setupOpen, setSetupOpen] = useState(false);
   // The 托盘驻留 case: a hidden main window must stop sampling the machine.
   const [windowVisible, setWindowVisible] = useState(true);
-  const cleanup = useScanWorkspace("cleanup");
-  const purge = useScanWorkspace("purge");
+  // Hub deep-links: the overview quick-cards and tray can request a specific
+  // tab; the selection resets on every navigate so a later click re-arms it.
+  const [spaceTab, setSpaceTab] = useState<SpaceTab>("junk");
+  const [maintTab, setMaintTab] = useState<MaintTab>("repair");
+  const [autostart, setAutostart] = useState(false);
+  // A process row can ask "where did this come from"; the monitor opens the
+  // process tab already filtered to that path.
+  const [processFilter] = useState<string | null>(null);
+  const cleanup = useScanWorkspace("cleanup", spaceDefaults);
+  const purge = useScanWorkspace("purge", spaceDefaults);
   const apps = useAppsWorkspace();
   const permissions = usePermissionsWorkspace(page === "permissions");
+  const security = useSecurityWorkspace(true);
   const systemActive = (page === "overview" || page === "system") && windowVisible;
   // Only the 实时监控 top-process table needs the expensive per-pid walk;
   // the overview tiles ride the light refresh.
   const system = useSystemSnapshot(systemActive, 1800, page === "system");
   const update = useUpdateFlow(bootstrap?.updateFeedUrl ?? "", autoCheck);
-  // One security state for the whole window: the overview strip, the sidebar
-  // badge and the security page all read this, so they cannot disagree.
-  const security = useSecurityWorkspace(true);
-  const startup = useStartupWorkspace(page === "startup");
-  // A process row can ask "where did this come from", and a startup entry can ask
-  // "is it running". Both hand the other page a path rather than duplicating data.
-  const [processFilter, setProcessFilter] = useState<string | null>(null);
-  // A path handed from the process table to the startup page, where it becomes a
-  // search rather than a second data load.
-  const [startupQuery, setStartupQuery] = useState<string | null>(null);
-  const [autostart, setAutostart] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -226,8 +247,6 @@ export default function App() {
         setLang(next.language);
         setAutoCheck(next.updateCheckEnabled);
         setSetupOpen(!next.settings.setupReviewed);
-        // The readiness card reports whether Squid starts at login, and that is a
-        // fact about the system rather than about settings, so it is asked for.
         void api
           .autostartStatus()
           .then(setAutostart)
@@ -262,11 +281,11 @@ export default function App() {
   /**
    * A notification click goes to the findings, and brings the window back.
    *
-   * Findings are the only thing squid notifies about, so the tap needs no
-   * destination in its payload. The backend is asked as well because closing the
-   * window only hides it: the webview is gone, so nothing on this side can undo
-   * the hide, and a click that appeared to do nothing would look like a bug in the
-   * security feature rather than in window management.
+   * Findings are the only thing Squid notifies about, so the tap needs no
+   * destination in its payload. The backend is asked as well because closing
+   * the window only hides it: the webview is gone, so nothing on this side can
+   * undo the hide, and a click that appeared to do nothing would look like a
+   * bug in the security feature rather than in window management.
    */
   useEffect(() => {
     let cancelled = false;
@@ -275,9 +294,6 @@ export default function App() {
       .then(({ onAction }) =>
         onAction(() => {
           if (cancelled) return;
-          // The backend's reply arrives as the same navigate event the tray menu
-          // uses, which also shows the hidden window. Asking first and navigating
-          // here as well would race the two against each other.
           void api.securityOpen().catch(() => undefined);
           void security.refresh();
         }),
@@ -286,8 +302,6 @@ export default function App() {
         if (cancelled) void listener.unregister();
         else stop = listener;
       })
-      // No plugin, or notifications switched off: the tray line and the in-app
-      // banner still report the same finding, so this is silence, not failure.
       .catch(() => undefined);
     return () => {
       cancelled = true;
@@ -295,20 +309,17 @@ export default function App() {
     };
   }, [security]);
 
-  const inspectProcess = useCallback((path: string) => {
-    setProcessFilter(path);
-    setPage("system");
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | null = null;
     void api
       .onNavigate((next) => {
-        if (!cancelled) setPage(next);
-        // A tray or notification jump into Security must show current numbers,
-        // not the ones from whenever the window last asked.
-        if (next === "security") void security.refresh();
+        if (cancelled) return;
+        const target = LEGACY_PAGES[next] ?? next;
+        setPage(target);
+        if (target === "space") setSpaceTab("junk");
+        if (target === "maintenance") setMaintTab("repair");
+        if (target === "security") void security.refresh();
       })
       .then((stop) => {
         if (cancelled) stop();
@@ -321,22 +332,25 @@ export default function App() {
   }, [security]);
 
   useEffect(() => {
-    const order: PageId[] = ([
+    const order: PageId[] = [
       "overview",
-      "cleanup",
+      "space",
       "applications",
-      "purge",
       "permissions",
-      "storage",
-      "system",
       "security",
-      "startup",
-    ] as PageId[]).filter(
-      (id) => id !== "permissions" || bootstrap?.platform === "windows",
-    );
-    // Ctrl/Cmd+1..9 follow the sidebar.
+      "maintenance",
+      "system",
+      "widget",
+      "history",
+    ];
+    // Ctrl/Cmd+1..9 follow the sidebar; 0 opens settings.
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (event.key === "0") {
+        event.preventDefault();
+        setPage("settings");
+        return;
+      }
       const index = Number(event.key) - 1;
       if (!Number.isInteger(index) || index < 0 || index >= order.length) return;
       event.preventDefault();
@@ -344,7 +358,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [bootstrap?.platform]);
+  }, []);
 
   const changeLanguage = useCallback(
     async (nextLanguage: Language) => {
@@ -352,7 +366,8 @@ export default function App() {
         const next = await api.settingsSave({ language: nextLanguage });
         setSettings(next);
         setLang(next.effectiveLanguage);
-        document.documentElement.lang = next.effectiveLanguage === "zh" ? "zh-CN" : "en";
+        document.documentElement.lang =
+          next.effectiveLanguage === "zh" ? "zh-CN" : "en";
       } catch (reason) {
         push(messageFrom(reason), "danger");
       }
@@ -363,12 +378,10 @@ export default function App() {
   const changeAutoCheck = useCallback(
     (enabled: boolean) => {
       setAutoCheck(enabled);
-      void api
-        .setUpdateCheckEnabled(enabled)
-        .catch((reason) => {
-          setAutoCheck(!enabled);
-          push(messageFrom(reason), "danger");
-        });
+      void api.setUpdateCheckEnabled(enabled).catch((reason) => {
+        setAutoCheck(!enabled);
+        push(messageFrom(reason), "danger");
+      });
     },
     [push],
   );
@@ -406,41 +419,33 @@ export default function App() {
             bootstrap={bootstrap}
             snapshot={system.snapshot}
             cleanup={cleanup}
+            purge={purge}
             onNavigate={setPage}
+            onOpenSpaceTab={(tab) => {
+              setSpaceTab(tab);
+              setPage("space");
+            }}
           />
         ) : null}
-        {page === "cleanup" ? (
-          <CleanupPage
-            workspace={cleanup}
+        {page === "space" ? (
+          <SpaceHubPage
+            cleanup={cleanup}
+            purge={purge}
+            bootstrap={bootstrap}
             deleteMode={deleteMode}
             onHistory={() => setPage("history")}
+            initialTab={spaceTab}
           />
         ) : null}
         {page === "applications" ? (
           <ApplicationsPage workspace={apps} onHistory={() => setPage("history")} />
         ) : null}
-        {page === "purge" ? (
-          <PurgePage
-            workspace={purge}
-            bootstrap={bootstrap}
-            deleteMode={deleteMode}
-            onHistory={() => setPage("history")}
-          />
-        ) : null}
         {page === "permissions" ? <PermissionsPage workspace={permissions} /> : null}
-        {page === "storage" ? <StoragePage bootstrap={bootstrap} /> : null}
         {page === "security" ? (
-          <SecurityPage security={security} onOpenStartup={() => setPage("startup")} />
+          <SecurityPage security={security} onOpenStartup={() => setPage("permissions")} />
         ) : null}
-        {page === "startup" ? (
-          <StartupPage
-            startup={startup}
-            security={security}
-            initialQuery={startupQuery}
-            onInspectProcess={inspectProcess}
-            onShowSecurity={() => setPage("security")}
-          />
-        ) : null}
+        {page === "widget" ? <WidgetPage /> : null}
+        {page === "maintenance" ? <MaintenanceHubPage initialTab={maintTab} /> : null}
         {page === "system" ? (
           <SystemPage
             snapshot={system.snapshot}
@@ -449,10 +454,7 @@ export default function App() {
             refresh={system.refresh}
             initialProcessFilter={processFilter}
             security={security}
-            onOpenStartup={(query) => {
-              setStartupQuery(query);
-              setPage("startup");
-            }}
+            onOpenStartup={() => setPage("permissions")}
           />
         ) : null}
         {page === "history" ? <HistoryPage /> : null}
@@ -511,11 +513,7 @@ function AppChrome({
   const title = PAGE_TITLES[page][lang === "zh" ? 1 : 0];
 
   return (
-    <div
-      className="app"
-      data-platform={bootstrap.platform}
-      data-page={page}
-    >
+    <div className="app" data-platform={bootstrap.platform} data-page={page}>
       <aside className="sidebar">
         <div className="sidebar-drag" data-tauri-drag-region />
         <div className="sidebar-brand">
@@ -532,9 +530,7 @@ function AppChrome({
               <span className="nav-group-label">
                 {lang === "zh" ? group.labelZh : group.labelEn}
               </span>
-              {group.items
-                .filter((item) => navItemVisible(item.id, bootstrap.platform))
-                .map((item) => {
+              {group.items.map((item) => {
                 const Icon = item.icon;
                 return (
                   <button
@@ -545,8 +541,10 @@ function AppChrome({
                   >
                     <Icon size={18} />
                     <span>{lang === "zh" ? item.labelZh : item.labelEn}</span>
-                    {item.id === "security" && security ? securityBadge(security, page) : null}
-                    {item.id === "cleanup" && page !== "cleanup" ? (
+                    {item.id === "security" && security
+                      ? securityBadge(security, page)
+                      : null}
+                    {item.id === "space" && page !== "space" ? (
                       <i className="nav-dot" />
                     ) : null}
                   </button>

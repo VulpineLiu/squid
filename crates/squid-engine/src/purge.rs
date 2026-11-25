@@ -196,9 +196,17 @@ pub fn scan(
     let mut candidates: Vec<Candidate> = Vec::new();
     let mut visited = 0usize;
     for root in &roots {
-        let top_level = roots.len() > 1 && root.components().count() <= 3;
-        let cap = if top_level { depth.min(4) } else { depth };
-        walk(root, cap, &mut candidates, &mut visited, progress, cancel)?;
+        // Shallow roots (the home folder itself) only get a depth-reduced
+        // walk; project containers are worth the full depth.
+        let cap = if root.shallow { depth.min(4) } else { depth };
+        walk(
+            &root.path,
+            cap,
+            &mut candidates,
+            &mut visited,
+            progress,
+            cancel,
+        )?;
     }
     candidates.sort_by(|a, b| a.path.cmp(&b.path));
     candidates.dedup_by(|a, b| a.path == b.path);
@@ -222,11 +230,13 @@ pub fn scan(
         );
         let mut item = item_for(candidate);
 
+        // Evidence chain (B3): remember the git verdict + project root + age
+        // while checking, then attach machine tokens for the UI panel.
+        let evidence_project =
+            project_with_git(&candidate.path).unwrap_or_else(|| candidate.project.clone());
+        let evidence_age = age_days(&candidate.path);
         if !options.force {
-            let project_root = match project_with_git(&candidate.path) {
-                Some(dir) => dir,
-                None => candidate.project.clone(),
-            };
+            let project_root = evidence_project.clone();
             let state = match git_cache.iter().find(|(dir, _)| *dir == project_root) {
                 Some((_, state)) => *state,
                 None => {
@@ -237,14 +247,22 @@ pub fn scan(
             };
             match state {
                 GitState::Tracked => {
+                    item.evidence.push("git:tracked".into());
                     item = item
                         .locked(LockReason::Protected)
                         .with_note("tracked by git — pass --all to delete anyway");
                 }
-                GitState::Ignored => item.note = Some("git-ignored build output".into()),
-                GitState::Untracked => item.note = Some("untracked by git".into()),
+                GitState::Ignored => {
+                    item.evidence.push("git:ignored".into());
+                    item.note = Some("git-ignored build output".into());
+                }
+                GitState::Untracked => {
+                    item.evidence.push("git:untracked".into());
+                    item.note = Some("untracked by git".into());
+                }
                 GitState::Unknown => {
-                    let age = age_days(&candidate.path);
+                    item.evidence.push("git:none".into());
+                    let age = evidence_age;
                     match age {
                         Some(age) if age >= min_age as f64 => {
                             item.note = Some(format!("no git repo · {:.0} days old", age));
@@ -288,6 +306,7 @@ pub fn scan(
                 .locked(LockReason::NotOwned)
                 .with_note("owned by another user");
         }
+        collect_evidence(&mut item, &evidence_project, evidence_age);
         report.items.push(item);
     }
 
@@ -308,6 +327,77 @@ pub fn scan(
         })
         .count() as u32;
     Ok(report)
+}
+
+/// Mole's node_modules evidence chain, made visible (B3):
+/// a lockfile proves the tree is *reinstallable*; the package manager's
+/// install record inside the artefact proves nobody hand-edited it since —
+/// any file newer than the record smells like patched code, so we count it.
+/// Returns machine tokens for the UI detail panel; empty = not a node tree.
+fn node_evidence(project: &Path, artifact: &Path) -> Vec<String> {
+    const LOCKS: [(&str, &str); 3] = [
+        ("package-lock.json", ".package-lock.json"),
+        ("pnpm-lock.yaml", ".modules.yaml"),
+        ("yarn.lock", ".yarn-integrity"),
+    ];
+    let mut out = Vec::new();
+    let Some((lock, record)) = LOCKS.iter().find(|(lock, _)| project.join(lock).is_file()) else {
+        return out;
+    };
+    out.push(format!("lock:{lock}"));
+    let record_path = artifact.join(record);
+    let Ok(meta) = std::fs::metadata(&record_path) else {
+        out.push("record-missing".into());
+        return out;
+    };
+    out.push(format!("record:{record}"));
+    let Ok(stamp) = meta.modified() else {
+        return out;
+    };
+    let mut modified = 0u32;
+    let mut seen = 0u32;
+    for entry in walkdir::WalkDir::new(artifact)
+        .follow_links(false)
+        .max_depth(8)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        seen += 1;
+        if entry
+            .metadata()
+            .ok()
+            .and_then(|file| file.modified().ok())
+            .is_some_and(|when| when > stamp)
+        {
+            modified += 1;
+            if modified > 50 {
+                break;
+            }
+        }
+        if seen >= 40_000 {
+            break;
+        }
+    }
+    out.push(format!("modified:{modified}"));
+    out
+}
+
+/// Collect the evidence tokens for one candidate after its checks ran.
+fn collect_evidence(item: &mut CleanupItem, project: &Path, age: Option<f64>) {
+    if let Some(age) = age {
+        item.evidence.push(format!("age:{}", age.floor() as u64));
+    }
+    let name = item
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if name == "node_modules" {
+        item.evidence.extend(node_evidence(project, &item.path));
+    }
 }
 
 fn item_for(candidate: &Candidate) -> CleanupItem {
@@ -337,24 +427,118 @@ fn item_for(candidate: &Candidate) -> CleanupItem {
     .with_note(project)
 }
 
-/// Default roots: everything the user configured, plus the home folder itself
-/// (shallow) so a project in an unexpected place is still found.
-fn resolve_roots(engine: &Engine, options: &PurgeOptions) -> Vec<PathBuf> {
+/// Default roots are auto-discovered (Mole habit, but without the config
+/// file): the home folder, container-named children of the home
+/// (`~/source`, `~/repos`, …) and container-named children sitting directly
+/// under each fixed drive root (`D:\Projects`). A user who wants more passes
+/// explicit roots; a user who edits `purge_roots` in settings.toml keeps
+/// those extras honoured as well.
+fn resolve_roots(engine: &Engine, options: &PurgeOptions) -> Vec<RootSpec> {
     if !options.roots.is_empty() {
-        return options
+        let chosen: Vec<RootSpec> = options
             .roots
             .iter()
             .map(|root| squid_core::paths::expand(&root.to_string_lossy()))
             .filter(|path| path.is_dir())
+            .map(|path| RootSpec {
+                path,
+                shallow: false,
+            })
             .collect();
+        if !chosen.is_empty() {
+            return chosen;
+        }
     }
-    let mut roots = engine.settings().purge_root_paths();
+    let mut roots: Vec<RootSpec> = Vec::new();
+    let push = |path: PathBuf, shallow: bool, roots: &mut Vec<RootSpec>| {
+        if path.is_dir()
+            && !roots
+                .iter()
+                .any(|seen| squid_core::paths::same_path(&seen.path, &path))
+        {
+            roots.push(RootSpec { path, shallow });
+        }
+    };
+    // Extras the user maintains by hand in settings.toml (not a UI concept).
+    for root in engine.settings().purge_root_paths() {
+        push(root, false, &mut roots);
+    }
     let home = squid_core::paths::home_dir();
-    if !roots.iter().any(|root| root == &home) {
-        roots.push(home);
+    // Container-named homes: full depth, high value.
+    for container in container_children(&home) {
+        push(container, false, &mut roots);
     }
-    roots.retain(|root| root.is_dir());
+    for mount in drive_roots(engine) {
+        for container in container_children(&mount) {
+            push(container, false, &mut roots);
+        }
+    }
+    // The home itself last, walked shallow: it still catches projects parked
+    // on Desktop / Documents without diving through the whole profile.
+    push(home, true, &mut roots);
     roots
+}
+
+/// One walk start point. `shallow` roots (the home folder) get the reduced
+/// depth cap; project containers are walked to the full depth.
+struct RootSpec {
+    path: PathBuf,
+    shallow: bool,
+}
+
+/// Names that, one level under the home or a drive root, mean "my projects
+/// live here". `documents`/`desktop` belong on drive roots (Windows users
+/// keep code under `D:\Documents`, VS writes `Documents\source\repos`);
+/// under the home folder they are reached by the shallow home walk anyway.
+const CONTAINER_NAMES: &[&str] = &[
+    "repos",
+    "repo",
+    "git",
+    "github",
+    "code",
+    "coding",
+    "dev",
+    "develop",
+    "development",
+    "projects",
+    "project",
+    "workspace",
+    "workspaces",
+    "work",
+    "src",
+    "source",
+    "documents",
+    "desktop",
+];
+
+fn container_children(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            CONTAINER_NAMES
+                .iter()
+                .any(|wanted| name.eq_ignore_ascii_case(wanted))
+                && entry.path().is_dir()
+        })
+        .map(|entry| entry.path())
+        .collect()
+}
+
+/// Fixed drive mount points (Windows) / the root volume only elsewhere —
+/// removable and network media are not project homes worth walking.
+fn drive_roots(engine: &Engine) -> Vec<PathBuf> {
+    let Ok(volumes) = engine.platform().volumes() else {
+        return Vec::new();
+    };
+    volumes
+        .into_iter()
+        .filter(|volume| !volume.is_removable)
+        .map(|volume| volume.mount_point)
+        .collect()
 }
 
 fn walk(
@@ -509,8 +693,21 @@ fn git_state(project: &Path, artifact: &Path) -> GitState {
     }
 }
 
+/// Spawn helper: on Windows a GUI parent (Squid) would otherwise get a fresh
+/// console window for every short-lived CLI call, flashing on the desktop.
+fn hide_console(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+    command
+}
+
 fn run_git(project: &Path, args: &[&str]) -> Option<bool> {
-    let output = Command::new("git")
+    let output = hide_console(&mut Command::new("git"))
         .arg("-C")
         .arg(project)
         .args(args)
@@ -522,7 +719,7 @@ fn run_git(project: &Path, args: &[&str]) -> Option<bool> {
 }
 
 fn run_git_raw(project: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
+    let output = hide_console(&mut Command::new("git"))
         .arg("-C")
         .arg(project)
         .args(args)
@@ -546,9 +743,31 @@ fn measure(report: &mut ScanReport, progress: &Progress, cancel: &CancelToken) {
         return;
     }
     progress.phase("measure", "measuring artefacts");
-    let sizes = squid_core::fs::measure_all(&targets, cancel, |index, _info| {
+    let meter = std::sync::Mutex::new((0u64, 0u64, std::time::Instant::now()));
+    let sizes = squid_core::fs::measure_all(&targets, cancel, |index, completed, info| {
+        let emit_line = {
+            let mut guard = meter
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.0 += info.files;
+            guard.1 += info.on_disk().as_u64();
+            if completed as u64 == targets.len() as u64
+                || guard.2.elapsed() >= std::time::Duration::from_millis(90)
+            {
+                guard.2 = std::time::Instant::now();
+                Some((guard.0, guard.1))
+            } else {
+                None
+            }
+        };
+        if let Some((files, bytes)) = emit_line {
+            progress.publish(squid_core::progress::Event::Metered {
+                files,
+                bytes: Bytes(bytes),
+            });
+        }
         progress.tick(
-            index as u64 + 1,
+            completed as u64,
             Some(targets.len() as u64),
             targets.get(index).map(|(path, _)| path.clone()),
         );
@@ -556,6 +775,15 @@ fn measure(report: &mut ScanReport, progress: &Progress, cancel: &CancelToken) {
     for (item, info) in report.items.iter_mut().zip(sizes) {
         item.size = info.logical;
         item.allocated = info.allocated;
+        item.file_count = info.files;
+        item.last_write_secs = if info.newest_write == 0 {
+            None
+        } else {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs());
+            Some(now.saturating_sub(info.newest_write))
+        };
         if info.unreadable > 0 {
             let suffix = format!("{} entries unreadable", info.unreadable);
             item.note = Some(match item.note.take() {

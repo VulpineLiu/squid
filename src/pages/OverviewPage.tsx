@@ -14,15 +14,12 @@ import {
   WandSparkles,
   Waypoints,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { useI18n } from "../i18n";
-import {
-  formatBytes,
-  formatCount,
-  formatMemoryBytes,
-  percent,
-} from "../lib/format";
-import type { Bootstrap, PageId, SystemSnapshot, Volume } from "../types";
+import { formatBytes, formatCount, formatMemory, percent } from "../lib/format";
+import type { Bootstrap, SystemSnapshot, Volume } from "../types";
 import type { ScanWorkspace } from "../hooks/useScanWorkspace";
+import type { PageId } from "../types";
 import { CategorySummary } from "../components/CleanupView";
 import {
   Button,
@@ -45,26 +42,87 @@ function greeting(lang: "zh" | "en"): string {
   return "Good evening";
 }
 
-function coreLabel(snapshot: SystemSnapshot | null, t: (en: string, zh: string) => string) {
-  if (!snapshot) return t("Reading processor…", "正在读取处理器…");
-  const { physical_cores: physical, logical_cores: logical } = snapshot.cpu;
-  if (physical === logical) {
-    return t(`${physical} cores`, `${physical} 核`);
-  }
-  return t(`${physical} cores / ${logical} threads`, `${physical} 核 / ${logical} 线程`);
+/// Windows mounts read `C:\`; everything else shows its own label.
+function driveLabel(volume: Volume): string {
+  return /^[A-Za-z]:/.exec(volume.mount_point)?.[0] ?? volume.mount_point;
 }
 
-function machineRows(
-  bootstrap: Bootstrap,
-  snapshot: SystemSnapshot | null,
-  volume: Volume | null,
-  t: (en: string, zh: string) => string,
-) {
-  const hardware = bootstrap.hardwareInfo;
-  const model = bootstrap.hardware.split(" · ")[0]?.trim() || bootstrap.hardware;
-  const installed = snapshot
+function SpecRow({
+  icon,
+  label,
+  value,
+  t,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  t: (en: string, zh: string) => string;
+}) {
+  return (
+    <div className="spec-row">
+      <span className="spec-icon">{icon}</span>
+      <span className="spec-label">{label}</span>
+      <strong title={value || undefined}>{value || t("—", "—")}</strong>
+    </div>
+  );
+}
+
+export function OverviewPage({
+  bootstrap,
+  snapshot,
+  cleanup,
+  purge,
+  onNavigate,
+  onOpenSpaceTab,
+}: {
+  bootstrap: Bootstrap;
+  snapshot: SystemSnapshot | null;
+  cleanup: ScanWorkspace;
+  purge: ScanWorkspace;
+  onNavigate: (page: PageId) => void;
+  /** Deep-link into a 空间清理 hub tab (重复文件 / 大文件). */
+  onOpenSpaceTab?: (tab: "junk" | "dups" | "big") => void;
+}) {
+  const { t, lang } = useI18n();
+  const volumes = snapshot?.volumes ?? [];
+  const rootVolume = volumes.find((candidate) => candidate.is_root) ?? volumes[0] ?? null;
+  const memoryInstalled = snapshot
     ? Math.max(snapshot.memory.installed, snapshot.memory.total)
     : 0;
+  const memoryReserved = snapshot
+    ? Math.max(0, memoryInstalled - snapshot.memory.total)
+    : 0;
+  const scanned = Boolean(cleanup.result || purge.result);
+  const scanning = cleanup.scanning || purge.scanning;
+  const found = [cleanup, purge].reduce(
+    (sum, workspace) =>
+      sum +
+      (workspace.result
+        ? workspace.result.items
+            .filter((item) => !item.lock)
+            .reduce((total, item) => total + item.onDisk, 0)
+        : 0),
+    0,
+  );
+  // 智能扫描 is an entry point, not a resident process: the moment it is
+  // pressed we hand the page over to 空间清理 and launch both scan stages
+  // there (SpacePage owns the settings — age threshold, auto-discovery).
+  // A finished scan keeps the button as a shortcut back to the results.
+  const smartScan = () => {
+    onNavigate("space");
+    if (!scanned && !scanning) {
+      void cleanup.runScan().then(() =>
+        purge.runScan({
+          // Empty = engine auto-discovery of project containers.
+          roots: [],
+          minAgeDays: bootstrap.settings.purgeMinAgeDays || 7,
+          force: false,
+        }),
+      );
+    }
+  };
+
+  const hardware = bootstrap.hardwareInfo;
   const ramBrands = [
     ...new Set(hardware.memory_sticks.map((stick) => stick.manufacturer).filter(Boolean)),
   ].join(" / ");
@@ -72,112 +130,40 @@ function machineRows(
     (top, stick) => Math.max(top, stick.speed_mhz),
     0,
   );
-  const memory = [
-    installed ? formatMemoryBytes(installed) : "",
-    ramBrands,
-    ramSpeed ? `${ramSpeed} MT/s` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const disk = [
-    [hardware.disk_vendor, hardware.disk_model].filter(Boolean).join(" "),
-    hardware.disk_size_bytes ? formatBytes(hardware.disk_size_bytes, 0) : "",
-    hardware.disk_bus,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const gpu = [
-    hardware.gpu_model &&
-    hardware.gpu_model.toLowerCase().startsWith(hardware.gpu_vendor.toLowerCase())
-      ? hardware.gpu_model
-      : [hardware.gpu_vendor, hardware.gpu_model].filter(Boolean).join(" "),
-    hardware.gpu_vram_bytes ? formatBytes(hardware.gpu_vram_bytes, 0) : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const rows = [
-    {
-      key: "os",
-      icon: MonitorCog,
-      label: t("Operating system", "操作系统"),
-      value: bootstrap.osVersion || bootstrap.osName,
-    },
-    {
-      key: "model",
-      icon: CircuitBoard,
-      label: t("Computer", "本机型号"),
-      value: hardware.board || model,
-    },
-    {
-      key: "cpu",
-      icon: Cpu,
-      label: t("Processor", "处理器"),
-      value: snapshot
-        ? snapshot.cpu.brand || t("Unknown processor", "未知处理器")
-        : t("Reading processor…", "正在读取处理器…"),
-    },
-    {
-      key: "memory",
-      icon: MemoryStick,
-      label: t("Memory", "内存"),
-      value: memory || t("Reading memory…", "正在读取内存…"),
-    },
-    {
-      key: "disk",
-      icon: HardDrive,
-      label: t("Primary disk", "主硬盘"),
-      value:
-        disk ||
-        (volume
-          ? `${volume.name || volume.mount_point} · ${formatBytes(volume.total, 0)} · ${volume.filesystem.toUpperCase()}`
-          : t("Reading disks…", "正在读取磁盘…")),
-    },
-  ];
-  if (gpu || snapshot?.host.gpu) {
-    rows.push({
-      key: "gpu",
-      icon: Waypoints,
-      label: t("Graphics", "显卡"),
-      value: gpu || snapshot?.host.gpu || "",
-    });
-  }
-  return rows;
-}
-
-export function OverviewPage({
-  bootstrap,
-  snapshot,
-  cleanup,
-  onNavigate,
-}: {
-  bootstrap: Bootstrap;
-  snapshot: SystemSnapshot | null;
-  cleanup: ScanWorkspace;
-  onNavigate: (page: PageId) => void;
-}) {
-  const { t, lang } = useI18n();
-  const volumes = snapshot?.volumes ?? [];
-  const rootVolume = volumes.find((candidate) => candidate.is_root) ?? volumes[0] ?? null;
-  const used = rootVolume ? rootVolume.total - rootVolume.free : 0;
-  const usedPercent = rootVolume ? percent(used, rootVolume.total) : 0;
-  const memoryPercent = snapshot
-    ? percent(snapshot.memory.used, snapshot.memory.total)
-    : 0;
-  const memoryInstalled = snapshot
-    ? Math.max(snapshot.memory.installed, snapshot.memory.total)
-    : 0;
-  const memoryReserved = snapshot
-    ? Math.max(0, memoryInstalled - snapshot.memory.total)
-    : 0;
-  const found = cleanup.result
-    ? cleanup.result.items
-        .filter((item) => !item.lock)
-        .reduce((sum, item) => sum + item.onDisk, 0)
-    : 0;
-  const visibleVolumes = (snapshot?.volumes ?? []).slice(0, 2);
-  const startScan = () => {
-    if (cleanup.result) onNavigate("cleanup");
-    else void cleanup.runScan();
+  const specs = {
+    os: bootstrap.osVersion,
+    board: hardware.board || bootstrap.hardware,
+    cpu: snapshot
+      ? `${snapshot.cpu.brand} · ${snapshot.cpu.physical_cores} ${t("cores", "核")} / ${
+          snapshot.cpu.logical_cores
+        } ${t("threads", "线程")}`
+      : hardware.cpu_model,
+    memory:
+      [
+        memoryInstalled ? formatMemory(memoryInstalled) : "",
+        ramBrands,
+        ramSpeed ? `${ramSpeed} MT/s` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ") || (memoryReserved ? formatMemory(memoryInstalled) : ""),
+    disk:
+      [
+        [hardware.disk_vendor, hardware.disk_model].filter(Boolean).join(" "),
+        hardware.disk_size_bytes ? formatBytes(hardware.disk_size_bytes) : "",
+        hardware.disk_bus,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    gpu:
+      [
+        hardware.gpu_model &&
+        hardware.gpu_model.toLowerCase().startsWith(hardware.gpu_vendor.toLowerCase())
+          ? hardware.gpu_model
+          : [hardware.gpu_vendor, hardware.gpu_model].filter(Boolean).join(" "),
+        hardware.gpu_vram_bytes ? formatBytes(hardware.gpu_vram_bytes) : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
   };
 
   return (
@@ -185,21 +171,6 @@ export function OverviewPage({
       <PageHeader
         eyebrow={`${greeting(lang)} · ${bootstrap.osName}`}
         title={t("Your computer, at its best", "让电脑始终保持在最佳状态")}
-        actions={
-          <Button
-            variant="primary"
-            size="lg"
-            icon={<Sparkles size={17} />}
-            onClick={startScan}
-            disabled={cleanup.scanning}
-          >
-            {cleanup.scanning
-              ? t("Scanning…", "扫描中…")
-              : cleanup.result
-                ? t("Review smart scan", "查看智能扫描")
-                : t("Smart scan", "智能扫描")}
-          </Button>
-        }
       />
 
       <section className="overview-hero">
@@ -209,7 +180,7 @@ export function OverviewPage({
             {t("Smart Care", "智能维护")}
           </div>
           <h2>
-            {cleanup.result
+            {scanned
               ? t(
                   `${formatBytes(found)} found safely`,
                   `安全发现 ${formatBytes(found)} 可清理空间`,
@@ -217,7 +188,7 @@ export function OverviewPage({
               : t("A lighter, faster machine", "更轻盈，更顺畅")}
           </h2>
           <p>
-            {cleanup.result
+            {scanned
               ? t(
                   "Review each category before anything is removed. Locked files stay untouched.",
                   "清理前可逐项检查，锁定文件始终不会被处理。",
@@ -230,20 +201,20 @@ export function OverviewPage({
           <div className="hero-actions">
             <Button
               variant="primary"
-              icon={cleanup.result ? <ArrowRight size={16} /> : <ScanSearch size={16} />}
-              onClick={startScan}
-              disabled={cleanup.scanning}
+              icon={scanned ? <ArrowRight size={16} /> : <ScanSearch size={16} />}
+              onClick={smartScan}
+              disabled={scanning}
             >
-              {cleanup.result
+              {scanned
                 ? t("Choose what to clean", "选择清理项目")
-                : t("Start smart scan", "开始智能扫描")}
+                : t("Start a smart scan", "开始智能扫描")}
             </Button>
             <Button
-              variant="secondary"
+              variant="primary"
               icon={<CircleGauge size={16} />}
               onClick={() => onNavigate("system")}
             >
-              {t("Live monitor", "实时监控")}
+              {t("Live system", "实时监控")}
             </Button>
           </div>
           <div className="hero-assurances">
@@ -253,173 +224,192 @@ export function OverviewPage({
           </div>
         </div>
 
-        <aside className="overview-machine">
-          <span className="machine-title">{t("This machine", "本机配置")}</span>
-          <div className="machine-list">
-            {machineRows(bootstrap, snapshot, rootVolume, t).map((row) => {
-              const Icon = row.icon;
-              return (
-                <div className="machine-row" key={row.key}>
-                  <span className="machine-icon">
-                    <Icon size={15} />
-                  </span>
-                  <span className="machine-label">{row.label}</span>
-                  <strong title={row.value}>{row.value}</strong>
-                </div>
-              );
-            })}
-          </div>
-        </aside>
+        <div className="overview-specs">
+          <span className="specs-kicker">{t("This machine", "本机配置")}</span>
+          <SpecRow
+            icon={<MonitorCog size={15} />}
+            label={t("System", "操作系统")}
+            value={specs.os}
+            t={t}
+          />
+          <SpecRow
+            icon={<CircuitBoard size={15} />}
+            label={t("Motherboard", "主板")}
+            value={specs.board}
+            t={t}
+          />
+          <SpecRow
+            icon={<Cpu size={15} />}
+            label={t("Processor", "处理器")}
+            value={specs.cpu}
+            t={t}
+          />
+          <SpecRow
+            icon={<MemoryStick size={15} />}
+            label={t("Memory", "内存")}
+            value={specs.memory}
+            t={t}
+          />
+          <SpecRow
+            icon={<HardDrive size={15} />}
+            label={t("Primary disk", "主硬盘")}
+            value={specs.disk}
+            t={t}
+          />
+          <SpecRow
+            icon={<Waypoints size={15} />}
+            label={t("Graphics", "显卡")}
+            value={specs.gpu}
+            t={t}
+          />
+        </div>
       </section>
 
-      {cleanup.scanning ? (
+      {scanning ? (
         <ProgressCard
-          progress={cleanup.progress}
+          progress={cleanup.progress ?? purge.progress}
           title={t("Looking for safe things to clean…", "正在查找可安全清理的项目…")}
-          onCancel={() => void cleanup.cancel()}
+          onCancel={() => void (cleanup.scanning ? cleanup.cancel() : purge.cancel())}
         />
       ) : null}
 
+      {scanned && !scanning ? (
+        <section className="overview-found">
+          <SectionTitle
+            title={t("What the scan found", "扫描发现")}
+            subtitle={t(
+              "Uncheck anything you want to keep.",
+              "不想清理的项目可以随时取消勾选。",
+            )}
+            action={
+              <Button variant="ghost" size="sm" onClick={() => onNavigate("space")}>
+                {t("Open space cleaning", "打开空间清理")}
+                <ChevronRight size={14} />
+              </Button>
+            }
+          />
+          {cleanup.result ? (
+            <CategorySummary
+              result={cleanup.result}
+              selected={cleanup.selected}
+              onToggle={cleanup.toggleCategory}
+              onInspect={() => onNavigate("space")}
+            />
+          ) : null}
+        </section>
+      ) : null}
+
+      {/* 指标行 30% / 42% / 28%：处理器+内存共用一框上下分布；存储每盘
+          一行；日常维护三入口竖排放右列，与左两卡等高。独立的「日常维护」
+          区块随此改版取消。 */}
       <section className="overview-metrics">
-        <article className="metric-panel">
-          <div className="metric-panel-head">
-            <span className="metric-icon tone-primary">
-              <Cpu size={18} />
-            </span>
-            <div>
-              <strong>{t("Processor", "处理器")}</strong>
-              <span>{coreLabel(snapshot, t)}</span>
-            </div>
-            <b>{Math.round(snapshot?.cpu.total ?? 0)}%</b>
-          </div>
-          <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="primary" />
-          <small>
-            {snapshot?.cpu.brand || t("Processor details unavailable", "暂无处理器信息")}
-          </small>
-        </article>
-
-        <article className="metric-panel">
-          <div className="metric-panel-head">
-            <span className="metric-icon tone-violet">
-              <MemoryStick size={18} />
-            </span>
-            <div>
-              <strong>{t("Memory", "内存")}</strong>
-              <span>
-                {snapshot
-                  ? `${formatMemoryBytes(snapshot.memory.used)} / ${formatMemoryBytes(
-                      memoryInstalled,
-                    )}`
-                  : t("Sampling…", "正在采样…")}
+        <div className="metric-panel metric-combo">
+          <div className="m-block">
+            <div className="metric-panel-head">
+              <span className="metric-icon tone-blue">
+                <CircleGauge size={18} />
               </span>
+              <div>
+                <strong>{t("Processor", "处理器")}</strong>
+                <span>
+                  {snapshot
+                    ? `${snapshot.cpu.physical_cores} ${t("cores", "核")} / ${snapshot.cpu.logical_cores} ${t("threads", "线程")}`
+                    : t("Sampling…", "正在采样…")}
+                </span>
+              </div>
+              <b>{Math.round(snapshot?.cpu.total ?? 0)}%</b>
             </div>
-            <b>{Math.round(memoryPercent)}%</b>
+            <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="blue" />
+            <small>
+              {snapshot?.cpu.brand || t("Processor details unavailable", "暂无处理器信息")}
+            </small>
           </div>
-          <UsageBar used={memoryPercent} total={100} tone="violet" />
-          <small>
-            {memoryReserved > 0
-              ? t(
-                  `Hardware reserved (integrated graphics): ${formatMemoryBytes(memoryReserved)}`,
-                  `硬件保留（含核显）：${formatMemoryBytes(memoryReserved)}`,
-                )
-              : snapshot?.memory.compressed !== null &&
-            snapshot?.memory.compressed !== undefined
-              ? t(
-                  `Compressed ${formatMemoryBytes(snapshot.memory.compressed)} · Wired ${formatMemoryBytes(
-                    snapshot.memory.wired ?? 0,
-                  )}`,
-                  `压缩 ${formatMemoryBytes(snapshot.memory.compressed)} · 固定 ${formatMemoryBytes(
-                    snapshot.memory.wired ?? 0,
-                  )}`,
-                )
-              : snapshot
+          <div className="m-block">
+            <div className="metric-panel-head">
+              <span className="metric-icon tone-violet">
+                <Boxes size={18} />
+              </span>
+              <div>
+                <strong>{t("Memory", "内存")}</strong>
+                <span>
+                  {snapshot
+                    ? `${formatMemory(snapshot.memory.used)} / ${formatMemory(memoryInstalled)}`
+                    : t("Sampling…", "正在采样…")}
+                </span>
+              </div>
+              <b>
+                {Math.round(
+                  snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0,
+                )}
+                %
+              </b>
+            </div>
+            <UsageBar
+              used={snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0}
+              total={100}
+              tone="violet"
+            />
+            <small>
+              {memoryReserved > 0
                 ? t(
-                    `${formatCount(snapshot.processes)} processes running`,
-                    `${formatCount(snapshot.processes)} 个进程正在运行`,
+                    `Hardware reserved (integrated graphics): ${formatMemory(memoryReserved)}`,
+                    `硬件保留（含核显）：${formatMemory(memoryReserved)}`,
                   )
-                : t("Reading activity", "正在读取活动")}
-          </small>
-        </article>
-
-        <article className="metric-panel overview-storage-card">
+                : snapshot
+                  ? t(
+                      `${formatCount(snapshot.processes)} processes running`,
+                      `${formatCount(snapshot.processes)} 个进程正在运行`,
+                    )
+                  : t("Reading activity", "正在读取活动")}
+            </small>
+          </div>
+        </div>
+        <div className="metric-panel metric-drives">
           <div className="metric-panel-head">
-            <span className="metric-icon tone-success">
+            <span className="metric-icon tone-green">
               <HardDrive size={18} />
             </span>
             <div>
               <strong>{t("Storage", "存储空间")}</strong>
               <span>
-                {snapshot
+                {volumes.length > 0
                   ? t(
-                      `${formatCount(snapshot.volumes.length)} partitions`,
-                      `${formatCount(snapshot.volumes.length)} 个分区`,
+                      `${volumes.length} drives`,
+                      `${volumes.length} 个分区`,
                     )
-                  : t("Reading volume…", "正在读取磁盘…")}
+                  : t("Reading volumes…", "正在读取磁盘…")}
               </span>
             </div>
-            <b>{Math.round(usedPercent)}%</b>
           </div>
-          {visibleVolumes.length > 0 ? (
-            <div className="storage-volume-list">
-              {visibleVolumes.map((candidate) => {
-                const candidateUsed = candidate.total - candidate.free;
-                const candidatePercent = percent(candidateUsed, candidate.total);
-                return (
-                  <div className="storage-volume" key={candidate.mount_point}>
-                    <div className="storage-volume-head">
-                      <strong>
-                        {candidate.name || candidate.mount_point}
-                        {candidate.is_root ? ` · ${t("System", "系统")}` : ""}
-                      </strong>
-                      <span>
-                        {t(
-                          `Total ${formatBytes(candidate.total)} · ${formatBytes(candidate.free)} free`,
-                          `总 ${formatBytes(candidate.total)} · 可用 ${formatBytes(candidate.free)}`,
-                        )}
-                      </span>
-                    </div>
+          <div className="drive-list">
+            {volumes.slice(0, 4).map((volume) => {
+              const usedPercent = percent(volume.total - volume.free, volume.total);
+              return (
+                <div className="drive-row" key={volume.mount_point}>
+                  <strong className="drive-name" title={volume.name || undefined}>
+                    {driveLabel(volume)}
+                  </strong>
+                  <span className="drive-bar">
                     <UsageBar
-                      used={candidateUsed}
-                      total={candidate.total}
-                      tone={candidatePercent > 88 ? "danger" : "success"}
+                      used={usedPercent}
+                      total={100}
+                      tone={usedPercent > 85 ? "red" : "green"}
                     />
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <UsageBar used={0} total={100} tone="success" />
-          )}
-        </article>
-      </section>
-
-      {cleanup.result && !cleanup.scanning ? (
-        <section className="overview-found">
-          <SectionTitle
-            title={t("What the scan found", "扫描发现")}
-            action={
-              <Button variant="ghost" size="sm" onClick={() => onNavigate("cleanup")}>
-                {t("Open cleanup", "打开清理")}
-                <ChevronRight size={14} />
-              </Button>
-            }
-          />
-          <CategorySummary
-            result={cleanup.result}
-            selected={cleanup.selected}
-            onToggle={cleanup.toggleCategory}
-            onInspect={() => onNavigate("cleanup")}
-          />
-        </section>
-      ) : null}
-
-      <section className="quick-actions">
-        <SectionTitle
-          title={t("Everyday care", "日常维护")}
-          subtitle={t("The right tool for the next five minutes.", "用几分钟完成最常用的事。")}
-        />
-        <div className="quick-grid">
-          <button className="quick-card tone-info" onClick={() => onNavigate("applications")}>
+                  </span>
+                  <span className="drive-info">
+                    <b className="drive-pct">{Math.round(usedPercent)}%</b>
+                    {t(
+                      `total ${formatBytes(volume.total)} · ${formatBytes(volume.free)} free`,
+                      `总 ${formatBytes(volume.total)} · 可用 ${formatBytes(volume.free)}`,
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="quick-col">
+          <button className="quick-card tone-cyan" onClick={() => onNavigate("applications")}>
             <span className="quick-icon">
               <AppWindow size={22} />
             </span>
@@ -429,23 +419,28 @@ export function OverviewPage({
             </span>
             <ChevronRight size={17} />
           </button>
-          <button className="quick-card tone-violet" onClick={() => onNavigate("storage")}>
+          <button className="quick-card tone-indigo" onClick={() => onOpenSpaceTab?.("big")}>
             <span className="quick-icon">
-              <Boxes size={22} />
+              <HardDrive size={22} />
             </span>
             <span className="quick-copy">
-              <strong>{t("Explore storage", "浏览存储空间")}</strong>
+              <strong>{t("Large files", "大文件")}</strong>
               <small>{t("See what is taking up space", "查看空间都被什么占用")}</small>
             </span>
             <ChevronRight size={17} />
           </button>
-          <button className="quick-card tone-violet" onClick={() => onNavigate("purge")}>
+          <button className="quick-card tone-violet" onClick={smartScan}>
             <span className="quick-icon">
               <Sparkles size={22} />
             </span>
             <span className="quick-copy">
-              <strong>{t("Deep clean", "深度清理")}</strong>
-              <small>{t("Clear build artefacts safely", "安全清理项目构建产物")}</small>
+              <strong>{t("Space cleaning", "空间清理")}</strong>
+              <small>
+                {t(
+                  "Caches, logs and build artefacts in one scan",
+                  "一次扫描清掉缓存、垃圾与构建产物",
+                )}
+              </small>
             </span>
             <ChevronRight size={17} />
           </button>

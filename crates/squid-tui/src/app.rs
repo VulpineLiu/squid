@@ -889,6 +889,8 @@ impl App {
                 };
                 panel.buckets.insert(category, (total, count));
             }
+            Event::Metered { .. } => {}
+            Event::Group { .. } => {}
             Event::Deleted { path, freed } => {
                 self.push_log(format!(
                     "removed {} ({})",
@@ -2611,6 +2613,7 @@ mod tests {
             publisher: None,
             installed_ms: None,
             display_icon: None,
+            ..AppInfo::default()
         };
         let items = vec![
             CleanupItem::new(
@@ -2708,6 +2711,7 @@ mod tests {
             publisher: None,
             installed_ms: None,
             display_icon: None,
+            ..AppInfo::default()
         }];
         app.uninstall.filter = "Squid".into();
         assert_eq!(app.uninstall.visible().len(), 1);

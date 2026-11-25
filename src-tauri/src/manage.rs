@@ -135,6 +135,21 @@ pub struct StartupView {
     source_label: String,
     scope: String,
     enabled: bool,
+    /// Attributed to a real software product (drives the 其他软件 bucket).
+    named: bool,
+    /// The binary this row really launches (lnk resolved); empty when unknown.
+    target: String,
+    /// False = the target is gone: a 残留项 the UI can offer to delete.
+    target_exists: bool,
+    /// `boot` | `logon` | `background` | `unknown`.
+    trigger: String,
+    /// Microsoft-signed or under %SystemRoot% — the hideable 系统组件 bucket.
+    system_item: bool,
+    /// Signature verdict of `target`: `microsoft` | `vendor` | `unsigned` |
+    /// `invalid` | `unknown`.
+    signature: String,
+    /// Signer subject when the binary carries a certificate.
+    signer: Option<String>,
 }
 
 impl From<&StartupEntry> for StartupView {
@@ -149,6 +164,13 @@ impl From<&StartupEntry> for StartupView {
             source_label: entry.source_label.clone(),
             scope: entry.scope.clone(),
             enabled: entry.enabled,
+            named: entry.named,
+            target: entry.target.clone(),
+            target_exists: entry.target_exists,
+            trigger: entry.trigger.clone(),
+            system_item: entry.system_item,
+            signature: entry.signature.clone(),
+            signer: entry.signer.clone(),
         }
     }
 }
@@ -169,6 +191,8 @@ pub struct ExtensionView {
     icon: Option<String>,
     /// false = currently parked in the app's restore list.
     registered: bool,
+    /// Module carries real product strings — drives the software grouping.
+    named: bool,
 }
 
 impl ExtensionView {
@@ -194,6 +218,7 @@ impl From<&ShellExtEntry> for ExtensionView {
             publisher: entry.publisher.clone(),
             icon: entry.icon.as_deref().map(png_data_url),
             registered: true,
+            named: entry.named,
         }
     }
 }
@@ -310,7 +335,7 @@ pub async fn manage_scan(app: AppHandle) -> Result<ManageView, String> {
 /// Flip one startup entry (registry / startup folder / scheduled task), then
 /// rescan so a partially-applied toggle can never desync the UI.
 #[tauri::command]
-pub async fn managed_startup_set_enabled(
+pub async fn startup_set_enabled(
     app: AppHandle,
     id: String,
     enabled: bool,
@@ -330,6 +355,119 @@ pub async fn managed_startup_set_enabled(
     let enabled_count = fresh.iter().filter(|entry| entry.enabled).count();
     *ManageState::lock(&manage.startup)? = fresh;
     Ok(enabled_count)
+}
+
+/// Delete one autostart registration — aimed at 残留项 whose program is gone.
+/// Only the config (registry value / shortcut / task) is removed, never files;
+/// services are disabled instead of uninstalled. Returns the new enabled count.
+#[tauri::command]
+pub async fn startup_remove_entry(app: AppHandle, id: String) -> Result<usize, String> {
+    let manage = app.state::<ManageState>();
+    let entry = ManageState::lock(&manage.startup)?
+        .iter()
+        .find(|entry| entry.id == id)
+        .cloned()
+        .ok_or_else(|| "请先重新扫描启动项".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || permissions::remove_startup_entry(&entry))
+        .await
+        .map_err(|error| error.to_string())??;
+    let fresh = tauri::async_runtime::spawn_blocking(permissions::scan_startup_entries)
+        .await
+        .map_err(|error| error.to_string())?;
+    let enabled_count = fresh.iter().filter(|entry| entry.enabled).count();
+    *ManageState::lock(&manage.startup)? = fresh;
+    Ok(enabled_count)
+}
+
+// ---- 进阶启动项 (advanced startup) ----------------------------------------
+
+/// One advanced row for the UI: registry hooks with signature trust, plus
+/// the hidden-task / auto-service tails merged from the ordinary scan.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvancedView {
+    id: String,
+    kind: String,
+    name: String,
+    command: String,
+    location: String,
+    scope: String,
+    enabled: bool,
+    signature: String,
+    signer: Option<String>,
+    warning: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvancedScanView {
+    entries: Vec<AdvancedView>,
+    /// Hidden scheduled tasks and automatic services, in the ordinary
+    /// startup shape so their toggles reuse `startup_set_enabled`.
+    extras: Vec<StartupView>,
+}
+
+#[tauri::command]
+pub async fn advanced_scan(app: AppHandle) -> Result<AdvancedScanView, String> {
+    let manage = app.state::<ManageState>();
+    let (entries, startup) = tauri::async_runtime::spawn_blocking(|| {
+        (
+            squid_platform::advanced::scan_advanced(),
+            permissions::scan_startup_entries(),
+        )
+    })
+    .await
+    .map_err(|error| format!("进阶扫描失败：{error}"))?;
+    // Cache the ordinary scan so the extras' toggles can find their entries.
+    *ManageState::lock(&manage.startup)? = startup.clone();
+    let extras: Vec<StartupView> = startup
+        .iter()
+        .filter(|entry| {
+            // Only the corners the plain list does not already show:
+            // hidden-by-default vendor tasks (source marks) and services.
+            entry.source == "service"
+        })
+        .map(StartupView::from)
+        .collect();
+    Ok(AdvancedScanView {
+        entries: entries
+            .iter()
+            .map(|entry| AdvancedView {
+                id: entry.id.clone(),
+                kind: entry.kind.clone(),
+                name: entry.name.clone(),
+                command: entry.command.clone(),
+                location: entry.location.clone(),
+                scope: entry.scope.clone(),
+                enabled: entry.enabled,
+                signature: entry.signature.clone(),
+                signer: entry.signer.clone(),
+                warning: entry.warning.clone(),
+            })
+            .collect(),
+        extras,
+    })
+}
+
+#[tauri::command]
+pub async fn advanced_set_enabled(
+    _app: AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    // Advanced rows carry their whole state in the id + a fresh scan match.
+    let entry = tauri::async_runtime::spawn_blocking(squid_platform::advanced::scan_advanced)
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .ok_or_else(|| "该进阶项已不存在，请重新扫描".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        squid_platform::advanced::set_advanced_enabled(&entry, enabled)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(())
 }
 
 /// Unregister / restore a context-menu handler. Removal keeps the entry in

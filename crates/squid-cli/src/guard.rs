@@ -619,7 +619,10 @@ fn with_progress<T>(
                             freed.human()
                         ),
                     ),
-                    Event::Bucket { .. } | Event::Done(_) => {}
+                    Event::Bucket { .. }
+                    | Event::Metered { .. }
+                    | Event::Group { .. }
+                    | Event::Done(_) => {}
                 }
             }
             if stop_now {

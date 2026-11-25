@@ -136,6 +136,7 @@ pub fn app_from_bundle(
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as u64),
         display_icon: None,
+        ..AppInfo::default()
     };
     if app.name.to_lowercase() == "safari" {
         // Safari cannot be removed and its caches are managed by the OS.

@@ -4,7 +4,7 @@ members = ["crates/*"]
 exclude = ["src-tauri"]
 
 [workspace.package]
-version = "0.1.11"
+version = "0.1.13"
 edition = "2021"
 rust-version = "1.95"
 license = "GPL-3.0-only"
@@ -35,6 +35,8 @@ dirs = "6"
 libc = "0.2"
 plist = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+sha2 = "0.10"
+filetime = "0.2"
 sysinfo = { version = "0.34", default-features = false, features = ["system", "network", "disk", "user"] }
 crossterm = "0.28"
 ratatui = "0.30"

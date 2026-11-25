@@ -11,16 +11,23 @@
 //! Engines never call `std::fs::remove_*` directly; that keeps the audit trail
 //! and the safety net impossible to bypass.
 
+pub mod ai;
 pub mod analyze;
+pub mod assets;
 pub mod clean;
 pub mod delete;
+pub mod duplicates;
+pub mod insights;
+pub mod maintenance;
+pub mod privacy;
 pub mod purge;
+pub mod tweaks;
 pub mod uninstall;
 pub mod updates;
 
 use globset::GlobMatcher;
 use squid_core::settings::Settings;
-use squid_core::{CleanupItem, SafetyPolicy};
+use squid_core::{CleanupItem, SafetyPolicy, ScanReport};
 use squid_platform::Platform;
 use squid_rules::RuleSet;
 use std::path::Path;
@@ -80,6 +87,15 @@ impl Engine {
         self.platform.as_ref()
     }
 
+    /// An engine whose safety policy lets an unprivileged run reach files
+    /// on any existing volume. Built for the duplicate-file delete path:
+    /// byte-confirmed copies of the user's own files, deleted to the
+    /// recycle bin, everywhere the scan looked. All other guardrails stay.
+    pub fn with_volume_wide_safety(mut self) -> Engine {
+        self.safety = self.safety.clone().with_all_volumes();
+        self
+    }
+
     pub fn settings(&self) -> &Settings {
         &self.settings
     }
@@ -121,6 +137,13 @@ impl Engine {
     /// Why this item cannot be deleted, if it cannot. Rules pass the anchor they
     /// declared; everything else falls back to the default anchors.
     pub fn block_reason(&self, item: &CleanupItem) -> Option<String> {
+        // Mole's lesson: some directories *look* like caches but hold the
+        // user's own work — chat files, PWA offline data, IME dictionaries.
+        // They are refused even when a broad rule matched them, with the
+        // reason shown verbatim in the UI lock chip.
+        if let Some(reason) = crate::assets::asset_reason(&item.path) {
+            return Some(reason.to_string());
+        }
         let anchors = if item.anchors.is_empty() {
             squid_core::fs::default_anchors()
         } else {
@@ -131,6 +154,107 @@ impl Engine {
         }
         self.safety.denies(&item.path, &anchors)
     }
+
+    /// Mole's "re-verify at the last second" made visible: re-run every
+    /// deletion gate against the *current* item set and report what changed
+    /// since the scan. The confirm dialog shows the summary, so surprises
+    /// ("your app just started, we dropped 3 items") appear before the run,
+    /// not inside the results.
+    pub fn preflight(&self, report: &ScanReport, indexes: &[usize]) -> Preflight {
+        let running = self.platform().running_executables();
+        let mut out = Preflight {
+            checked: indexes.len(),
+            blocked: Vec::new(),
+        };
+        for &index in indexes {
+            let Some(item) = report.items.get(index) else {
+                continue;
+            };
+            if item.lock.is_some() {
+                continue;
+            }
+            if let Some(reason) = self.block_reason(item) {
+                out.blocked.push((item.display_path(), reason));
+                continue;
+            }
+            if let Some(path) = gone_path(item) {
+                out.blocked.push((
+                    item.display_path(),
+                    format!("{} 已不存在", squid_core::paths::pretty(&path)),
+                ));
+            }
+        }
+        // Apps started since the scan: re-check running conflicts per rule.
+        for (index, item) in report.items.iter().enumerate() {
+            if item.lock.is_some() || !indexes.contains(&index) {
+                continue;
+            }
+            if let Some(rule) = self
+                .rules()
+                .rules()
+                .iter()
+                .find(|rule| rule.id == item.rule_id)
+            {
+                if let Some(conflict) = crate::clean::rule_running_conflict(rule, &running) {
+                    if !out
+                        .blocked
+                        .iter()
+                        .any(|(path, _)| *path == item.display_path())
+                    {
+                        out.blocked.push((item.display_path(), conflict));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Which whitelist patterns actually *do something* (Mole's #458: a
+    /// protection line nobody ever hits is a fake protection). A pattern is
+    /// "live" when it matches a path the current rule set finds on this
+    /// machine — the user learns their glob protects a real thing, or that
+    /// it protects nothing at all.
+    pub fn audit_whitelist(&self) -> Vec<(String, bool)> {
+        let known: Vec<std::path::PathBuf> = self
+            .rules()
+            .rules()
+            .iter()
+            .filter(|rule| rule.applies_to_current_os())
+            .flat_map(|rule| {
+                squid_rules::PreparedRule::new((*rule).clone())
+                    .matches()
+                    .into_iter()
+                    .map(|matched| matched.path)
+            })
+            .collect();
+        // Same expansion the delete layer uses (settings.whitelist_matchers
+        // shape), rebuilt per pattern so an invalid line cannot shift the
+        // index pairing — the audit answers "does THIS pattern protect
+        // anything".
+        self.settings
+            .whitelist
+            .iter()
+            .map(|pattern| {
+                let live = Settings::whitelist_matcher_for(pattern).is_some_and(|matcher| {
+                    known.iter().any(|path| matcher.is_match(path.as_path()))
+                });
+                (pattern.clone(), live)
+            })
+            .collect()
+    }
+}
+
+/// Result of [`Engine::preflight`].
+#[derive(Clone, Debug, Default)]
+pub struct Preflight {
+    pub checked: usize,
+    /// (display path, reason) for items that can no longer be deleted.
+    pub blocked: Vec<(String, String)>,
+}
+
+fn gone_path(item: &squid_core::CleanupItem) -> Option<std::path::PathBuf> {
+    (!item.path.exists() && !std::fs::symlink_metadata(&item.path).is_ok())
+        .then(|| item.path.clone())
 }
 
 /// True when the process may touch system-owned paths.

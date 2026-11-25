@@ -223,23 +223,9 @@ impl Default for Settings {
             delete_mode: DeleteMode::Trash,
             whitelist: Vec::new(),
             disabled_rules: Vec::new(),
-            purge_roots: vec![
-                "~/code".into(),
-                "~/Code".into(),
-                "~/dev".into(),
-                "~/Dev".into(),
-                "~/develop".into(),
-                "~/projects".into(),
-                "~/Projects".into(),
-                "~/repos".into(),
-                "~/Repos".into(),
-                "~/src".into(),
-                "~/work".into(),
-                "~/Work".into(),
-                "~/Desktop".into(),
-                "~/Documents".into(),
-                "~/.codex/worktrees".into(),
-            ],
+            // Auto-discovery (purge::resolve_roots) owns the default story;
+            // this list is now only for hand-edited extra folders.
+            purge_roots: Vec::new(),
             purge_min_age_days: 7,
             purge_max_entries: 200_000,
             show_allocated: true,
@@ -339,6 +325,13 @@ impl Settings {
                 Glob::new(&expanded).ok().map(|g| g.compile_matcher())
             })
             .collect()
+    }
+
+    /// One raw whitelist line as a matcher — the shape the audit layer
+    /// needs when it must answer about a single pattern, not the list.
+    pub fn whitelist_matcher_for(raw: &str) -> Option<GlobMatcher> {
+        let expanded = paths::expand(raw).to_string_lossy().into_owned();
+        Glob::new(&expanded).ok().map(|g| g.compile_matcher())
     }
 
     pub fn is_whitelisted(&self, path: &Path, matchers: &[GlobMatcher]) -> bool {

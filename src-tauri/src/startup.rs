@@ -67,7 +67,6 @@ impl StartupView {
     }
 }
 
-#[tauri::command]
 pub async fn startup_items() -> Result<StartupView, String> {
     tauri::async_runtime::spawn_blocking(|| StartupView::of(squid_platform::startup::inventory()))
         .await
@@ -85,7 +84,6 @@ pub struct StartupChange {
 /// Disable or enable one entry. The refreshed inventory comes back with it,
 /// because the truth after a launchd reload or a registry write is whatever the
 /// system now says, not what this function intended.
-#[tauri::command]
 pub async fn startup_set_enabled(id: String, enabled: bool) -> Result<StartupChange, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let item = squid_platform::startup::set_enabled(&id, enabled)?;
@@ -129,7 +127,6 @@ pub async fn startup_set_enabled(id: String, enabled: bool) -> Result<StartupCha
 /// pane it does not recognise, so the macOS version picks the URL instead of trying
 /// one and hoping: Ventura renamed the login-item pane from a Users & Groups anchor
 /// to its own extension.
-#[tauri::command]
 pub fn open_startup_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let target = {

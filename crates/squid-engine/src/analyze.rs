@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 use squid_core::fs;
-use squid_core::progress::{CancelToken, Progress};
+use squid_core::progress::{CancelToken, Event, Progress};
 use squid_core::Bytes;
 use std::path::{Path, PathBuf};
 
@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 const CHILD_CAP: usize = 512;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Node {
     pub path: PathBuf,
     pub logical: Bytes,
@@ -196,9 +197,9 @@ pub fn expand(
         })
         .collect();
     progress.tick(0, Some(targets.len() as u64), None);
-    let sizes = fs::measure_all(&targets, cancel, |index, _info| {
+    let sizes = fs::measure_all(&targets, cancel, |index, completed, _info| {
         progress.tick(
-            index as u64 + 1,
+            completed as u64,
             Some(targets.len() as u64),
             targets.get(index).map(|(path, _)| path.clone()),
         );
@@ -305,6 +306,146 @@ pub fn largest_files(
     found.sort_by_key(|entry| std::cmp::Reverse(entry.size()));
     found.truncate(limit);
     Ok(found)
+}
+
+/// Type buckets the large-file page filters on (extension → class).
+/// Anything not listed lands in the catch-all "other".
+pub fn file_class(path: &Path) -> &'static str {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "ts" | "m2ts" => "video",
+        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" | "zst" => "archive",
+        "exe" | "msi" | "msp" | "appx" | "msix" | "dmg" | "pkg" | "deb" | "rpm" | "appimage" => {
+            "installer"
+        }
+        "iso" | "img" | "vhd" | "vhdx" | "vmdk" | "qcow2" | "wim" | "esd" => "image",
+        _ => "other",
+    }
+}
+
+/// Large files across several roots with a byte threshold and optional
+/// type-class filter. Streams `Metered` (folders walked / bytes found);
+/// returns every hit at or above `min_bytes` — the UI counts them all,
+/// "共 214 个" honesty beats a capped top-list.
+pub fn large_files(
+    roots: &[PathBuf],
+    min_bytes: u64,
+    class: Option<&str>,
+    cancel: &CancelToken,
+    progress: &Progress,
+) -> squid_core::Result<Vec<FileEntry>> {
+    let mut found: Vec<FileEntry> = Vec::new();
+    let mut stack: Vec<(PathBuf, usize)> = roots
+        .iter()
+        .filter(|root| root.is_dir())
+        .map(|root| (root.clone(), 0usize))
+        .collect();
+    let mut visited = 0usize;
+    let mut emitted = 0u64;
+    progress.phase("bigfiles", "scanning for large files");
+    while let Some((dir, depth)) = stack.pop() {
+        cancel.check()?;
+        visited += 1;
+        if visited % 256 == 0 {
+            progress.publish(Event::Metered {
+                files: visited as u64,
+                bytes: Bytes(emitted),
+            });
+        }
+        if depth > 24 {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.is_dir() {
+                if !is_mountpoint(&path) && !skip_infra(&entry.file_name().to_string_lossy()) {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            if !meta.is_file() || meta.len() < min_bytes {
+                continue;
+            }
+            // The page files are system-managed and permanently locked:
+            // listing them only teaches users that deleting C:\pagefile.sys
+            // fails. hiberfil.sys stays — it has a real, actionable switch.
+            if is_pagefile(&path) {
+                continue;
+            }
+            if let Some(wanted) = class {
+                if file_class(&path) != wanted {
+                    continue;
+                }
+            }
+            emitted += meta.len();
+            let modified_ms = meta
+                .modified()
+                .or_else(|_| meta.created())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64);
+            found.push(FileEntry {
+                path,
+                logical: Bytes(meta.len()),
+                allocated: Bytes(allocated_of(&meta)),
+                modified_ms,
+            });
+        }
+    }
+    found.sort_by_key(|entry| std::cmp::Reverse(entry.size()));
+    progress.publish(Event::Metered {
+        files: visited as u64,
+        bytes: Bytes(emitted),
+    });
+    Ok(found)
+}
+
+/// The virtual-memory page files. They sit at a volume root, are held open by
+/// the kernel and cannot be deleted from Explorer, so a large-file sweep must
+/// not offer them. `hiberfil.sys` deliberately stays: turning hibernation off
+/// is a real, actionable way to free that space.
+fn is_pagefile(path: &Path) -> bool {
+    // Only the volume-root copies are the system's; a photo named
+    // pagefile.sys inside a folder stays listed. `C:\pagefile.sys` has
+    // parent `C:\`, whose own parent is none.
+    let at_root = path
+        .parent()
+        .and_then(|parent| parent.parent())
+        .map_or(true, |grand| grand.as_os_str().is_empty());
+    if !at_root {
+        return false;
+    }
+    path.file_name()
+        .map(|name| {
+            let name = name.to_string_lossy();
+            name.eq_ignore_ascii_case("pagefile.sys") || name.eq_ignore_ascii_case("swapfile.sys")
+        })
+        .unwrap_or(false)
+}
+
+/// System churn a large-file sweep should not crawl through.
+fn skip_infra(name: &str) -> bool {
+    const SKIP: &[&str] = &[
+        "$recycle.bin",
+        "system volume information",
+        "windows",
+        "program files",
+        "program files (x86)",
+        "node_modules",
+        ".git",
+    ];
+    let lower = name.to_lowercase();
+    SKIP.iter().any(|wanted| lower == *wanted)
 }
 
 #[cfg(unix)]
@@ -441,5 +582,20 @@ mod tests {
         assert!(shown + node.folded_size.as_u64() > 0);
         assert!(!node.complete);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn page_files_hide_only_at_the_volume_root() {
+        // Paths are matched lexically; nothing has to exist on disk.
+        assert!(is_pagefile(std::path::Path::new(r"C:\pagefile.sys")));
+        assert!(is_pagefile(std::path::Path::new(r"C:\swapfile.sys")));
+        assert!(is_pagefile(std::path::Path::new(r"D:\PAGEFILE.SYS")));
+        // hiberfil stays listed — it has an actionable switch (关闭休眠).
+        assert!(!is_pagefile(std::path::Path::new(r"C:\hiberfil.sys")));
+        // A file that merely carries the name inside a folder is still shown.
+        assert!(!is_pagefile(std::path::Path::new(
+            r"C:\Users\me\pagefile.sys"
+        )));
     }
 }

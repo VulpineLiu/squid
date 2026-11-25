@@ -1,41 +1,29 @@
-/* The desktop live-monitor window content (index.html?view=widget): header bar
- * with settings + collapse, live panels, and the settings dropdown. */
-import { Activity, ChevronUp, Settings2 } from "lucide-react";
+/* The 桌面小工具 window content (index.html?view=widget): header bar with
+ * settings + collapse, live panels, and a compact settings popover that
+ * writes straight through to widget_set (broadcast keeps the main page in
+ * sync). */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { api } from "../lib/api";
 import { messageFrom } from "../lib/format";
-import type { WidgetCorner, WidgetPrefs } from "../types";
+import type { WidgetPrefs } from "../types";
 import { WidgetPanels, useHistory } from "../components/WidgetPanels";
-import { Select } from "../components/ui";
 import type { SystemSnapshot } from "../types";
 
-const PANELS: { key: keyof WidgetPrefs; en: string; zh: string }[] = [
-  { key: "panelRun", en: "Status", zh: "运行状态" },
-  { key: "panelCpu", en: "CPU", zh: "CPU" },
-  { key: "panelNetwork", en: "Network", zh: "网络" },
-  { key: "panelDisk", en: "Disk I/O", zh: "存储读写" },
-  { key: "panelStorage", en: "Storage", zh: "存储空间" },
+const PANELS: { key: keyof WidgetPrefs; label: string }[] = [
+  { key: "panelRun", label: "运行状态" },
+  { key: "panelCpu", label: "CPU" },
+  { key: "panelNetwork", label: "网络" },
+  { key: "panelDisk", label: "存储读写" },
+  { key: "panelStorage", label: "存储空间" },
 ];
-
-const CORNERS: { id: WidgetCorner; en: string; zh: string }[] = [
-  { id: "top-right", en: "Top right", zh: "右上角" },
-  { id: "top-left", en: "Top left", zh: "左上角" },
-  { id: "bottom-right", en: "Bottom right", zh: "右下角" },
-  { id: "bottom-left", en: "Bottom left", zh: "左下角" },
-];
-
-const INTERVALS = [2_000, 5_000, 10_000];
 
 export function WidgetWindow() {
   const [prefs, setPrefs] = useState<WidgetPrefs | null>(null);
-  const [language, setLanguage] = useState<"zh" | "en">("en");
   const [snapshot, setSnapshot] = useState<SystemSnapshot | null>(null);
   const [open, setOpen] = useState(false);
   const [history, bump] = useHistory();
   const windowRef = useRef(getCurrentWindow());
-  const settingsRef = useRef<HTMLDivElement | null>(null);
-  const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     // The window is transparent; punch through the app's opaque body paint.
@@ -48,11 +36,7 @@ export function WidgetWindow() {
     let stop: (() => void) | null = null;
     void api
       .widgetGet()
-      .then((view) => {
-        if (cancelled) return;
-        setPrefs(view.prefs);
-        setLanguage(view.language);
-      })
+      .then((view) => !cancelled && setPrefs(view.prefs))
       .catch((reason) => console.error(messageFrom(reason)));
     void api
       .onWidgetSettings((next) => !cancelled && setPrefs(next))
@@ -70,20 +54,12 @@ export function WidgetWindow() {
   // table, so it rides the light refresh, and an all-collapsed widget goes
   // silent until the header is opened again.
   const collapsed = Boolean(prefs?.collapsed);
-  const hasPanels = Boolean(
-    prefs &&
-      (prefs.panelRun ||
-        prefs.panelCpu ||
-        prefs.panelNetwork ||
-        prefs.panelDisk ||
-        prefs.panelStorage),
-  );
   const intervalMs = prefs?.intervalMs ?? 2000;
   useEffect(() => {
-    if (!prefs?.enabled || collapsed || !hasPanels) return;
+    if (!prefs?.enabled || collapsed) return;
     let live = true;
     const tick = async () => {
-      if (!live) return;
+      if (!live || document.hidden) return;
       // Desktop-layer windows report `document.hidden` whenever another app
       // occludes them; ask Tauri whether the window is actually hidden.
       try {
@@ -107,18 +83,17 @@ export function WidgetWindow() {
       live = false;
       window.clearInterval(timer);
     };
-  }, [bump, collapsed, hasPanels, intervalMs, prefs?.enabled]);
-
-  // Last persisted drag position; null while the widget is corner-docked.
-  const lastPos = useRef<{ x: number; y: number } | null>(null);
+  }, [bump, collapsed, intervalMs, prefs?.enabled]);
 
   const patch = useCallback((values: Parameters<typeof api.widgetSet>[0]) => {
-    if (values.corner) lastPos.current = null;
     void api
       .widgetSet(values)
       .then(setPrefs)
       .catch((reason) => console.error(messageFrom(reason)));
   }, []);
+
+  // Last persisted drag position; null while the widget is corner-docked.
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
 
   // Grow/shrink the window to the stacked cards so transparent space never
   // eats desktop clicks (scrollHeight is CSS px == LogicalSize units).
@@ -137,14 +112,16 @@ export function WidgetWindow() {
     const fit = () => {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
-        const height = Math.max(64, root.scrollHeight + 12);
+        const height = Math.max(64, root.scrollHeight + 4);
         if (height === lastFit.current) return;
         lastFit.current = height;
         void windowRef.current
           ?.setSize(new LogicalSize(350, height))
           .then(() => {
-            // Keep the docked corner anchored after the size change.
-            if (!lastPos.current) void api.widgetSet({ redock: true }).catch(() => undefined);
+            // Keep the widget anchored after the size change: redock runs
+            // the backend maths, which re-corners a corner-docked widget and
+            // keeps (clamped) a remembered drag spot — correct in both modes.
+            void api.widgetSet({ redock: true }).catch(() => undefined);
           })
           .catch(() => {
             lastFit.current = 0;
@@ -165,69 +142,43 @@ export function WidgetWindow() {
     patch({ collapsed: !collapsed });
   };
 
-  const toggleSettings = () => {
-    if (!open && collapsed) patch({ collapsed: false });
-    setOpen((value) => !value);
-  };
-
+  // Persist a *real* drag after the pointer settles (the header is a native
+  // drag region, so poll once shortly after mouseup). Mere clicks must not
+  // pin the position: seed lastPos with the true current spot on mount, and
+  // only persist once the window has actually moved (≥5 px). An earlier bug
+  // let a click right after an RDP re-layout save the drifted mid-screen
+  // spot as "the user's chosen position" forever.
   useEffect(() => {
-    if (!open) return;
-    const close = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (
-        settingsRef.current?.contains(target) ||
-        settingsButtonRef.current?.contains(target)
-      ) {
-        return;
-      }
-      setOpen(false);
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [open]);
-
-  // Persist a dragged position after the pointer settles (the header is a
-  // native drag region, so poll once shortly after mouseup).
-  useEffect(() => {
-    const pressed = { current: null as { x: number; y: number } | null };
-    const onDown = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (
-        !target.closest("[data-tauri-drag-region]") ||
-        target.closest("button, input, select, .wd-settings")
-      ) {
-        return;
-      }
-      pressed.current = { x: event.screenX, y: event.screenY };
-    };
-    const onUp = (event: MouseEvent) => {
-      const start = pressed.current;
-      pressed.current = null;
-      if (!start || Math.hypot(event.screenX - start.x, event.screenY - start.y) < 4) {
-        return;
-      }
+    void windowRef.current
+      ?.outerPosition()
+      .then((position) => {
+        lastPos.current = position;
+      })
+      .catch(() => undefined);
+    const onUp = () => {
       window.setTimeout(() => {
         void windowRef.current
           ?.outerPosition()
           .then((position) => {
             const previous = lastPos.current;
-            if (previous && previous.x === position.x && previous.y === position.y) return;
+            if (
+              previous &&
+              Math.abs(previous.x - position.x) < 5 &&
+              Math.abs(previous.y - position.y) < 5
+            ) {
+              return;
+            }
             lastPos.current = position;
             patch({ position: [position.x, position.y], keepPosition: true });
           })
           .catch(() => undefined);
       }, 350);
     };
-    window.addEventListener("mousedown", onDown);
     window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("mouseup", onUp);
-    };
+    return () => window.removeEventListener("mouseup", onUp);
   }, [patch]);
 
   if (!prefs) return <div className="widget widget-loading" />;
-  const zh = language === "zh";
   return (
     <div
       ref={rootRef}
@@ -235,137 +186,73 @@ export function WidgetWindow() {
       style={{ opacity: (prefs.opacity ?? 100) / 100 }}
     >
       <div className="wd-card wd-head" data-tauri-drag-region>
-        <span className="wd-brand">
-          <Activity size={15} />
-          <b>{zh ? "实时监控" : "Live monitor"}</b>
-        </span>
-        <span className="wd-head-spacer" />
         <button
-          ref={settingsButtonRef}
           type="button"
-          className={`wd-head-btn ${open ? "is-active" : ""}`}
-          aria-label={zh ? "打开设置" : "Open settings"}
-          title={zh ? "设置" : "Settings"}
-          onClick={toggleSettings}
+          className="wd-head-btn"
+          aria-label="小部件设置"
+          title="小部件设置"
+          onClick={() => setOpen((value) => !value)}
         >
-          <Settings2 size={17} />
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M4 7h10M18 7h2M4 12h2M10 12h10M4 17h13" />
+            <circle cx="16" cy="7" r="2" />
+            <circle cx="8" cy="12" r="2" />
+            <circle cx="19" cy="17" r="2" />
+          </svg>
         </button>
+        <span className="wd-head-spacer" />
         <button
           type="button"
           className={`wd-head-btn wd-chevron ${collapsed ? "is-collapsed" : ""}`}
-          aria-label={collapsed ? (zh ? "展开" : "Expand") : zh ? "折叠" : "Collapse"}
-          title={collapsed ? (zh ? "展开" : "Expand") : zh ? "折叠" : "Collapse"}
+          aria-label={collapsed ? "展开" : "折叠"}
+          title={collapsed ? "展开" : "折叠"}
           onClick={toggleCollapsed}
         >
-          <ChevronUp size={18} />
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m6 15 6-6 6 6" />
+          </svg>
         </button>
       </div>
 
-      {open ? (
-        <div ref={settingsRef} className="wd-card wd-settings">
-          <div className="wd-settings-head">
-            <div>
-              <h4>{zh ? "实时监控设置" : "Live monitor settings"}</h4>
-              <span>{zh ? "更改会立即生效" : "Changes apply immediately"}</span>
-            </div>
-            <button type="button" className="wd-settings-done" onClick={() => setOpen(false)}>
-              {zh ? "完成" : "Done"}
-            </button>
-          </div>
-
-          <div className="wd-settings-section">
-            <span className="wd-settings-label">{zh ? "面板" : "Panels"}</span>
-            {PANELS.map((panel) => (
-              <div className="wd-set-row" key={panel.key}>
-                <span>{zh ? panel.zh : panel.en}</span>
-                <button
-                  type="button"
-                  className={`wd-set-toggle ${prefs[panel.key] ? "is-on" : ""}`}
-                  role="switch"
-                  aria-checked={Boolean(prefs[panel.key])}
-                  aria-label={zh ? panel.zh : panel.en}
-                  onClick={() => patch({ [panel.key]: !prefs[panel.key] })}
-                />
-              </div>
-            ))}
-          </div>
-
-          <div className="wd-settings-section">
-            <span className="wd-settings-label">{zh ? "外观与行为" : "Appearance & behaviour"}</span>
-            <div className="wd-set-row">
-              <span>{zh ? "不透明度" : "Opacity"}</span>
-              <div className="wd-set-control">
-                <input
-                  className="wd-range"
-                  type="range"
-                  min={90}
-                  max={100}
-                  value={prefs.opacity}
-                  aria-label={zh ? "不透明度" : "Opacity"}
-                  onChange={(event) => patch({ opacity: Number(event.target.value) })}
-                />
-                <b>{prefs.opacity}%</b>
-              </div>
-            </div>
-            <div className="wd-set-row">
-              <span>{zh ? "更新频率" : "Refresh rate"}</span>
-              <Select
-                value={prefs.intervalMs}
-                label={zh ? "更新频率" : "Refresh rate"}
-                options={INTERVALS.map((ms) => ({
-                  value: ms,
-                  label: zh ? `${ms / 1000} 秒` : `${ms / 1000} seconds`,
-                }))}
-                onChange={(intervalMs) => patch({ intervalMs })}
-              />
-            </div>
-            <div className="wd-set-row">
-              <span>{zh ? "显示位置" : "Dock corner"}</span>
-              <Select
-                value={prefs.corner}
-                label={zh ? "显示位置" : "Dock corner"}
-                placement="up"
-                options={CORNERS.map((corner) => ({
-                  value: corner.id,
-                  label: zh ? corner.zh : corner.en,
-                }))}
-                onChange={(corner) => patch({ corner })}
-              />
-            </div>
-            <div className="wd-set-row">
-              <span>{zh ? "记住折叠状态" : "Remember folded state"}</span>
+      {open && !collapsed ? (
+        <div className="wd-card wd-settings">
+          <h4>小部件设置</h4>
+          {PANELS.map((panel) => (
+            <div className="wd-set-row" key={panel.key}>
+              <span>{panel.label}</span>
               <button
                 type="button"
-                className={`wd-set-toggle ${prefs.rememberCollapsed ? "is-on" : ""}`}
+                className={`wd-set-toggle ${prefs[panel.key] ? "is-on" : ""}`}
                 role="switch"
-                aria-checked={prefs.rememberCollapsed}
-                aria-label={zh ? "记住折叠状态" : "Remember folded state"}
-                onClick={() =>
-                  patch({ rememberCollapsed: !prefs.rememberCollapsed })
-                }
+                aria-checked={Boolean(prefs[panel.key])}
+                aria-label={panel.label}
+                onClick={() => patch({ [panel.key]: !prefs[panel.key] })}
               />
             </div>
+          ))}
+          <div className="wd-set-row">
+            <span>不透明度</span>
+            <input
+              className="wd-range"
+              type="range"
+              min={90}
+              max={100}
+              value={prefs.opacity}
+              onChange={(event) => patch({ opacity: Number(event.target.value) })}
+            />
           </div>
-
           <button
             type="button"
             className="wd-close-line"
             onClick={() => patch({ enabled: false })}
           >
-            {zh ? "关闭桌面实时监控" : "Turn off desktop monitor"}
+            关闭小工具
           </button>
         </div>
       ) : null}
 
       {!collapsed ? (
-        <WidgetPanels snapshot={snapshot} prefs={prefs} history={history} zh={zh} />
-      ) : null}
-      {!collapsed && !hasPanels ? (
-        <div className="wd-card wd-empty">
-          {zh
-            ? "所有面板都已关闭，点击右上角设置重新开启。"
-            : "All panels are off. Open Settings at the top right to bring them back."}
-        </div>
+        <WidgetPanels snapshot={snapshot} prefs={prefs} history={history} zh />
       ) : null}
     </div>
   );

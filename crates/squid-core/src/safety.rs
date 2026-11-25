@@ -186,6 +186,13 @@ pub struct SafetyPolicy {
     /// Roots whose contents a non-admin run may still reach — on Unix
     /// `/Applications`, on Windows `%ProgramData%` and `%PUBLIC%`.
     pub outside_home_ok: Vec<PathBuf>,
+    /// Accept *any* existing volume as an allowed anchor, not just system
+    /// paths. The duplicate-file scan runs over whole drives by design — the
+    /// files are the user's own, they were confirmed byte-identical, and
+    /// deletion still goes through the recycle bin + undo path. Everything
+    /// else about the policy (hard-deny roots, protected folders, symlink
+    /// refusal) keeps its full teeth.
+    pub all_volumes_ok: bool,
 }
 
 impl Default for SafetyPolicy {
@@ -208,6 +215,7 @@ impl Default for SafetyPolicy {
             allow_system_paths: true,
             follow_symlinks: false,
             outside_home_ok: outside_home_ok(),
+            all_volumes_ok: false,
         }
     }
 }
@@ -232,6 +240,33 @@ impl SafetyPolicy {
     pub fn with_mounts(mut self, mounts: Vec<PathBuf>) -> Self {
         self.forbidden_mounts = mounts;
         self
+    }
+
+    /// Let an unprivileged run reach files on any existing volume (the
+    /// duplicate-file scan); see [`SafetyPolicy::all_volumes_ok`].
+    pub fn with_all_volumes(mut self) -> Self {
+        self.all_volumes_ok = true;
+        self
+    }
+
+    /// True when `norm` sits on a drive/volume that exists right now. The
+    /// scan-anchors-are-volumes rule keeps its teeth in the other checks:
+    /// hard-deny roots, deny-exact folders and reserved names all run first.
+    fn on_existing_volume(&self, norm: &Path) -> bool {
+        #[cfg(windows)]
+        {
+            match norm.components().next() {
+                Some(std::path::Component::Prefix(prefix)) => {
+                    PathBuf::from(prefix.as_os_str()).exists()
+                }
+                _ => false,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = norm;
+            true
+        }
     }
 
     fn is_exact_denied(&self, path: &Path) -> bool {
@@ -304,6 +339,7 @@ impl SafetyPolicy {
         }
 
         if !self.allow_system_paths
+            && !(self.all_volumes_ok && self.on_existing_volume(&norm))
             && !paths::is_within(&paths::home_dir(), &norm)
             && !self
                 .outside_home_ok

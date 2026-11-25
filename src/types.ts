@@ -1,14 +1,13 @@
 export type Language = "zh" | "en";
 export type PageId =
   | "overview"
-  | "cleanup"
+  | "space"
   | "applications"
-  | "purge"
   | "permissions"
-  | "storage"
-  | "system"
   | "security"
-  | "startup"
+  | "widget"
+  | "system"
+  | "maintenance"
   | "history"
   | "settings";
 
@@ -23,7 +22,10 @@ export type Category =
   | "trash"
   | "language-packs"
   | "leftovers"
-  | "update-installers";
+  | "update-installers"
+  | "duplicates"
+  | "ai-tools"
+  | "privacy";
 export type ItemKind = "path" | "contents" | "file";
 export type LockReason =
   | "app-running"
@@ -45,6 +47,11 @@ export interface CleanupItem {
   selected: boolean;
   lock: LockReason | null;
   note: string | null;
+  /** Seconds since the newest last-write inside the item (A③). */
+  lastWriteSecs?: number | null;
+  fileCount?: number;
+  /** Machine tokens for the B3 evidence panel ("lock:package-lock.json"). */
+  evidence?: string[];
 }
 
 export interface ScanResult {
@@ -71,7 +78,15 @@ export interface DeleteResult {
 export interface JobProgress {
   jobId: string;
   kind: string;
-  event: "phase" | "tick" | "note" | "warning" | "deleted" | "bucket";
+  event:
+    | "phase"
+    | "tick"
+    | "note"
+    | "warning"
+    | "deleted"
+    | "bucket"
+    | "metered"
+    | "group";
   phase: string | null;
   detail: string | null;
   done: number | null;
@@ -139,7 +154,6 @@ export interface AppInfo {
   name: string;
   bundle_id: string | null;
   path: string;
-  icon_source: string | null;
   version: string | null;
   size: number;
   source: string;
@@ -148,6 +162,12 @@ export interface AppInfo {
   publisher: string | null;
   installed_ms: number | null;
   display_icon: string | null;
+  /** Recorded uninstaller command (Windows), when the app left one. */
+  uninstall_string?: string | null;
+  /** Windows: "HKLM64|<subkey>" — the uninstall registry record itself. */
+  reg_key?: string | null;
+  /** 安装不完整: the record survives but the product files are gone. */
+  dead?: boolean;
   /** data-URL PNG icon (apps_scan only; null when extraction failed). */
   icon?: string | null;
 }
@@ -254,12 +274,36 @@ export interface StorageNode {
   allocated: number;
   files: number;
   dirs: number;
-  is_dir: boolean;
+  isDir: boolean;
   readable: boolean;
   children: StorageNode[];
   folded: number;
-  folded_size: number;
+  foldedSize: number;
   complete: boolean;
+}
+
+/** storage_explore now answers with freshness metadata (A⑥ size cache). */
+export interface ExploreResult {
+  node: StorageNode;
+  cached: boolean;
+  measuredAtMs: number | null;
+}
+
+/** Hidden-space insight row (A⑤, Mole overview idiom). */
+export interface SpaceInsight {
+  id: string;
+  title: string;
+  path: string;
+  size: number;
+  action: "cleanable" | "command" | "external" | "info";
+  command: string | null;
+  hint: string;
+}
+
+/** cleanup_preflight verdict (B1 last-second re-check). */
+export interface PreflightResult {
+  checked: number;
+  blocked: { path: string; reason: string }[];
 }
 
 export interface LargestFile {
@@ -267,6 +311,97 @@ export interface LargestFile {
   logical: number;
   allocated: number;
   modified_ms: number | null;
+}
+
+// ---- duplicate files (重复文件) ------------------------------------------
+
+export interface DupCopy {
+  /** Display spelling; `~` folded for the home folder. */
+  path: string;
+  mtimeMs: number;
+  /** Why this copy may not be deleted (protected user asset), when it may not. */
+  locked: string | null;
+}
+
+export interface DupGroup {
+  size: number;
+  copies: DupCopy[];
+  /** Index the UI marks 「保留」 by default. */
+  keep: number;
+  /** At least one copy sits in a protected personal folder. */
+  personal: boolean;
+}
+
+export interface DupReport {
+  groups: DupGroup[];
+  walked: number;
+  sameSize: number;
+  sampleHits: number;
+  confirmedGroups: number;
+  confirmedFiles: number;
+  wasted: number;
+}
+
+export interface DupsResult {
+  scanId: string;
+  report: DupReport;
+  elapsedMs: number;
+}
+
+// ---- system maintenance (系统维护) ---------------------------------------
+
+export interface MaintenanceTask {
+  id: string;
+  titleEn: string;
+  titleZh: string;
+  detailEn: string;
+  detailZh: string;
+  risk: "safe" | "admin" | "slow";
+  budgetSecs: number;
+  estimate: string;
+}
+
+export interface MaintenanceResult {
+  task: string;
+  ok: boolean;
+  steps: string[];
+  failedStep: string | null;
+  outputTail: string;
+  durationMs: number;
+}
+
+// ---- optimisation tweaks (系统优化) --------------------------------------
+
+export interface TweakState {
+  id: string;
+  titleZh: string;
+  titleEn: string;
+  detailZh: string;
+  detailEn: string;
+  risk: "safe" | "notice";
+  hive: string;
+  key: string;
+  value: string;
+  kind: "dword" | "string" | "none-means-zero";
+  on: string;
+  restartHint: boolean;
+  enabled: boolean;
+  unreadable: boolean;
+  recorded: boolean;
+}
+
+// ---- large files (大文件) -------------------------------------------------
+
+export interface LargeFile {
+  path: string;
+  displayPath: string;
+  size: number;
+  modifiedMs: number;
+  class: "video" | "archive" | "installer" | "image" | "other";
+  /** A cloud-sync folder sits above this file — there may be a copy online. */
+  cloudHint: boolean;
+  /** Disk image: something (Hyper-V/WSL) may hold it open. */
+  maybeMounted: boolean;
 }
 
 export interface LedgerEntry {
@@ -322,6 +457,147 @@ export interface UpdateCheckResult {
 export interface UndoResult {
   restored: number;
   skipped: number;
+}
+
+
+// ---- permissions (权限管理) ---------------------------------------------
+
+export interface StartupItem {
+  id: string;
+  name: string;
+  displayName: string;
+  /** data-URL PNG of the binary's icon; null on platforms without extraction. */
+  icon: string | null;
+  command: string;
+  source: string;
+  sourceLabel: string;
+  scope: string;
+  enabled: boolean;
+  /** Attributed to a real product; false lands in the 其他软件 group. */
+  named: boolean;
+  /** The binary this row really launches (`.lnk` resolved); "" when unknown. */
+  target?: string;
+  /** False = the program is gone: a 残留项 that can be removed. */
+  targetExists?: boolean;
+  /** When it fires: `boot` | `logon` | `background` | `unknown`. */
+  trigger?: string;
+  /** Microsoft-signed or under %SystemRoot%; hideable 系统组件 bucket. */
+  systemItem?: boolean;
+  /** `microsoft` | `vendor` | `unsigned` | `invalid` | `unknown`. */
+  signature?: string;
+  /** Signer subject when the binary carries a certificate. */
+  signer?: string | null;
+}
+
+export interface ShellExtension {
+  id: string;
+  name: string;
+  handler: string;
+  extensionPoint: string;
+  scope: string;
+  friendlyName: string | null;
+  module: string | null;
+  /** publisher (CompanyName) of the owning dll — 电脑管家's 创建者 column. */
+  publisher: string | null;
+  /** data-URL PNG of the owning module's icon; null without extraction. */
+  icon: string | null;
+  registered: boolean;
+  /** Module carries real product strings (software grouping, like startup). */
+  named: boolean;
+}
+
+export interface PopupWindowItem {
+  hwnd: number;
+  title: string;
+  process: string;
+  exe: string | null;
+  /** data-URL PNG of the owning process's icon; null without extraction. */
+  icon: string | null;
+}
+
+export interface PopupRuleItem {
+  exe: string;
+  title: string;
+  matcher: string;
+  enabled: boolean;
+  closed: number;
+  /** data-URL PNG of the rule's exe, filled by manage_scan. */
+  icon?: string | null;
+}
+
+// ---- advanced startup (进阶启动项) ---------------------------------------
+
+export interface AdvancedEntry {
+  id: string;
+  kind: "winlogon" | "appinit" | "ifeo" | "bho";
+  name: string;
+  command: string;
+  location: string;
+  scope: string;
+  enabled: boolean;
+  signature: "microsoft" | "vendor" | "unsigned" | "invalid" | "unknown";
+  signer: string | null;
+  warning: string | null;
+}
+
+export interface AdvancedScanResult {
+  entries: AdvancedEntry[];
+  /** Auto-start services, in the ordinary startup shape (shared toggle). */
+  extras: StartupItem[];
+}
+
+export interface ManageView {
+  watcherEnabled: boolean;
+  intervalMs: number;
+  rules: PopupRuleItem[];
+  windows: PopupWindowItem[];
+  startup: StartupItem[];
+  extensions: ShellExtension[];
+  startupCount: number;
+  startupEnabledCount: number;
+}
+
+export interface PopupClosedEvent {
+  process: string;
+  title: string;
+  ruleIndex: number;
+}
+
+// ---- desktop widget (桌面小工具) ------------------------------------------
+
+export type WidgetCorner = "top-right" | "top-left" | "bottom-right" | "bottom-left";
+
+export interface WidgetPrefs {
+  enabled: boolean;
+  panelRun: boolean;
+  panelCpu: boolean;
+  panelNetwork: boolean;
+  panelDisk: boolean;
+  panelStorage: boolean;
+  /** 90–100 percent window opacity. */
+  opacity: number;
+  intervalMs: number;
+  corner: WidgetCorner;
+  rememberCollapsed: boolean;
+  collapsed: boolean;
+  position: [number, number] | null;
+}
+
+export interface WidgetPatch {
+  enabled?: boolean;
+  panelRun?: boolean;
+  panelCpu?: boolean;
+  panelNetwork?: boolean;
+  panelDisk?: boolean;
+  panelStorage?: boolean;
+  opacity?: number;
+  intervalMs?: number;
+  corner?: WidgetCorner;
+  rememberCollapsed?: boolean;
+  collapsed?: boolean;
+  position?: [number, number] | null;
+  keepPosition?: boolean;
+  redock?: boolean;
 }
 
 /* ------------------------------------------------------------------ security */
@@ -464,84 +740,6 @@ export interface SecurityAction {
   status: SecurityStatus;
 }
 
-/* ------------------------------------------------------------------- startup */
-
-export type StartupScope = "user" | "system";
-export type StartupSource =
-  | "launch-agent"
-  | "launch-daemon"
-  | "login-item"
-  | "registry-run"
-  | "startup-folder"
-  | "scheduled-task"
-  | "service";
-export type StartupRisk =
-  | "missing-target"
-  | "in-temp-dir"
-  | "unsigned"
-  | "signature-unreadable"
-  | "script-interpreter"
-  | "recently-created"
-  | "hidden-entry"
-  | "hidden-home-directory";
-export type StartupCategory = "open-at-login" | "background";
-/** Something squid has to admit it could not read; the page says it in its own language. */
-export interface StartupNote {
-  kind: "unreadable-root" | "login-items-unavailable";
-  subject: string;
-  detail: string;
-}
-export type StartupLock =
-  | "operating-system"
-  | "needs-authorisation"
-  | "not-writable"
-  | "managed-by-system-settings"
-  | "not-managed";
-
-/** The application an entry belongs to, as both operating systems group them. */
-export interface StartupOwner {
-  name: string;
-  bundlePath: string | null;
-  vendor: boolean;
-}
-
-export interface StartupItem {
-  id: string;
-  name: string;
-  source: StartupSource;
-  scope: StartupScope;
-  command: string;
-  program: string | null;
-  workingDirectory: string | null;
-  publisher: string | null;
-  signed: boolean;
-  systemVendor: boolean;
-  disabled: boolean;
-  modifiable: boolean;
-  lock: StartupLock | null;
-  hidden: boolean;
-  modifiedMs: number | null;
-  risks: StartupRisk[];
-  category: StartupCategory;
-  owner: StartupOwner | null;
-}
-
-export interface StartupView {
-  items: StartupItem[];
-  notes: StartupNote[];
-  loginCount: number;
-  backgroundCount: number;
-  vendorCount: number;
-  actionableCount: number;
-  riskyCount: number;
-}
-
-export interface StartupChange {
-  item: StartupItem;
-  message: string;
-  view: StartupView;
-}
-
 /* ------------------------------------------------------------------ processes */
 
 export interface ProcessRow {
@@ -576,107 +774,4 @@ export interface ProcessDetail {
   startup: StartupItem | null;
   parent: ProcessRow | null;
   stopNote: string | null;
-}
-
-/* --------------------------------------------------------------- permissions */
-
-export interface ManagedStartupItem {
-  id: string;
-  name: string;
-  displayName: string;
-  /** data-URL PNG of the binary's icon; null on platforms without extraction. */
-  icon: string | null;
-  command: string;
-  source: string;
-  sourceLabel: string;
-  scope: string;
-  enabled: boolean;
-}
-
-export interface ShellExtension {
-  id: string;
-  name: string;
-  handler: string;
-  extensionPoint: string;
-  scope: string;
-  friendlyName: string | null;
-  module: string | null;
-  /** publisher (CompanyName) of the owning dll — 电脑管家's 创建者 column. */
-  publisher: string | null;
-  /** data-URL PNG of the owning module's icon; null without extraction. */
-  icon: string | null;
-  registered: boolean;
-}
-
-export interface PopupWindowItem {
-  hwnd: number;
-  title: string;
-  process: string;
-  exe: string | null;
-  /** data-URL PNG of the owning process's icon; null without extraction. */
-  icon: string | null;
-}
-
-export interface PopupRuleItem {
-  exe: string;
-  title: string;
-  matcher: string;
-  enabled: boolean;
-  closed: number;
-  /** data-URL PNG of the rule's exe, filled by manage_scan. */
-  icon?: string | null;
-}
-
-export interface ManageView {
-  watcherEnabled: boolean;
-  intervalMs: number;
-  rules: PopupRuleItem[];
-  windows: PopupWindowItem[];
-  startup: ManagedStartupItem[];
-  extensions: ShellExtension[];
-  startupCount: number;
-  startupEnabledCount: number;
-}
-
-export interface PopupClosedEvent {
-  process: string;
-  title: string;
-  ruleIndex: number;
-}
-
-/* ------------------------------------------------------------ desktop widget */
-
-export type WidgetCorner = "top-right" | "top-left" | "bottom-right" | "bottom-left";
-
-export interface WidgetPrefs {
-  enabled: boolean;
-  panelRun: boolean;
-  panelCpu: boolean;
-  panelNetwork: boolean;
-  panelDisk: boolean;
-  panelStorage: boolean;
-  /** 90–100 percent window opacity. */
-  opacity: number;
-  intervalMs: number;
-  corner: WidgetCorner;
-  rememberCollapsed: boolean;
-  collapsed: boolean;
-  position: [number, number] | null;
-}
-
-export interface WidgetPatch {
-  enabled?: boolean;
-  panelRun?: boolean;
-  panelCpu?: boolean;
-  panelNetwork?: boolean;
-  panelDisk?: boolean;
-  panelStorage?: boolean;
-  opacity?: number;
-  intervalMs?: number;
-  corner?: WidgetCorner;
-  rememberCollapsed?: boolean;
-  collapsed?: boolean;
-  position?: [number, number] | null;
-  keepPosition?: boolean;
-  redock?: boolean;
 }

@@ -28,10 +28,41 @@ pub struct StartupEntry {
     /// `currentUser` | `machine`
     pub scope: String,
     pub enabled: bool,
+    /// True once the entry was attributed to a real software product (the
+    /// binary carries a human FileDescription/ProductName). 电脑管家 groups
+    /// every entry it *cannot* attribute under 其他软件; this flag drives
+    /// that bucket on the UI side.
+    #[serde(default)]
+    pub named: bool,
     /// PNG bytes of the binary's default icon, extracted on Windows only —
     /// the 电脑管家 habit of showing the software icon next to its name.
     #[serde(default)]
     pub icon: Option<Vec<u8>>,
+    /// The executable this entry really runs (lnk targets resolved). Empty
+    /// when the command holds no path at all.
+    #[serde(default)]
+    pub target: String,
+    /// False when `target` does not exist on disk — the program was removed
+    /// but its autostart config survived: a 残留项 (leftover), removable via
+    /// [`remove_startup_entry`].
+    #[serde(default)]
+    pub target_exists: bool,
+    /// When this fires: `boot` | `logon` | `background` | `unknown`, from the
+    /// registry value / task triggers / service start type. Shown as a chip.
+    #[serde(default)]
+    pub trigger: String,
+    /// Microsoft-signed or living under %SystemRoot% — the UI folds these
+    /// into a 系统组件 group that 「显示系统项」 can hide.
+    #[serde(default)]
+    pub system_item: bool,
+    /// Digital-signature verdict of `target`: `microsoft` | `vendor` |
+    /// `unsigned` | `invalid` | `unknown` (nothing resolvable / non-Windows).
+    /// Filled by the batch signature pass at the end of the scan.
+    #[serde(default)]
+    pub signature: String,
+    /// Subject of the signing certificate when known.
+    #[serde(default)]
+    pub signer: Option<String>,
 }
 
 /// One registered context-menu ("右键菜单") handler.
@@ -57,6 +88,12 @@ pub struct ShellExtEntry {
     /// PNG bytes of the owning module's icon (Windows only).
     #[serde(default)]
     pub icon: Option<Vec<u8>>,
+    /// True once the handler was attributed to a real software product (its
+    /// module carries usable FileDescription/ProductName strings). Drives the
+    /// same software-grouping rule the startup list uses; unattributed rows
+    /// land in 其他软件.
+    #[serde(default)]
+    pub named: bool,
 }
 
 /// A visible top-level window the popup blocker could act on.
@@ -137,6 +174,22 @@ pub fn set_startup_enabled(entry: &StartupEntry, enabled: bool) -> Result<(), St
     {
         let _ = (entry, enabled);
         Err("startup management is not supported on this platform".into())
+    }
+}
+
+/// Delete a leftover autostart configuration (the program it points at is
+/// gone). Only the *registration* disappears — registry value, Startup-folder
+/// shortcut, task definition — never a program's files. Services are disabled
+/// rather than uninstalled because other software may still reference them.
+pub fn remove_startup_entry(entry: &StartupEntry) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        windows::remove_startup_entry(entry)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = entry;
+        Err("删除启动项仅在 Windows 提供".into())
     }
 }
 
@@ -266,21 +319,104 @@ mod windows {
         list: &str,
         value_name: &str,
         enabled: bool,
-    ) -> Result<(), String> {
+    ) -> std::io::Result<()> {
         let hive = RegKey::predef(if machine {
             HKEY_LOCAL_MACHINE
         } else {
             HKEY_CURRENT_USER
         });
-        let (key, _) = hive
-            .create_subkey(format!(r"{base}\Explorer\StartupApproved\{list}"))
-            .map_err(registry_error)?;
+        // Minimal rights only: several security suites (and locked-down
+        // profiles) deny KEY_ALL_ACCESS-style opens on the startup trees even
+        // for the key's own owner, which used to make every toggle fail.
+        let (key, _) = hive.create_subkey_with_flags(
+            format!(r"{base}\Explorer\StartupApproved\{list}"),
+            KEY_READ | KEY_WRITE,
+        )?;
         let marker = winreg::RegValue {
             bytes: approved_marker(enabled),
             vtype: RegType::REG_BINARY,
         };
         key.set_raw_value(value_name, &marker)
-            .map_err(registry_error)
+    }
+
+    /// Task Manager's marker rendered for `reg.exe` (12 bytes, hex).
+    fn approved_marker_hex(enabled: bool) -> String {
+        let mut hex = String::from(if enabled { "02" } else { "03" });
+        hex.push_str(&"0".repeat(22));
+        hex
+    }
+
+    /// Flip an approval marker, escalating through a one-shot UAC prompt when
+    /// the direct write is denied (machine-scope keys, protected hives). The
+    /// result is verified against the registry itself, so a cancelled prompt
+    /// reports failure instead of a silently dead switch.
+    fn flip_approved(
+        machine: bool,
+        base: &str,
+        list: &str,
+        value_name: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        if let Err(why) = write_approved(machine, base, list, value_name, enabled) {
+            if why.kind() != std::io::ErrorKind::PermissionDenied {
+                return Err(registry_error(why));
+            }
+            let hive_label = if machine { "HKLM" } else { "HKCU" };
+            run_elevated(
+                "reg.exe",
+                &[
+                    "add".to_string(),
+                    format!(r"{hive_label}\{base}\Explorer\StartupApproved\{list}"),
+                    "/v".to_string(),
+                    value_name.to_string(),
+                    "/t".to_string(),
+                    "REG_BINARY".to_string(),
+                    "/d".to_string(),
+                    approved_marker_hex(enabled),
+                    "/f".to_string(),
+                ],
+            )?;
+            let hive = RegKey::predef(if machine {
+                HKEY_LOCAL_MACHINE
+            } else {
+                HKEY_CURRENT_USER
+            });
+            if approved_enabled(&hive, base, list, value_name) != enabled {
+                return Err("提权写入后状态仍未改变".to_string());
+            }
+        }
+        Ok(())
+    }
+
+    /// Single-quote one argument for a PowerShell -ArgumentList list.
+    fn quote_ps(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "''"))
+    }
+
+    /// Run `program args…` elevated through `Start-Process -Verb RunAs`.
+    /// PowerShell's own exit code reports a cancelled or refused prompt.
+    fn run_elevated(program: &str, args: &[String]) -> Result<(), String> {
+        use std::os::windows::process::CommandExt;
+        let arglist = args
+            .iter()
+            .map(|arg| quote_ps(arg))
+            .collect::<Vec<_>>()
+            .join(",");
+        let script = format!(
+            "$ErrorActionPreference='Stop'; Start-Process -FilePath {} -ArgumentList {} -Verb RunAs -WindowStyle Hidden -Wait",
+            quote_ps(program),
+            arglist
+        );
+        let status = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .creation_flags(0x0800_0000)
+            .status()
+            .map_err(|error| format!("无法启动提权助手：{error}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err("管理员授权被取消，未做修改".to_string())
+        }
     }
 
     fn display_name(command: &str) -> String {
@@ -436,9 +572,71 @@ mod windows {
     /// Per-binary cache payload: (FileDescription, ProductName, icon PNG).
     type SoftwareInfo = (Option<String>, Option<String>, Option<Vec<u8>>);
 
+    /// Whether a launch path is concrete enough to judge: a drive-qualified or
+    /// UNC path. `foo.exe` alone resolves against *our* working directory, so
+    /// answering "missing" for it would invent false 残留项.
+    fn is_absolute_path(path: &str) -> bool {
+        let trimmed = path.trim_matches('"');
+        let bytes = trimmed.as_bytes();
+        (bytes.len() > 2 && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
+            || trimmed.starts_with(r"\\")
+    }
+
+    /// Store packages deny version-info reads to plain users, but their
+    /// install folder *is* the product identity: `…\WindowsApps\
+    /// OpenAI.ChatGPT_1.2025_x64__w269v…\ChatGPT.exe` → "ChatGPT". Without
+    /// this every packaged app (ChatGPT, Terminal, Notepad) sinks into
+    /// 其他软件 even though the folder spells the product name out.
+    fn windows_store_product(path: &str) -> Option<String> {
+        const MARK: &str = "\\windowsapps\\";
+        let lowered = path.to_lowercase().replace('/', "\\");
+        let at = lowered.find(MARK)? + MARK.len();
+        // The scan lower-cases only to *locate* the folder; the slice from
+        // the original path keeps the real casing (`OpenAI.ChatGPT_…`).
+        let original = path.replace('/', "\\");
+        let package = original[at..].split('\\').next()?;
+        let family = package.split('_').next()?;
+        let product = match family.split_once('.') {
+            // `Publisher.Product` — the product half is what users say.
+            Some((_, product)) if !product.trim().is_empty() => product,
+            Some((publisher, _)) => publisher,
+            None => family,
+        };
+        let product = product.trim();
+        (!product.is_empty()).then(|| product.to_string())
+    }
+
+    /// Windows-style *component role* descriptions shipped inside PEs —
+    /// "Windows File System Proxy" (WinFsp), "Microsoft Edge Elevation
+    /// Service" — label a role, not a product the user recognises. Rows
+    /// named only by such a label are not attributed to a software group;
+    /// they fall into 其他软件 like any anonymous helper. Microsoft-signed
+    /// ones are usually hidden in 系统组件 anyway.
+    fn is_component_role_label(text: &str) -> bool {
+        let lower = text.trim().to_lowercase();
+        let vendor_led = lower.starts_with("windows ") || lower.starts_with("microsoft ");
+        const ROLES: [&str; 10] = [
+            "proxy",
+            "host",
+            "agent",
+            "service",
+            "support",
+            "helper",
+            "driver",
+            "component",
+            "launcher",
+            "broker",
+        ];
+        vendor_led && ROLES.iter().any(|role| lower.ends_with(role))
+    }
+
     /// Resolve `display_name` (and the software icon) for every scanned
-    /// entry, once per binary.
+    /// entry, once per binary. Also settles `target` / `target_exists`: the
+    /// binary the row really runs, and whether it is still on disk (a missing
+    /// one is a 残留项).
     fn decorate_display_names(entries: &mut [StartupEntry]) {
+        let vendors = vendor_icon_map();
+        let products = product_icon_map();
         let mut cache: std::collections::HashMap<String, SoftwareInfo> = Default::default();
         for entry in entries {
             let Some(exe) = exe_from_command(&entry.command) else {
@@ -452,17 +650,312 @@ mod windows {
             } else {
                 probed
             };
+            entry.target = probed.clone();
+            entry.target_exists = !is_absolute_path(&probed) || Path::new(&probed).exists();
             let (description, product, icon) = cache
-                .entry(exe)
+                .entry(probed.clone())
                 .or_insert_with(|| {
                     let (description, product, _company) = version_strings(&probed);
-                    (description, product, exe_icon_png(&probed, 0))
+                    let usable = |text: Option<String>| text.filter(|t| !is_placeholder_label(t));
+                    let (description, product) = (usable(description), usable(product));
+                    // A stub's own PE strings name the product it serves;
+                    // hand that label to the icon lookup so the uninstall
+                    // registry can point at the real binary's icon.
+                    let label = product
+                        .as_deref()
+                        .or(description.as_deref())
+                        .map(clean_module_name);
+                    let icon = software_icon(&probed, &vendors, &products, label.as_deref());
+                    (description, product, icon)
                 })
                 .clone();
             entry.display_name =
                 friendly_program_name(&entry.name, description.as_deref(), product.as_deref());
+            // 电脑管家's grouping rule: an entry is only attributed to a
+            // software product when the binary carries real human strings;
+            // everything else falls into the 其他软件 bucket. A "Windows
+            // File System Proxy"-style role label names a plumbing part,
+            // not a product the user recognises — WinFsp's launcher used to
+            // open its own fake software group through its FileDescription.
+            entry.named = (description.is_some() || product.is_some())
+                && !is_component_role_label(&entry.display_name);
+            if !entry.named {
+                if let Some(product) = windows_store_product(&probed) {
+                    entry.display_name = product;
+                    entry.named = true;
+                }
+            }
             entry.icon = icon;
         }
+    }
+
+    /// Whether a PE/ICO file ships *real* icon resources. Service stubs such
+    /// as `qmbsrv.exe` or Edge's `elevation_service.exe` embed none, and
+    /// `ExtractAssociatedIconW` then silently returns the generic Windows
+    /// app tile — the cause of whole columns of 权限管理 rows looking alike.
+    fn has_icon_resources(path: &str) -> bool {
+        use windows_sys::Win32::UI::Shell::ExtractIconExW;
+        let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: NUL-terminated buffer; null handle arrays only ask for the
+        // count of icons the module carries.
+        (unsafe {
+            ExtractIconExW(
+                wide.as_ptr(),
+                -1,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                0,
+            )
+        }) > 0
+    }
+
+    /// `App Paths` is the canonical "where does this tool really live" answer:
+    /// `SpaceAgent.exe` registers the product binary even when the row points
+    /// at a stripped-down service stub. Returns an (icon path, index) pair
+    /// that differs from `except` and exists on disk.
+    fn app_paths_icon_spec(exe_name: &str, except: &str) -> Option<(String, u16)> {
+        const APP_PATHS: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths";
+        const APP_PATHS_WOW: &str =
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths";
+        let candidates = [
+            (HKEY_LOCAL_MACHINE, APP_PATHS),
+            (HKEY_LOCAL_MACHINE, APP_PATHS_WOW),
+            (HKEY_CURRENT_USER, APP_PATHS),
+        ];
+        for (hive, base) in candidates {
+            let Ok(root) = RegKey::predef(hive).open_subkey_with_flags(base, KEY_READ) else {
+                continue;
+            };
+            let Ok(app) = root.open_subkey_with_flags(exe_name, KEY_READ) else {
+                continue;
+            };
+            let default: String = app.get_value("").unwrap_or_default();
+            let icon: String = app
+                .open_subkey_with_flags("DefaultIcon", KEY_READ)
+                .and_then(|key| key.get_value(""))
+                .unwrap_or_default();
+            let spec = if icon.trim().is_empty() {
+                &default
+            } else {
+                &icon
+            };
+            let (path, index) = parse_display_icon(spec)?;
+            if path.eq_ignore_ascii_case(except.trim_matches('"')) {
+                continue;
+            }
+            if Path::new(&path).exists() {
+                return Some((path, index));
+            }
+        }
+        None
+    }
+
+    /// A sibling in the same folder that does ship an icon: vendors park
+    /// `Workspace.ico` next to the stub (H3C) or the full binary sits one
+    /// directory entry away (Edge). `.ico` files win; otherwise the largest
+    /// `.exe` with real icon resources — the main product binary.
+    fn sibling_icon_spec(dir: &Path) -> Option<(String, u16)> {
+        let Ok(read_dir) = std::fs::read_dir(dir) else {
+            return None;
+        };
+        let mut files: Vec<PathBuf> = read_dir.filter_map(Result::ok).map(|f| f.path()).collect();
+        files.sort();
+        for path in &files {
+            let is_ico = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("ico"));
+            if is_ico {
+                return Some((path.to_string_lossy().into_owned(), 0));
+            }
+        }
+        let mut best: Option<(u64, String)> = None;
+        for path in &files {
+            let is_exe = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+            if !is_exe || !has_icon_resources(&path.to_string_lossy()) {
+                continue;
+            }
+            let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            if best.as_ref().map_or(true, |(known, _)| size > *known) {
+                best = Some((size, path.to_string_lossy().into_owned()));
+            }
+        }
+        best.map(|(_, path)| (path, 0))
+    }
+
+    /// Directory → `DisplayIcon` from the uninstall registry — the authoritative
+    /// "this folder belongs to product X, and X's icon is here" table. Edge,
+    /// 电脑管家 and SpaceAgent all register one whose parent is exactly the
+    /// folder holding their icon-less service stubs. Built once per scan.
+    fn vendor_icon_map() -> std::collections::HashMap<String, (String, u16)> {
+        const UNINSTALLS: [&str; 3] = [
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        ];
+        let mut map: std::collections::HashMap<String, (String, u16)> = Default::default();
+        for hive in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+            for base in UNINSTALLS {
+                let Ok(root) = RegKey::predef(hive).open_subkey_with_flags(base, KEY_READ) else {
+                    continue;
+                };
+                for name in root.enum_keys().filter_map(Result::ok) {
+                    let Ok(app) = root.open_subkey_with_flags(&name, KEY_READ) else {
+                        continue;
+                    };
+                    let Some(spec): Option<String> = app.get_value("DisplayIcon").ok() else {
+                        continue;
+                    };
+                    let Some((path, index)) = parse_display_icon(&spec) else {
+                        continue;
+                    };
+                    let Some(dir) = Path::new(&path).parent() else {
+                        continue;
+                    };
+                    let dir = dir
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .trim_end_matches('\\')
+                        .to_string();
+                    if !dir.is_empty() && !map.contains_key(&dir) && Path::new(&path).exists() {
+                        map.insert(dir, (path, index));
+                    }
+                }
+            }
+        }
+        map
+    }
+
+    /// Lower-case product identity of a PE label: cut parenthetical
+    /// editions ("WeChat (64-bit)") and trim, so a stub's FileDescription
+    /// can be matched against uninstall-registry keys.
+    fn clean_module_name(text: &str) -> String {
+        text.split(['(', '（', '[', '【'])
+            .next()
+            .unwrap_or(text)
+            .trim()
+            .to_lowercase()
+    }
+
+    /// Product name → `DisplayIcon` from the uninstall registry. Stubs that
+    /// ship no icon resources carry the product in their PE strings
+    /// (`WemeetUpdateSvc.exe` says "腾讯会议", `WXWorkUpgrader.exe` says
+    /// "WXWorkService"); this map turns that claim into the real binary's
+    /// icon. Keyed by both the cleaned `DisplayName` and the DisplayIcon
+    /// file stem so either form finds its product. Built once per scan.
+    fn product_icon_map() -> std::collections::HashMap<String, (String, u16)> {
+        const UNINSTALLS: [&str; 3] = [
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        ];
+        let mut map: std::collections::HashMap<String, (String, u16)> = Default::default();
+        for hive in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+            for base in UNINSTALLS {
+                let Ok(root) = RegKey::predef(hive).open_subkey_with_flags(base, KEY_READ) else {
+                    continue;
+                };
+                for name in root.enum_keys().filter_map(Result::ok) {
+                    let Ok(app) = root.open_subkey_with_flags(&name, KEY_READ) else {
+                        continue;
+                    };
+                    let Some(spec): Option<String> = app.get_value("DisplayIcon").ok() else {
+                        continue;
+                    };
+                    let Some((path, index)) = parse_display_icon(&spec) else {
+                        continue;
+                    };
+                    if !Path::new(&path).exists() {
+                        continue;
+                    }
+                    if let Ok(display) = app.get_value::<String, _>("DisplayName") {
+                        let key = clean_module_name(&display);
+                        if !key.is_empty() {
+                            map.entry(key).or_insert_with(|| (path.clone(), index));
+                        }
+                    }
+                    let stem = Path::new(&path)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_lowercase())
+                        .unwrap_or_default();
+                    if !stem.is_empty() {
+                        map.entry(stem).or_insert_with(|| (path.clone(), index));
+                    }
+                }
+            }
+        }
+        map
+    }
+
+    /// Registry key for a stub's claimed product: exact first, then the
+    /// longest alias that stretches to it ("wxworkservice" → the `wxwork`
+    /// stem). Aliases shorter than four characters never stretch, so
+    /// generic words cannot borrow an unrelated tile.
+    fn product_icon_spec<'a>(
+        label: &str,
+        products: &'a std::collections::HashMap<String, (String, u16)>,
+    ) -> Option<&'a (String, u16)> {
+        if let Some(found) = products.get(label) {
+            return Some(found);
+        }
+        products
+            .iter()
+            .filter(|(key, _)| {
+                key.len() >= 4 && (label.starts_with(key.as_str()) || key.starts_with(label))
+            })
+            .max_by(|(left, _), (right, _)| left.len().cmp(&right.len()))
+            .map(|(_, spec)| spec)
+    }
+
+    /// Startup-list icon with the vendor fallbacks the generic extraction
+    /// lacks: real resources first, then App Paths, then the uninstall
+    /// registry's DisplayIcon for the same folder, then the DisplayIcon of
+    /// the *named* product (a stub's PE strings say which app it belongs to
+    /// — 腾讯会议's updater lives alone in `Tencent\UpdateSvr\` and ships no
+    /// icon, while the real `WeMeetApp.exe` is one DisplayIcon away), then a
+    /// sibling file. `None` (a neutral placeholder in the UI) beats a
+    /// misleading tile.
+    fn software_icon(
+        path: &str,
+        vendors: &std::collections::HashMap<String, (String, u16)>,
+        products: &std::collections::HashMap<String, (String, u16)>,
+        product_label: Option<&str>,
+    ) -> Option<Vec<u8>> {
+        if has_icon_resources(path) {
+            return exe_icon_png(path, 0);
+        }
+        let file = Path::new(path);
+        let name = file.file_name()?.to_string_lossy().to_string();
+        if let Some((spec, index)) = app_paths_icon_spec(&name, path) {
+            if let Some(icon) = exe_icon_png(&spec, index) {
+                return Some(icon);
+            }
+        }
+        let dir_key = file
+            .parent()
+            .map(|dir| dir.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if let Some((spec, index)) = vendors.get(dir_key.trim_end_matches('\\')) {
+            if let Some(icon) = exe_icon_png(spec, *index) {
+                return Some(icon);
+            }
+        }
+        if let Some(label) = product_label {
+            if let Some((spec, index)) = product_icon_spec(&label.to_lowercase(), products) {
+                if let Some(icon) = exe_icon_png(spec, *index) {
+                    return Some(icon);
+                }
+            }
+        }
+        if let Some((spec, index)) = file.parent().and_then(sibling_icon_spec) {
+            if let Some(icon) = exe_icon_png(&spec, index) {
+                return Some(icon);
+            }
+        }
+        None
     }
 
     /// ImagePath entries sometimes carry `"` around paths with spaces even
@@ -859,6 +1352,12 @@ mod windows {
                 id: format!("reg|{hive_label}|{}|{name}", source.key_path),
                 name: display_name(&command),
                 command,
+                target: String::new(),
+                target_exists: true,
+                trigger: "logon".to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "registry".to_string(),
@@ -869,6 +1368,7 @@ mod windows {
                     "currentUser".to_string()
                 },
                 enabled,
+                named: false,
             });
         }
         out
@@ -903,6 +1403,12 @@ mod windows {
                     .file_stem()
                     .map_or_else(|| file_name.clone(), |s| s.to_string_lossy().to_string()),
                 command: path.display().to_string(),
+                target: String::new(),
+                target_exists: true,
+                trigger: "logon".to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "startupFolder".to_string(),
@@ -917,6 +1423,7 @@ mod windows {
                     "currentUser".to_string()
                 },
                 enabled,
+                named: false,
             });
         }
         out
@@ -959,12 +1466,19 @@ mod windows {
                         .file_name()
                         .map_or_else(|| task_name.clone(), |n| n.to_string_lossy().to_string()),
                     command: task_actions(&text).unwrap_or_else(|| task_name.clone()),
+                    target: String::new(),
+                    target_exists: true,
+                    trigger: task_trigger(&text),
+                    system_item: false,
+                    signature: String::new(),
+                    signer: None,
                     display_name: String::new(),
                     icon: None,
                     source: "scheduledTask".to_string(),
                     source_label: "计划任务".to_string(),
                     scope: "machine".to_string(),
                     enabled: task_settings_enabled(&text),
+                    named: false,
                 });
             }
         }
@@ -1035,12 +1549,20 @@ mod windows {
                     .rsplit_once('\\')
                     .map_or_else(|| task_name.clone(), |(_, leaf)| leaf.to_string()),
                 command: String::new(),
+                target: String::new(),
+                // Nothing was resolved here, so "missing" would be a lie.
+                target_exists: true,
+                trigger: "unknown".to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "scheduledTask".to_string(),
                 source_label: "计划任务".to_string(),
                 scope: "machine".to_string(),
                 enabled,
+                named: false,
             });
         }
         out
@@ -1158,6 +1680,14 @@ mod windows {
                 id: format!("svc|{name}"),
                 name: display,
                 command: image,
+                target: String::new(),
+                target_exists: true,
+                // Automatic services are started by the SCM during boot;
+                // manual/disabled ones only run on demand.
+                trigger: if start == 2 { "boot" } else { "background" }.to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "service".to_string(),
@@ -1169,6 +1699,7 @@ mod windows {
                 .to_string(),
                 scope: "machine".to_string(),
                 enabled: start == 2,
+                named: false,
             });
         }
         out
@@ -1202,6 +1733,21 @@ mod windows {
         let tail = &text[start..];
         let end = tail.find("</Settings>").unwrap_or(tail.len());
         !tail[..end].contains("<Enabled>false")
+    }
+
+    /// When a task fires: a BootTrigger runs before anyone logs on, a
+    /// LogonTrigger at logon, anything else (calendar, event, maintenance) is
+    /// a background schedule the user does not experience as "startup".
+    fn task_trigger(text: &str) -> String {
+        if text.contains("<BootTrigger") {
+            "boot".to_string()
+        } else if text.contains("<LogonTrigger") {
+            "logon".to_string()
+        } else if text.contains("<Triggers>") {
+            "background".to_string()
+        } else {
+            "unknown".to_string()
+        }
     }
 
     fn task_actions(text: &str) -> Option<String> {
@@ -1260,7 +1806,140 @@ mod windows {
         entries.extend(scheduled_task_entries());
         entries.extend(auto_service_entries());
         decorate_display_names(&mut entries);
+        attribute_vendor_suites(&mut entries);
+        enrich_trust(&mut entries);
         entries
+    }
+
+    /// `(vendor folder, product sub-folder)` for a path installed under
+    /// Program Files: `C:\Program Files\H3C\Workspace\cameraservice.exe` →
+    /// `("H3C", "Workspace")`. Files dropped directly into Program Files,
+    /// and generic containers, carry no suite.
+    fn suite_path(path: &str) -> Option<(String, String)> {
+        const GENERIC: [&str; 5] = [
+            "common files",
+            "windowsapps",
+            "internet explorer",
+            "dotnet",
+            "modifiable windows apps",
+        ];
+        let normalized = path.replace('/', "\\");
+        let lower = normalized.to_lowercase();
+        for marker in ["\\program files (x86)\\", "\\program files\\"] {
+            let Some(at) = lower.find(marker) else {
+                continue;
+            };
+            let mut parts = normalized[at + marker.len()..]
+                .split('\\')
+                .filter(|part| !part.is_empty());
+            let (Some(vendor), Some(child)) = (parts.next(), parts.next()) else {
+                return None;
+            };
+            // The child must be a folder: `Tencent\Weixin.exe` sits directly
+            // in the vendor folder and owns no suite.
+            if child.contains('.') {
+                return None;
+            }
+            if GENERIC.contains(&vendor.to_lowercase().as_str()) {
+                return None;
+            }
+            return Some((vendor.to_string(), child.to_string()));
+        }
+        None
+    }
+
+    /// Suite grouping the 电脑管家 habit: H3C Workspace spreads one product
+    /// across `H3C\Workspace`, `H3C\SpaceAgent`, `H3C\Workspace\Device
+    /// Redirect\…` and each stub binary ships no version strings, so rows
+    /// scattered into singleton groups and 其他软件. A vendor folder hosting
+    /// two or more distinct product sub-folders across the scan *is* the
+    /// product identity — fold every weakly-attributed row into it. Rows a
+    /// PE honestly named (微信, Microsoft Edge) keep their own groups. When a
+    /// `Workspace` sub-folder exists the group reads 厂商 Workspace, the
+    /// suite's own product name, rather than a bare vendor letter.
+    fn attribute_vendor_suites(entries: &mut [StartupEntry]) {
+        use std::collections::{HashMap, HashSet};
+        let mut families: HashMap<String, (String, HashSet<String>)> = HashMap::new();
+        for entry in entries.iter() {
+            let path = if entry.target.is_empty() {
+                &entry.command
+            } else {
+                &entry.target
+            };
+            let Some((vendor, child)) = suite_path(path) else {
+                continue;
+            };
+            let family = families
+                .entry(vendor.to_lowercase())
+                .or_insert_with(|| (vendor.clone(), HashSet::new()));
+            family.1.insert(child.to_lowercase());
+        }
+        for entry in entries.iter_mut() {
+            // Merge weakly-attributed rows: nothing found, the "product
+            // name" echoes the technical key, or it is a bare ASCII label
+            // (H3C's stubs self-name  PrintDaemon / VDI USB Redirect  —
+            // components, not products). A PE that carries a real human
+            // product name (微信, Microsoft Edge-style CJK naming included)
+            // keeps its own group.
+            let honest = entry.named && !entry.display_name.eq_ignore_ascii_case(&entry.name);
+            if honest && has_cjk(&entry.display_name) {
+                continue;
+            }
+            let path = if entry.target.is_empty() {
+                &entry.command
+            } else {
+                &entry.target
+            };
+            let Some((vendor, _)) = suite_path(path) else {
+                continue;
+            };
+            let Some((vendor_label, children)) = families.get(&vendor.to_lowercase()) else {
+                continue;
+            };
+            if children.len() < 2 {
+                continue;
+            }
+            entry.display_name = if children.iter().any(|child| child == "workspace") {
+                format!("{vendor_label} Workspace")
+            } else {
+                vendor_label.clone()
+            };
+            entry.named = true;
+        }
+    }
+
+    /// One batched signature grade over every resolved target, then stamp the
+    /// verdict and fold Microsoft-signed / %SystemRoot% rows into 系统组件 —
+    /// the same trust table the 进阶启动项 tab shows, shared so a scan pays
+    /// for one PowerShell process, not one per row.
+    fn enrich_trust(entries: &mut [StartupEntry]) {
+        let system_root = std::env::var("SystemRoot")
+            .unwrap_or_else(|_| r"C:\Windows".to_string())
+            .to_lowercase();
+        let mut targets: Vec<String> = Vec::new();
+        for entry in entries.iter_mut() {
+            entry.system_item = entry.target.to_lowercase().starts_with(&system_root);
+            if entry.target_exists
+                && !entry.target.is_empty()
+                && !targets
+                    .iter()
+                    .any(|seen| seen.eq_ignore_ascii_case(&entry.target))
+            {
+                targets.push(entry.target.clone());
+            }
+        }
+        let grades = crate::advanced::windows::signature_grades(&targets);
+        for entry in entries.iter_mut() {
+            if let Some((verdict, signer)) = grades.get(&entry.target.to_ascii_lowercase()) {
+                entry.signature = verdict.clone();
+                entry.signer = signer.clone();
+                if verdict == "microsoft" {
+                    entry.system_item = true;
+                }
+            } else {
+                entry.signature = "unknown".into();
+            }
+        }
     }
 
     pub(super) fn set_startup_enabled(entry: &StartupEntry, enabled: bool) -> Result<(), String> {
@@ -1279,7 +1958,7 @@ mod windows {
                 } else {
                     name.to_string()
                 };
-                write_approved(machine, &base, list, &marker, enabled)
+                flip_approved(machine, &base, list, &marker, enabled)
             }
             "folder" => {
                 let file = Path::new(rest)
@@ -1287,7 +1966,7 @@ mod windows {
                     .map(|n| n.to_string_lossy().to_string())
                     .ok_or_else(|| "启动文件夹项目路径无效".to_string())?;
                 let machine = rest.contains("ProgramData");
-                write_approved(machine, CURRENT_VERSION, "StartupFolder", &file, enabled)
+                flip_approved(machine, CURRENT_VERSION, "StartupFolder", &file, enabled)
             }
             "task" => {
                 use std::os::windows::process::CommandExt;
@@ -1302,23 +1981,79 @@ mod windows {
                     .output()
                     .map_err(|error| format!("无法调用 schtasks：{error}"))?;
                 if output.status.success() {
-                    Ok(())
-                } else {
-                    Err(format!(
+                    return Ok(());
+                }
+                let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+                // schtasks reports "task not ready", missing tasks, etc. —
+                // only a plain access denial justifies a UAC round-trip.
+                let denied = stderr.contains("access is denied")
+                    || stderr.contains("access denied")
+                    || stderr.contains("拒绝访问");
+                if !denied {
+                    return Err(format!(
                         "计划任务修改失败：{}",
                         String::from_utf8_lossy(&output.stderr).trim()
-                    ))
+                    ));
                 }
+                run_elevated(
+                    "schtasks.exe",
+                    &[
+                        "/Change".to_string(),
+                        "/TN".to_string(),
+                        rest.to_string(),
+                        if enabled { "/Enable" } else { "/Disable" }.to_string(),
+                    ],
+                )?;
+                Ok(())
             }
             "svc" => {
                 // 开 = Automatic(2)，关 = Manual(3)：保留按需启动能力，
                 // 与管家的“禁止开机自启”语义一致；HKLM 写入需要管理员。
-                let key = RegKey::predef(HKEY_LOCAL_MACHINE)
-                    .open_subkey_with_flags(format!(r"{SERVICES_KEY}\{rest}"), KEY_READ | KEY_WRITE)
-                    .map_err(registry_error)?;
-                key.set_value("Start", &(if enabled { 2u32 } else { 3u32 }))
-                    .map_err(registry_error)?;
-                let _ = service_control(rest, if enabled { "auto" } else { "demand" });
+                let start = if enabled { 2u32 } else { 3u32 };
+                let key_path = format!(r"{SERVICES_KEY}\{rest}");
+                let direct = (|| -> std::io::Result<()> {
+                    let key = RegKey::predef(HKEY_LOCAL_MACHINE)
+                        .open_subkey_with_flags(&key_path, KEY_READ | KEY_WRITE)?;
+                    key.set_value("Start", &start)
+                })();
+                if let Err(why) = direct {
+                    if why.kind() != std::io::ErrorKind::PermissionDenied {
+                        return Err(registry_error(why));
+                    }
+                    run_elevated(
+                        "reg.exe",
+                        &[
+                            "add".to_string(),
+                            format!(r"HKLM\{key_path}"),
+                            "/v".to_string(),
+                            "Start".to_string(),
+                            "/t".to_string(),
+                            "REG_DWORD".to_string(),
+                            "/d".to_string(),
+                            start.to_string(),
+                            "/f".to_string(),
+                        ],
+                    )?;
+                    let live = RegKey::predef(HKEY_LOCAL_MACHINE)
+                        .open_subkey_with_flags(&key_path, KEY_READ)
+                        .map(|key| key.get_value::<u32, _>("Start").ok())
+                        .ok()
+                        .flatten();
+                    if live != Some(start) {
+                        return Err("提权写入后服务状态仍未改变".to_string());
+                    }
+                }
+                if service_control(rest, if enabled { "auto" } else { "demand" }).is_err() {
+                    let _ = run_elevated(
+                        "sc.exe",
+                        &[
+                            "config".to_string(),
+                            rest.to_string(),
+                            "start=".to_string(),
+                            if enabled { "auto" } else { "demand" }.to_string(),
+                        ],
+                    );
+                }
                 Ok(())
             }
             _ => Err("未知的启动项来源".to_string()),
@@ -1335,6 +2070,149 @@ mod windows {
             .output()
             .map_err(|error| format!("sc 调用失败：{error}"))
             .map(|_| ())
+    }
+
+    /// Remove one autostart registration; see the module-level
+    /// `remove_startup_entry` for the semantics per source kind.
+    pub(super) fn remove_startup_entry(entry: &StartupEntry) -> Result<(), String> {
+        let Some((kind, rest)) = entry.id.split_once('|') else {
+            return Err("未知的启动项来源".to_string());
+        };
+        match kind {
+            "reg" => {
+                let pieces: Vec<&str> = rest.splitn(3, '|').collect();
+                let [hive_label, key_path, name] = pieces.as_slice() else {
+                    return Err("未知的启动项来源".to_string());
+                };
+                let (machine, base, list, prefix32) = split_run_path(hive_label, key_path);
+                let hive = RegKey::predef(if machine {
+                    HKEY_LOCAL_MACHINE
+                } else {
+                    HKEY_CURRENT_USER
+                });
+                let direct = (|| -> std::io::Result<()> {
+                    let key = hive.open_subkey_with_flags(key_path, KEY_READ | KEY_WRITE)?;
+                    key.delete_value(*name)
+                })();
+                if let Err(why) = direct {
+                    if why.kind() != std::io::ErrorKind::PermissionDenied {
+                        return Err(registry_error(why));
+                    }
+                    run_elevated(
+                        "reg.exe",
+                        &[
+                            "delete".to_string(),
+                            format!(r"{hive_label}\{key_path}"),
+                            "/v".to_string(),
+                            name.to_string(),
+                            "/f".to_string(),
+                        ],
+                    )?;
+                    if hive
+                        .open_subkey_with_flags(key_path, KEY_READ)
+                        .map(|key| key.get_raw_value(*name).is_ok())
+                        .unwrap_or(false)
+                    {
+                        return Err("提权删除后启动项仍然存在".to_string());
+                    }
+                }
+                // Task Manager keeps its own approval marker next to the row;
+                // drop it so the removed name cannot resurface as a ghost.
+                let marker = if prefix32 {
+                    format!("32|{name}")
+                } else {
+                    name.to_string()
+                };
+                let _ = hive
+                    .open_subkey_with_flags(
+                        format!(r"{base}\Explorer\StartupApproved\{list}"),
+                        KEY_READ | KEY_WRITE,
+                    )
+                    .and_then(|key| key.delete_value(&marker));
+                Ok(())
+            }
+            "folder" => {
+                let file = Path::new(rest);
+                match std::fs::remove_file(file) {
+                    Ok(()) => Ok(()),
+                    Err(why) if why.kind() == std::io::ErrorKind::PermissionDenied => {
+                        run_elevated(
+                            "cmd.exe",
+                            &["/C".to_string(), "del".to_string(), format!("/F /Q {rest}")],
+                        )?;
+                        if file.exists() {
+                            return Err("提权删除后快捷方式仍然存在".to_string());
+                        }
+                        Ok(())
+                    }
+                    Err(why) => Err(format!("删除快捷方式失败：{why}")),
+                }
+            }
+            "task" => {
+                use std::os::windows::process::CommandExt;
+                let output = std::process::Command::new("schtasks.exe")
+                    .args(["/Delete", "/TN", rest, "/F"])
+                    .creation_flags(0x0800_0000)
+                    .output()
+                    .map_err(|error| format!("无法调用 schtasks：{error}"))?;
+                if output.status.success() {
+                    return Ok(());
+                }
+                let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+                if stderr.contains("access is denied")
+                    || stderr.contains("access denied")
+                    || stderr.contains("拒绝访问")
+                {
+                    run_elevated(
+                        "schtasks.exe",
+                        &[
+                            "/Delete".to_string(),
+                            "/TN".to_string(),
+                            rest.to_string(),
+                            "/F".to_string(),
+                        ],
+                    )?;
+                    return Ok(());
+                }
+                Err(format!(
+                    "删除计划任务失败：{}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ))
+            }
+            "svc" => {
+                // Uninstalling a service outright breaks anything that still
+                // opens it, so 残留服务 is disabled instead (Start = 4).
+                set_startup_enabled(entry, false)?;
+                let key_path = format!(r"{SERVICES_KEY}\{rest}");
+                let direct = (|| -> std::io::Result<()> {
+                    let key = RegKey::predef(HKEY_LOCAL_MACHINE)
+                        .open_subkey_with_flags(&key_path, KEY_READ | KEY_WRITE)?;
+                    key.set_value("Start", &4u32)
+                })();
+                if let Err(why) = direct {
+                    if why.kind() != std::io::ErrorKind::PermissionDenied {
+                        return Err(registry_error(why));
+                    }
+                    run_elevated(
+                        "reg.exe",
+                        &[
+                            "add".to_string(),
+                            format!(r"HKLM\{key_path}"),
+                            "/v".to_string(),
+                            "Start".to_string(),
+                            "/t".to_string(),
+                            "REG_DWORD".to_string(),
+                            "/d".to_string(),
+                            "4".to_string(),
+                            "/f".to_string(),
+                        ],
+                    )?;
+                }
+                let _ = service_control(rest, "disabled");
+                Ok(())
+            }
+            _ => Err("这类启动项暂不支持删除".to_string()),
+        }
     }
 
     fn split_run_path(hive_label: &str, key_path: &str) -> (bool, String, &'static str, bool) {
@@ -1469,9 +2347,12 @@ mod windows {
                 icon = exe_icon_png(&clean, 0);
                 cleaned = Some(clean);
             }
-            let friendly_name = module_label
-                .or_else(|| cleaned.as_deref().and_then(module_folder_name))
-                .or(clsid_name);
+            // Attribution for the UI's software grouping: a row belongs to a
+            // product when its module carries real strings or sits in a
+            // recognisable install folder — same rule the startup list uses.
+            let folder_label = cleaned.as_deref().and_then(module_folder_name);
+            let named = module_label.is_some() || folder_label.is_some();
+            let friendly_name = module_label.or(folder_label).or(clsid_name);
             if is_builtin_handler(&name, friendly_name.as_deref(), cleaned.as_deref()) {
                 continue;
             }
@@ -1489,6 +2370,7 @@ mod windows {
                 module: cleaned.or(module),
                 publisher,
                 icon,
+                named,
             });
         }
         out
@@ -1737,9 +2619,296 @@ mod windows {
     #[cfg(test)]
     mod tests {
         use super::{
-            clean_module_path, exe_from_command, friendly_program_name, has_cjk,
-            is_placeholder_label, module_folder_name, parse_csv_line, task_settings_enabled,
+            approved_enabled, attribute_vendor_suites, clean_module_name, clean_module_path,
+            exe_from_command, friendly_program_name, has_cjk, is_component_role_label,
+            is_placeholder_label, module_folder_name, parse_csv_line, product_icon_map,
+            product_icon_spec, split_run_path, suite_path, task_settings_enabled,
+            windows_store_product, write_approved, StartupEntry, CURRENT_VERSION,
         };
+        use winreg::RegKey;
+
+        #[test]
+        fn role_labels_are_not_products() {
+            // WinFsp's launcher names itself "Windows File System Proxy";
+            // that is plumbing, so the row must not open its own group.
+            assert!(is_component_role_label("Windows File System Proxy"));
+            assert!(is_component_role_label("Microsoft Edge Elevation Service"));
+            assert!(is_component_role_label(
+                "Windows Push Notifications User Service"
+            ));
+            // Real products keep their groups, Chinese or English.
+            assert!(!is_component_role_label("微信"));
+            assert!(!is_component_role_label("Windows Defender Firewall"));
+            assert!(!is_component_role_label("Everything"));
+            assert!(!is_component_role_label("WinFsp Launcher"));
+        }
+
+        #[test]
+        fn the_live_scan_leaves_winfsp_unattributed() {
+            // The user's exact complaint: the WinFsp launcher service opened
+            // a "Windows File System Proxy" software group of its own.
+            if !std::path::Path::new(r"C:\Program Files (x86)\WinFsp").exists() {
+                eprintln!("skipping: no WinFsp on this machine");
+                return;
+            }
+            let entries = super::scan_startup();
+            let launcher: Vec<_> = entries
+                .iter()
+                .filter(|entry| {
+                    entry
+                        .target
+                        .to_lowercase()
+                        .starts_with(r"c:\program files (x86)\winfsp")
+                })
+                .collect();
+            assert!(!launcher.is_empty(), "WinFsp rows vanished");
+            assert!(
+                launcher.iter().all(|entry| !entry.named),
+                "WinFsp still attributed: {:?}",
+                launcher
+                    .iter()
+                    .map(|entry| (&entry.name, &entry.display_name, entry.named))
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        #[test]
+        fn suite_paths_need_a_vendor_and_a_child_folder() {
+            assert_eq!(
+                suite_path(r"C:\Program Files\H3C\Workspace\cameraservice.exe"),
+                Some(("H3C".into(), "Workspace".into()))
+            );
+            assert_eq!(
+                suite_path(r"C:\Program Files (x86)\Common Files\acme\x.exe"),
+                None,
+                "Common Files is not a vendor"
+            );
+            assert_eq!(
+                suite_path(r"C:\Program Files\Tencent\Weixin.exe"),
+                None,
+                "a loose file in Program Files has no suite"
+            );
+        }
+
+        #[test]
+        fn clean_module_names_drop_editions_and_case() {
+            assert_eq!(clean_module_name("WeChat (64-bit)"), "wechat");
+            assert_eq!(clean_module_name("腾讯会议（企业版） "), "腾讯会议");
+            assert_eq!(clean_module_name("  WXWorkService "), "wxworkservice");
+        }
+
+        #[test]
+        fn a_stub_borrows_its_products_icon_by_label() {
+            // Two shapes of the same problem: 腾讯会议's stub says exactly
+            // what the uninstall `DisplayName` says, 企业微信's says
+            // "WXWorkService" while the registry keys are 企业微信 /
+            // `wxwork.exe`. The first matches by name, the second must
+            // stretch to the longest alias.
+            let products = product_icon_map();
+            let Some(wechat) = products.get("企业微信").or_else(|| products.get("wxwork"))
+            else {
+                eprintln!("skipping: 企业微信 not installed");
+                return;
+            };
+            assert!(
+                product_icon_spec("wxworkservice", &products).is_some_and(|found| found == wechat),
+                "the upgrader label did not resolve to the product icon"
+            );
+            // Too-short keys never stretch, or "ab" would own everything;
+            // a label stretching *down* to a shorter alias is the rule.
+            let mut tiny: std::collections::HashMap<String, (String, u16)> = Default::default();
+            tiny.insert("ab".into(), ("unrelated.exe".into(), 0));
+            tiny.insert("wemeet".into(), wechat.clone());
+            assert!(product_icon_spec("wemeetupd", &tiny).is_some_and(|found| found == wechat));
+            assert!(product_icon_spec("zeta", &tiny).is_none());
+        }
+
+        #[test]
+        fn the_live_scan_icons_the_stubbin_updaters() {
+            // 腾讯会议 keeps `WemeetUpdateSvc.exe` alone in
+            // `Tencent\UpdateSvr\` with zero icon resources, and 企业微信's
+            // `WXWorkUpgrader.exe` is the same trick; both used to render a
+            // grey initial tile in the startup groups. Skips off those boxes.
+            let meetings = std::path::Path::new(r"C:\Program Files (x86)\Tencent\UpdateSvr");
+            let wechat = std::path::Path::new(r"D:\Program Files (x86)\WXWork");
+            if !meetings.exists() && !wechat.exists() {
+                eprintln!("skipping: no Tencent updater stubs on this machine");
+                return;
+            }
+            let entries = super::scan_startup();
+            let stubs: Vec<_> = entries
+                .iter()
+                .filter(|entry| {
+                    entry.target.to_lowercase().contains("wemeetupdatesvc")
+                        || entry.target.to_lowercase().contains("wxworkupgrader")
+                })
+                .collect();
+            assert!(
+                !stubs.is_empty(),
+                "the updater stubs vanished from the scan"
+            );
+            for stub in &stubs {
+                assert!(
+                    stub.icon.is_some(),
+                    "{} has no icon: {:?}",
+                    stub.name,
+                    stub.target
+                );
+            }
+        }
+
+        #[test]
+        fn the_live_scan_folds_h3c_into_one_suite_group() {
+            // The real complaint on the H3C VDI machine: cameraservice,
+            // SpaceAgent and the Device Redirect services scattered across
+            // singleton groups and 其他软件 despite sharing no version
+            // strings. Skips silently off the affected hardware.
+            if !std::path::Path::new(r"C:\Program Files\H3C\Workspace").exists() {
+                eprintln!("skipping: no H3C Workspace on this machine");
+                return;
+            }
+            let entries = super::scan_startup();
+            let h3c: Vec<_> = entries
+                .iter()
+                .filter(|entry| {
+                    entry
+                        .target
+                        .to_lowercase()
+                        .starts_with(r"c:\program files\h3c\")
+                })
+                .collect();
+            assert!(!h3c.is_empty(), "H3C rows vanished from the scan");
+            assert!(
+                h3c.iter()
+                    .all(|entry| entry.display_name == "H3C Workspace"),
+                "H3C rows split: {:?}",
+                h3c.iter()
+                    .map(|entry| (&entry.name, &entry.display_name))
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        #[test]
+        fn one_vendor_two_products_fold_into_a_suite_group() {
+            fn entry(name: &str, target: &str) -> StartupEntry {
+                StartupEntry {
+                    id: format!("svc|{name}"),
+                    name: name.into(),
+                    command: target.into(),
+                    display_name: name.into(),
+                    icon: None,
+                    target: target.into(),
+                    target_exists: true,
+                    trigger: "boot".into(),
+                    system_item: false,
+                    signature: String::new(),
+                    signer: None,
+                    source: "service".into(),
+                    source_label: "服务（自动启动）".into(),
+                    scope: "machine".into(),
+                    enabled: true,
+                    named: false,
+                }
+            }
+            let mut entries = vec![
+                entry(
+                    "CameraRedirectService",
+                    r"C:\Program Files\H3C\Workspace\cameraservice.exe",
+                ),
+                entry(
+                    "PrintDaemon",
+                    r"C:\Program Files\H3C\Workspace\Device Redirect\PrintRedir\PrintDaemon.exe",
+                ),
+                entry(
+                    "SpaceAgent",
+                    r"C:\Program Files\H3C\SpaceAgent\SpaceAgent.exe",
+                ),
+                // Honest PE names never merge, even under a suite vendor.
+                entry("Weixin", r"C:\Program Files\Tencent\Weixin\Weixin.exe"),
+            ];
+            entries[3].display_name = "微信".into();
+            entries[3].named = true;
+            attribute_vendor_suites(&mut entries);
+            for entry in &entries[..3] {
+                assert_eq!(entry.display_name, "H3C Workspace", "{}", entry.name);
+                assert!(entry.named);
+            }
+            assert_eq!(entries[3].display_name, "微信");
+        }
+
+        #[test]
+        fn store_packages_are_attributed_by_their_package_folder() {
+            // MSIX installs deny version-info reads, so the folder is the
+            // only honest product name: these must escape 其他软件.
+            assert_eq!(
+                windows_store_product(
+                    r"C:\Program Files\WindowsApps\OpenAI.ChatGPT_1.2025.10.0_x64__w269v8zz8d6vy\ChatGPT.exe"
+                )
+                .as_deref(),
+                Some("ChatGPT")
+            );
+            assert_eq!(
+                windows_store_product(
+                    r"C:\PROGRAM FILES\WINDOWSAPPS\Microsoft.WindowsTerminal_1.21\wt.exe"
+                )
+                .as_deref(),
+                Some("WindowsTerminal")
+            );
+        }
+
+        #[test]
+        fn ordinary_paths_have_no_store_product() {
+            assert_eq!(
+                windows_store_product(r"D:\Program Files\Tencent\Weixin\Weixin.exe"),
+                None
+            );
+            assert_eq!(windows_store_product("Weixin.exe"), None);
+        }
+
+        #[test]
+        fn toggle_round_trips_through_the_approved_marker() {
+            // The exact pair the UI toggle relies on: write_approved stores a
+            // marker, the rescan reads it back. If these ever drift, every
+            // startup switch silently snaps back — the "button is dead" bug.
+            let list = format!("squidTest{}", std::process::id());
+            let hive = RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+            let key_path = format!(r"{CURRENT_VERSION}\Explorer\StartupApproved\{list}");
+            for name in ["squid-off", "squid-on"] {
+                let want = name.ends_with("on");
+                if let Err(why) = write_approved(false, CURRENT_VERSION, &list, name, want) {
+                    // Sandboxed CI runners deny registry writes; the marker
+                    // round-trip cannot be proven here, so say so instead of
+                    // failing a correct build.
+                    eprintln!("skipping marker round-trip: registry write denied ({why})");
+                    return;
+                }
+                assert_eq!(
+                    approved_enabled(&hive, CURRENT_VERSION, &list, name),
+                    want,
+                    "{name} must read back as written"
+                );
+            }
+            let _ = hive.delete_subkey_all(&key_path);
+        }
+
+        #[test]
+        fn run_path_split_round_trips_hive_and_list() {
+            // set_startup_enabled re-derives (machine, base, list) from the
+            // id scan produced; a mismatch writes the marker to the wrong key
+            // and the rescan then shows the old state.
+            let wow_run = r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run".to_string();
+            let (machine, base, list, prefix32) = split_run_path("HKLM", &wow_run);
+            assert!(machine);
+            assert_eq!(list, "Run");
+            assert!(prefix32);
+            assert!(base.contains("WOW6432Node"));
+            let (machine, base, list, prefix32) =
+                split_run_path("HKCU", &format!(r"{CURRENT_VERSION}\RunOnce"));
+            assert!(!machine);
+            assert_eq!(list, "RunOnce");
+            assert!(!prefix32);
+            assert_eq!(base, CURRENT_VERSION);
+        }
 
         #[test]
         fn command_paths_survive_quotes_and_arguments() {
@@ -1954,12 +3123,19 @@ mod macos {
                 id: format!("launchAgent|{}", path.display()),
                 name: label_text,
                 command: path.display().to_string(),
+                target: String::new(),
+                target_exists: true,
+                trigger: "logon".to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "launchAgent".to_string(),
                 source_label: label.to_string(),
                 scope: scope.to_string(),
                 enabled,
+                named: true,
             });
         }
         out
@@ -2058,12 +3234,19 @@ mod linux {
                 id: format!("autostart|{}", path.display()),
                 name,
                 command: exec,
+                target: String::new(),
+                target_exists: true,
+                trigger: "logon".to_string(),
+                system_item: false,
+                signature: String::new(),
+                signer: None,
                 display_name: String::new(),
                 icon: None,
                 source: "autostart".to_string(),
                 source_label: "~/.config/autostart".to_string(),
                 scope: "currentUser".to_string(),
                 enabled,
+                named: true,
             });
         }
         for entry in &mut out {

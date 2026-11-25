@@ -85,6 +85,28 @@ export function SettingsPage({
   const [checkingPermission, setCheckingPermission] = useState(false);
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [savingAutostart, setSavingAutostart] = useState(false);
+  // Whitelist entries are only as good as their last hit: the audit answers
+  // "did this pattern ever protect something real?".
+  const [audit, setAudit] = useState<Map<string, boolean> | null>(null);
+  const [auditing, setAuditing] = useState(false);
+
+  const runAudit = useCallback(async () => {
+    setAuditing(true);
+    try {
+      const rows = await api.whitelistAudit();
+      setAudit(new Map(rows.map((row) => [row.pattern, row.live])));
+    } catch {
+      setAudit(null);
+    } finally {
+      setAuditing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (settings.whitelist.length > 0 && audit === null && !auditing) {
+      void runAudit();
+    }
+  }, [audit, auditing, runAudit, settings.whitelist.length]);
 
   const checkPermissions = useCallback(async () => {
     setCheckingPermission(true);
@@ -408,6 +430,30 @@ export function SettingsPage({
                 {t("Add", "添加")}
               </Button>
             </div>
+            {settings.whitelist.length > 0 ? (
+              <div className="whitelist-audit-bar">
+                <span>
+                  {audit === null
+                    ? t(
+                        "Checking whether each pattern still matches anything…",
+                        "正在核对每条规则是否还命中过内容…",
+                      )
+                    : t(
+                        `Consumption audit: ${[...audit.values()].filter(Boolean).length} of ${audit.size} pattern(s) matched known cache locations`,
+                        `消费审计：${audit.size} 条规则中 ${[...audit.values()].filter(Boolean).length} 条命中过已知缓存位置`,
+                      )}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<RefreshCw size={13} className={auditing ? "spin" : undefined} />}
+                  onClick={() => void runAudit()}
+                  disabled={auditing}
+                >
+                  {t("Re-check", "重新检查")}
+                </Button>
+              </div>
+            ) : null}
             <div className="whitelist-list">
               {settings.whitelist.length === 0 ? (
                 <p className="settings-empty">
@@ -420,6 +466,25 @@ export function SettingsPage({
                       <ShieldCheck size={15} />
                     </span>
                     <code title={pattern}>{shortPath(pattern, 88)}</code>
+                    {audit ? (
+                      <span
+                        className={`whitelist-audit-chip ${
+                          audit.get(pattern) ? "is-live" : "is-dead"
+                        }`}
+                        title={t(
+                          audit.get(pattern)
+                            ? "This pattern matched paths Squid knows about on the last scan"
+                            : "This pattern has never matched anything — it may be stale",
+                          audit.get(pattern)
+                            ? "最近扫描命中过这条规则保护的位置"
+                            : "从未命中任何已知位置，规则可能已经过期",
+                        )}
+                      >
+                        {audit.get(pattern)
+                          ? t("Recently matched", "最近命中")
+                          : t("Never matched", "从未命中")}
+                      </span>
+                    ) : null}
                     <button
                       className="row-reveal"
                       aria-label={t("Remove protection", "移除保护")}

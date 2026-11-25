@@ -136,7 +136,14 @@ pub fn build_plan(
         Some(version) => format!("{} · {}", app.source, version),
         None => app.source.clone(),
     });
-    if system {
+    if app.dead || app.path.as_os_str().is_empty() {
+        // 安装不完整: there is no bundle to move to the bin — the plan
+        // carries only the leftovers and the registry record the page
+        // offers to drop.
+        bundle_item = bundle_item
+            .locked(LockReason::Protected)
+            .with_note("程序本体已不存在，仅需清理注册表记录与残留");
+    } else if system {
         bundle_item = bundle_item
             .locked(LockReason::Protected)
             .with_note("system application");
@@ -248,9 +255,9 @@ fn measure(
         .iter()
         .map(|item| (item.path.clone(), item.kind))
         .collect();
-    let sizes = squid_core::fs::measure_all(&targets, cancel, |index, _info| {
+    let sizes = squid_core::fs::measure_all(&targets, cancel, |index, completed, _info| {
         progress.tick(
-            index as u64 + 1,
+            completed as u64,
             Some(targets.len() as u64),
             targets.get(index).map(|(path, _)| path.clone()),
         );
@@ -473,6 +480,7 @@ mod tests {
             publisher: None,
             installed_ms: None,
             display_icon: None,
+            ..AppInfo::default()
         }
     }
 

@@ -30,6 +30,19 @@ pub enum Event {
         total: Bytes,
         count: usize,
     },
+    /// Cumulative measurement counters, streamed while sizes are computed
+    /// (Mole's "Scanning: 128,431 files · 38.2 GB" live status line).
+    Metered {
+        files: u64,
+        bytes: Bytes,
+    },
+    /// A finished work unit streamed as soon as it is confirmed, shaped by
+    /// the producing engine (duplicate groups land while the scan still
+    /// runs — MangoDisk's lesson that results beat progress bars).
+    Group {
+        kind: &'static str,
+        payload: serde_json::Value,
+    },
     Deleted {
         path: PathBuf,
         freed: Bytes,

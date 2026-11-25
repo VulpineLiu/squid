@@ -2,10 +2,13 @@ import {
   AlertTriangle,
   AppWindow,
   Boxes,
+  Bot,
   Check,
   ChevronDown,
   Code2,
+  CopyX,
   DownloadCloud,
+  EyeOff,
   FileWarning,
   Globe2,
   Languages,
@@ -36,17 +39,8 @@ export interface CategoryMeta {
   blurbEn: string;
   blurbZh: string;
   icon: typeof Boxes;
-  tone: Tone;
+  tone: string;
 }
-
-export type Tone =
-  | "primary"
-  | "success"
-  | "warning"
-  | "danger"
-  | "neutral"
-  | "info"
-  | "violet";
 
 export const CATEGORY_META: Record<Category, CategoryMeta> = {
   "system-junk": {
@@ -55,7 +49,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Temporary files and system scratch data",
     blurbZh: "临时文件与系统缓存",
     icon: Trash2,
-    tone: "primary",
+    tone: "blue",
   },
   "app-caches": {
     en: "App caches",
@@ -63,7 +57,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Caches apps can rebuild",
     blurbZh: "应用可自动重建的缓存",
     icon: AppWindow,
-    tone: "primary",
+    tone: "cyan",
   },
   "browser-caches": {
     en: "Browser caches",
@@ -71,7 +65,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Web content and offline data",
     blurbZh: "网页内容与离线数据",
     icon: Globe2,
-    tone: "primary",
+    tone: "violet",
   },
   logs: {
     en: "Logs & reports",
@@ -79,7 +73,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Rotated logs and crash reports",
     blurbZh: "旧日志与崩溃报告",
     icon: FileWarning,
-    tone: "neutral",
+    tone: "orange",
   },
   developer: {
     en: "Developer files",
@@ -87,7 +81,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Simulators, archives and tool caches",
     blurbZh: "模拟器、归档与工具缓存",
     icon: Code2,
-    tone: "neutral",
+    tone: "indigo",
   },
   "project-artifacts": {
     en: "Build artefacts",
@@ -95,15 +89,15 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Regenerable project build folders",
     blurbZh: "可重新生成的构建目录",
     icon: PackageOpen,
-    tone: "primary",
+    tone: "teal",
   },
   trash: {
-    en: "Trash",
-    zh: "废纸篓",
+    en: "Recycle Bin",
+    zh: "回收站",
     blurbEn: "Files waiting to be emptied",
     blurbZh: "等待清空的文件",
     icon: Trash2,
-    tone: "neutral",
+    tone: "slate",
   },
   "language-packs": {
     en: "Language packs",
@@ -111,7 +105,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Unused voice and localisation data",
     blurbZh: "未使用的语音与本地化数据",
     icon: Languages,
-    tone: "neutral",
+    tone: "pink",
   },
   leftovers: {
     en: "Leftovers",
@@ -119,7 +113,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Data left by removed applications",
     blurbZh: "已删除应用留下的数据",
     icon: Puzzle,
-    tone: "warning",
+    tone: "amber",
   },
   "update-installers": {
     en: "Update installers",
@@ -127,7 +121,31 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
     blurbEn: "Installer packages apps keep after updating",
     blurbZh: "应用升级后留下的安装包，需要时会自动重新下载",
     icon: DownloadCloud,
-    tone: "success",
+    tone: "green",
+  },
+  duplicates: {
+    en: "Duplicate files",
+    zh: "重复文件",
+    blurbEn: "Byte-identical copies confirmed by full hashing",
+    blurbZh: "全量哈希确认的完全相同文件",
+    icon: CopyX,
+    tone: "orange",
+  },
+  "ai-tools": {
+    en: "AI tools & models",
+    zh: "AI 工具与模型",
+    blurbEn: "Local models and caches that re-download on demand",
+    blurbZh: "本地模型与缓存；模型删除后需重新下载",
+    icon: Bot,
+    tone: "violet",
+  },
+  privacy: {
+    en: "Privacy traces",
+    zh: "隐私痕迹",
+    blurbEn: "History and traces removed without a recycle bin",
+    blurbZh: "历史与痕迹；删除不进回收站",
+    icon: EyeOff,
+    tone: "slate",
   },
 };
 
@@ -404,11 +422,18 @@ export function ProgressCard({
   title,
   onCancel,
   compact = false,
+  liveLine,
+  capAt99 = false,
 }: {
   progress: JobProgress | null;
   title: string;
   onCancel?: () => void;
   compact?: boolean;
+  /** "已统计 128,431 文件 · 38.2 GB" streamed side-band (A①). */
+  liveLine?: string | null;
+  /** Scans hold the bar at 99% until the final number lands — a full bar
+   * that is still working reads as a lie (Mole's cap discipline). */
+  capAt99?: boolean;
 }) {
   const { t, lang } = useI18n();
   const phase = useMemo(() => {
@@ -423,6 +448,9 @@ export function ProgressCard({
       plan: ["Finding application leftovers", "正在查找应用残留"],
       storage: ["Measuring folders", "正在测量文件夹"],
       files: ["Finding the largest files", "正在查找大文件"],
+      bigfiles: ["Scanning every drive for large files", "正在遍历所有磁盘查找大文件"],
+      duplicates: ["Hashing duplicates (3-stage funnel)", "正在哈希校验重复文件（三级漏斗）"],
+      maintenance: ["Running the repair commands", "正在执行修复命令"],
       orphans: ["Finding unused leftovers", "正在查找孤立残留"],
     };
     const pair = labels[progress.phase];
@@ -431,7 +459,9 @@ export function ProgressCard({
   const denominator = progress?.total ?? 0;
   const done = progress?.done ?? 0;
   const ratio =
-    denominator > 0 ? Math.min(100, Math.max(0, (done / denominator) * 100)) : null;
+    denominator > 0
+      ? Math.min(capAt99 ? 99 : 100, Math.max(0, (done / denominator) * 100))
+      : null;
   const detail = progress?.detail || progress?.subject || "";
 
   return (
@@ -460,6 +490,11 @@ export function ProgressCard({
         >
           <span style={{ width: ratio === null ? undefined : `${ratio}%` }} />
         </div>
+        {liveLine ? (
+          <div className="progress-live" role="status">
+            {liveLine}
+          </div>
+        ) : null}
         <div className="progress-detail" title={detail}>
           {detail || t("Working safely in the background…", "正在后台安全处理…")}
         </div>
@@ -635,14 +670,25 @@ export function Gauge({
   value,
   size = 160,
   stroke = 12,
-  tone = "primary",
+  tone = "blue",
   children,
   label,
 }: {
   value: number;
   size?: number;
   stroke?: number;
-  tone?: Tone;
+  tone?:
+    | "blue"
+    | "green"
+    | "orange"
+    | "violet"
+    | "red"
+    | "primary"
+    | "success"
+    | "warning"
+    | "danger"
+    | "neutral"
+    | "info";
   children?: ReactNode;
   label?: string;
 }) {
@@ -685,10 +731,21 @@ export function Gauge({
 
 export function MetricBar({
   value,
-  tone = "primary",
+  tone = "blue",
 }: {
   value: number;
-  tone?: Tone;
+  tone?:
+    | "blue"
+    | "green"
+    | "orange"
+    | "violet"
+    | "red"
+    | "primary"
+    | "success"
+    | "warning"
+    | "danger"
+    | "neutral"
+    | "info";
 }) {
   return (
     <div className={`metric-bar tone-${tone}`}>
@@ -704,18 +761,14 @@ export function EmptyState({
   action,
 }: {
   icon: ReactNode;
-  title?: string;
+  title: string;
   description?: string;
   action?: ReactNode;
 }) {
   return (
     <div className="empty-state">
       <div className="empty-icon">{icon}</div>
-      {title ? (
-        <h2>{title}</h2>
-      ) : (
-        <span className="empty-title-spacer" aria-hidden="true" />
-      )}
+      <h2>{title}</h2>
       {description ? <p>{description}</p> : null}
       {action}
     </div>
@@ -959,11 +1012,22 @@ export function PathRow({
 export function UsageBar({
   used,
   total,
-  tone = "primary",
+  tone = "blue",
 }: {
   used: number;
   total: number;
-  tone?: Tone;
+  tone?:
+    | "blue"
+    | "green"
+    | "orange"
+    | "violet"
+    | "red"
+    | "primary"
+    | "success"
+    | "warning"
+    | "danger"
+    | "neutral"
+    | "info";
 }) {
   return (
     <div className={`usage-bar tone-${tone}`}>

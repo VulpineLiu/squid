@@ -13,7 +13,7 @@ use security::ScanTarget;
 use squid_core::{Locale, Settings};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, WindowEvent,
 };
 
@@ -66,22 +66,22 @@ fn tray_menu(app: &AppHandle, locale: Locale) -> tauri::Result<Menu<tauri::Wry>>
         if security::scanning(app) {
             tray_text(locale, "Scanning…", "正在扫描…")
         } else {
-            tray_text(locale, "Scan for malware", "扫描恶意软件")
+            tray_text(locale, "Scan malware", "扫描恶意软件")
         },
         !security::scanning(app),
         None::<&str>,
     )?;
-    let startup = MenuItem::with_id(
+    let permissions = MenuItem::with_id(
         app,
-        "startup",
+        "permissions",
         tray_text(locale, "Manage startup items", "管理启动项"),
         true,
         None::<&str>,
     )?;
-    let cleanup = MenuItem::with_id(
+    let space = MenuItem::with_id(
         app,
-        "cleanup",
-        tray_text(locale, "Daily cleanup", "日常清理"),
+        "space",
+        tray_text(locale, "Space cleaning", "空间清理"),
         true,
         None::<&str>,
     )?;
@@ -89,13 +89,6 @@ fn tray_menu(app: &AppHandle, locale: Locale) -> tauri::Result<Menu<tauri::Wry>>
         app,
         "applications",
         tray_text(locale, "Uninstall apps", "应用卸载"),
-        true,
-        None::<&str>,
-    )?;
-    let purge = MenuItem::with_id(
-        app,
-        "purge",
-        tray_text(locale, "Deep Clean", "深度清理"),
         true,
         None::<&str>,
     )?;
@@ -108,7 +101,7 @@ fn tray_menu(app: &AppHandle, locale: Locale) -> tauri::Result<Menu<tauri::Wry>>
     )?;
     let first_separator = PredefinedMenuItem::separator(app)?;
     let last_separator = PredefinedMenuItem::separator(app)?;
-    // Flips the widget master switch; state is shown on the Real-time monitor.
+    // Flips the widget master switch; state is shown on the 桌面小工具 page.
     let widget_toggle = MenuItem::with_id(
         app,
         "widget",
@@ -122,11 +115,10 @@ fn tray_menu(app: &AppHandle, locale: Locale) -> tauri::Result<Menu<tauri::Wry>>
             &open,
             &protection,
             &scan,
-            &startup,
+            &permissions,
             &first_separator,
-            &cleanup,
+            &space,
             &apps,
-            &purge,
             &widget_toggle,
             &last_separator,
             &quit,
@@ -186,14 +178,14 @@ fn create_tray(app: &AppHandle, locale: Locale) -> tauri::Result<()> {
         .icon_as_template(cfg!(target_os = "macos"))
         .tooltip(tooltip)
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        // 左键/双击 = 直接打开主界面，右键 = 菜单（电脑管家式交互）。
+        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main_window(app),
             "scan" => security::scan_in_background(app.clone(), ScanTarget::Quick),
-            "startup" => navigate_to(app, "startup"),
-            "cleanup" => navigate_to(app, "cleanup"),
+            "permissions" => navigate_to(app, "permissions"),
+            "space" => navigate_to(app, "space"),
             "applications" => navigate_to(app, "applications"),
-            "purge" => navigate_to(app, "purge"),
             "widget" => {
                 if let Err(error) = widget::toggle_from_tray(app) {
                     eprintln!("widget toggle failed: {error}");
@@ -201,6 +193,21 @@ fn create_tray(app: &AppHandle, locale: Locale) -> tauri::Result<()> {
             }
             "quit" => app.exit(0),
             _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            let app = tray.app_handle();
+            match event {
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+                | TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                } => show_main_window(app),
+                _ => {}
+            }
         })
         .build(app)?;
     Ok(())
@@ -247,13 +254,28 @@ pub fn run() {
             app::cancel_job,
             app::cleanup_scan,
             app::cleanup_delete,
+            app::cleanup_preflight,
             app::purge_scan,
             app::purge_delete,
+            app::duplicates_scan,
+            app::duplicates_delete,
+            app::large_files_scan,
+            app::large_files_delete,
+            app::maintenance_tasks,
+            app::maintenance_run,
+            app::privacy_scan,
+            app::privacy_delete,
+            app::tweaks_states,
+            app::tweaks_set,
+            app::tweaks_restore_all,
             app::apps_scan,
             app::app_plan,
             app::app_uninstall,
+            app::app_remove_record,
             app::app_icon,
             app::storage_explore,
+            app::storage_insights,
+            app::write_text_file,
             app::storage_largest_files,
             app::system_snapshot,
             app::stop_process,
@@ -262,6 +284,7 @@ pub fn run() {
             app::settings_save,
             app::whitelist_add,
             app::whitelist_remove,
+            app::whitelist_audit,
             autostart::autostart_status,
             autostart::set_autostart,
             app::reveal_path,
@@ -269,7 +292,10 @@ pub fn run() {
             permissions::permission_status,
             permissions::open_full_disk_access_settings,
             manage::manage_scan,
-            manage::managed_startup_set_enabled,
+            manage::startup_set_enabled,
+            manage::startup_remove_entry,
+            manage::advanced_scan,
+            manage::advanced_set_enabled,
             manage::extension_set_registered,
             manage::popup_list,
             manage::popup_close,
@@ -301,9 +327,6 @@ pub fn run() {
             security::security_update_rules,
             security::security_rollback_rules,
             security::open_quarantine_folder,
-            startup::startup_items,
-            startup::startup_set_enabled,
-            startup::open_startup_settings,
             startup::process_inventory,
             startup::process_detail,
             startup::process_stop,
@@ -315,6 +338,7 @@ pub fn run() {
             security::spawn_scheduler(app.handle(), &settings);
             manage::spawn_watcher(app.handle().clone());
             widget::spawn_startup(app.handle());
+            widget::spawn_desktop_watch(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())

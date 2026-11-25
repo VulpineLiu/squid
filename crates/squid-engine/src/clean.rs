@@ -172,6 +172,42 @@ pub fn scan(
         }
     }
 
+    // AI 工具与模型 (E1): local model weights (never pre-checked) plus the
+    // genuinely disposable Electron/update caches the desktop AI apps keep.
+    // Always on unless the caller filtered categories down to something else.
+    let ai_wanted =
+        options.categories.is_empty() || options.categories.contains(&Category::AiTools);
+    if ai_wanted {
+        progress.phase("ai", "collecting local AI models and caches");
+        for item in crate::ai::collect(engine, cancel) {
+            if seen.contains_key(&item.path) {
+                continue;
+            }
+            let mut item = item;
+            if engine.is_whitelisted(&item.path) {
+                item = item.locked(LockReason::Whitelisted);
+            } else if let Some(reason) = engine.block_reason(&item) {
+                item = item.locked(LockReason::Protected).with_note(reason);
+            }
+            seen.insert(item.path.clone(), report.items.len());
+            report.items.push(item);
+        }
+    }
+
+    // User-asset rows (B4): pinned directories shown as locked, explained
+    // rows so "why can't I clean my WeChat files?" never becomes a mystery.
+    let assets_wanted =
+        options.categories.is_empty() || options.categories.contains(&Category::AppCaches);
+    if assets_wanted {
+        for item in crate::assets::known_asset_rows() {
+            if seen.contains_key(&item.path) {
+                continue;
+            }
+            seen.insert(item.path.clone(), report.items.len());
+            report.items.push(item);
+        }
+    }
+
     if !options.fast {
         measure(engine, &mut report, progress, cancel)?;
     }
@@ -201,7 +237,7 @@ fn prepared_rules(engine: &Engine, options: &CleanOptions) -> Vec<PreparedRule> 
     rules.into_iter().map(PreparedRule::new).collect()
 }
 
-fn rule_running_conflict(rule: &Rule, running: &[String]) -> Option<String> {
+pub fn rule_running_conflict(rule: &Rule, running: &[String]) -> Option<String> {
     if rule.skip_if_running.is_empty() {
         return None;
     }
@@ -334,15 +370,42 @@ fn measure(
         .iter()
         .map(|item| (item.path.clone(), item.kind))
         .collect();
-    progress.tick(0, Some(targets.len() as u64), None);
+    let total = targets.len() as u64;
+    progress.tick(0, Some(total), None);
 
-    let results: Vec<squid_core::fs::SizeInfo> = measure_all(&targets, cancel, |index, _info| {
-        progress.tick(
-            index as u64 + 1,
-            Some(targets.len() as u64),
-            targets.get(index).map(|(path, _)| path.clone()),
-        );
-    });
+    // Cumulative counters for the live status line; the callback runs on
+    // rayon worker threads, hence the mutex. Emissions are throttled to
+    // ~10/s so the IPC stays a whisper while the walk screams.
+    let meter = std::sync::Mutex::new((0u64, 0u64, std::time::Instant::now()));
+    let results: Vec<squid_core::fs::SizeInfo> =
+        measure_all(&targets, cancel, |index, completed, info| {
+            let emit_line = {
+                let mut guard = meter
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.0 += info.files;
+                guard.1 += info.on_disk().as_u64();
+                if completed as u64 == total
+                    || guard.2.elapsed() >= std::time::Duration::from_millis(90)
+                {
+                    guard.2 = std::time::Instant::now();
+                    Some((guard.0, guard.1))
+                } else {
+                    None
+                }
+            };
+            if let Some((files, bytes)) = emit_line {
+                progress.publish(Event::Metered {
+                    files,
+                    bytes: Bytes(bytes),
+                });
+            }
+            progress.tick(
+                completed as u64,
+                Some(total),
+                targets.get(index).map(|(path, _)| path.clone()),
+            );
+        });
     if results.len() != report.items.len() {
         return Err(SquidError::Other(
             "measurement returned an unexpected number of results".into(),
@@ -351,6 +414,17 @@ fn measure(
     for (item, info) in report.items.iter_mut().zip(results) {
         item.size = info.logical;
         item.allocated = info.allocated;
+        item.file_count = info.files;
+        // "Untouched for X" is the actionable half of a size figure; derived
+        // from the newest last-write seen during the walk we just did.
+        item.last_write_secs = if info.newest_write == 0 {
+            None
+        } else {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs());
+            Some(now.saturating_sub(info.newest_write))
+        };
         if info.unreadable > 0 && item.note.is_none() {
             item.note = Some(format!("{} entries unreadable", info.unreadable));
         } else if info.files > 0 && item.note.is_none() {

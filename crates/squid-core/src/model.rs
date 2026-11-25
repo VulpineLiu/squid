@@ -20,10 +20,16 @@ pub enum Category {
     LanguagePacks,
     Leftovers,
     UpdateInstallers,
+    /// Duplicate-file scan results (its own page, streamed group by group).
+    Duplicates,
+    /// AI tool caches and local model files (Ollama, HuggingFace, …).
+    AiTools,
+    /// Privacy traces: browser history, recent items, clipboard, activity.
+    Privacy,
 }
 
 impl Category {
-    pub const ALL: [Category; 10] = [
+    pub const ALL: [Category; 13] = [
         Category::SystemJunk,
         Category::AppCaches,
         Category::BrowserCaches,
@@ -34,6 +40,9 @@ impl Category {
         Category::LanguagePacks,
         Category::Leftovers,
         Category::UpdateInstallers,
+        Category::Duplicates,
+        Category::AiTools,
+        Category::Privacy,
     ];
 
     pub fn id(self) -> &'static str {
@@ -48,6 +57,9 @@ impl Category {
             Category::LanguagePacks => "languages",
             Category::Leftovers => "leftovers",
             Category::UpdateInstallers => "update-installers",
+            Category::Duplicates => "duplicates",
+            Category::AiTools => "ai",
+            Category::Privacy => "privacy",
         }
     }
 
@@ -63,6 +75,9 @@ impl Category {
             Category::LanguagePacks => "Unneeded Languages",
             Category::Leftovers => "Uninstaller Leftovers",
             Category::UpdateInstallers => "Update Installers",
+            Category::Duplicates => "Duplicate Files",
+            Category::AiTools => "AI Tools & Models",
+            Category::Privacy => "Privacy Traces",
         }
     }
 
@@ -81,6 +96,9 @@ impl Category {
             Category::LanguagePacks => "Speech and localization data for languages you do not use",
             Category::Leftovers => "Data belonging to apps that are no longer installed",
             Category::UpdateInstallers => "Installer packages apps keep after a successful update",
+            Category::Duplicates => "Byte-identical files confirmed by a three-stage hash funnel",
+            Category::AiTools => "Local model weights and caches that re-download when needed",
+            Category::Privacy => "History and traces that disappear without a recycle bin",
         }
     }
 
@@ -109,6 +127,9 @@ impl Category {
             "update-installer" | "update-installers" | "upgrades" | "upgrade-packages" => {
                 Category::UpdateInstallers
             }
+            "duplicate" | "duplicates" | "duplicate-files" => Category::Duplicates,
+            "ai" | "ai-tools" | "ai-models" | "models" => Category::AiTools,
+            "privacy" | "privacy-traces" | "private" => Category::Privacy,
             _ => return None,
         };
         Some(alias)
@@ -165,6 +186,21 @@ pub struct CleanupItem {
     /// stale or hand-edited item can never escape its sandbox.
     #[serde(default)]
     pub anchors: Vec<PathBuf>,
+    /// Seconds since the *most recent* last-write inside the item (Mole's
+    /// decision aid: 1.2 GB alone is not actionable, "untouched for 3 months"
+    /// is — and a low value flags a live, working directory). Unknown until
+    /// measurement; `None` for unreadable paths.
+    #[serde(default)]
+    pub last_write_secs: Option<u64>,
+    /// File count from measurement — lets the UI say "12 files · 5 folders".
+    #[serde(default)]
+    pub file_count: u64,
+    /// Machine-readable judgement tokens (Mole's evidence chain, made
+    /// visible): `lock:<file>`, `record:<file>`, `record-missing`,
+    /// `modified:<n>`, `git:ignored|untracked|none|tracked`, `age:<days>`,
+    /// `busy`. The UI renders each token as a ✓/! line in a detail panel.
+    #[serde(default)]
+    pub evidence: Vec<String>,
 }
 
 impl CleanupItem {
@@ -187,6 +223,9 @@ impl CleanupItem {
             lock: lock_default(kind),
             note: None,
             anchors: Vec::new(),
+            last_write_secs: None,
+            file_count: 0,
+            evidence: Vec::new(),
         }
     }
 
@@ -380,10 +419,23 @@ pub struct AppInfo {
     pub has_sibling_install: bool,
     pub publisher: Option<String>,
     pub installed_ms: Option<u64>,
-    /// Raw `DisplayIcon` registry value (Windows): a path, optionally with an
+    /// Raw `DisplayIcon` registry value (Windows): a path, optionally with a
     /// `,index` suffix — the icon Explorer shows for this app.
     #[serde(default)]
     pub display_icon: Option<String>,
+    /// The uninstaller command recorded by the app itself, when present.
+    #[serde(default)]
+    pub uninstall_string: Option<String>,
+    /// Windows: the exact registry key holding this entry
+    /// (`HKCU|HKLM` + subkey), so an orphaned record can be removed after
+    /// its files are gone.
+    #[serde(default)]
+    pub reg_key: Option<String>,
+    /// Install is broken: neither the install folder nor the uninstaller
+    /// target exists any more (or MSI reports the product absent while the
+    /// registry record remains). 「安装不完整」 — offer leftover cleanup.
+    #[serde(default)]
+    pub dead: bool,
 }
 
 impl AppInfo {
