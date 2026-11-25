@@ -1678,8 +1678,106 @@ mod windows {
         entries.extend(scheduled_task_entries());
         entries.extend(auto_service_entries());
         decorate_display_names(&mut entries);
+        attribute_vendor_suites(&mut entries);
         enrich_trust(&mut entries);
         entries
+    }
+
+    /// `(vendor folder, product sub-folder)` for a path installed under
+    /// Program Files: `C:\Program Files\H3C\Workspace\cameraservice.exe` →
+    /// `("H3C", "Workspace")`. Files dropped directly into Program Files,
+    /// and generic containers, carry no suite.
+    fn suite_path(path: &str) -> Option<(String, String)> {
+        const GENERIC: [&str; 5] = [
+            "common files",
+            "windowsapps",
+            "internet explorer",
+            "dotnet",
+            "modifiable windows apps",
+        ];
+        let normalized = path.replace('/', "\\");
+        let lower = normalized.to_lowercase();
+        for marker in ["\\program files (x86)\\", "\\program files\\"] {
+            let Some(at) = lower.find(marker) else {
+                continue;
+            };
+            let mut parts = normalized[at + marker.len()..]
+                .split('\\')
+                .filter(|part| !part.is_empty());
+            let (Some(vendor), Some(child)) = (parts.next(), parts.next()) else {
+                return None;
+            };
+            // The child must be a folder: `Tencent\Weixin.exe` sits directly
+            // in the vendor folder and owns no suite.
+            if child.contains('.') {
+                return None;
+            }
+            if GENERIC.contains(&vendor.to_lowercase().as_str()) {
+                return None;
+            }
+            return Some((vendor.to_string(), child.to_string()));
+        }
+        None
+    }
+
+    /// Suite grouping the 电脑管家 habit: H3C Workspace spreads one product
+    /// across `H3C\Workspace`, `H3C\SpaceAgent`, `H3C\Workspace\Device
+    /// Redirect\…` and each stub binary ships no version strings, so rows
+    /// scattered into singleton groups and 其他软件. A vendor folder hosting
+    /// two or more distinct product sub-folders across the scan *is* the
+    /// product identity — fold every weakly-attributed row into it. Rows a
+    /// PE honestly named (微信, Microsoft Edge) keep their own groups. When a
+    /// `Workspace` sub-folder exists the group reads 厂商 Workspace, the
+    /// suite's own product name, rather than a bare vendor letter.
+    fn attribute_vendor_suites(entries: &mut [StartupEntry]) {
+        use std::collections::{HashMap, HashSet};
+        let mut families: HashMap<String, (String, HashSet<String>)> = HashMap::new();
+        for entry in entries.iter() {
+            let path = if entry.target.is_empty() {
+                &entry.command
+            } else {
+                &entry.target
+            };
+            let Some((vendor, child)) = suite_path(path) else {
+                continue;
+            };
+            let family = families
+                .entry(vendor.to_lowercase())
+                .or_insert_with(|| (vendor.clone(), HashSet::new()));
+            family.1.insert(child.to_lowercase());
+        }
+        for entry in entries.iter_mut() {
+            // Merge weakly-attributed rows: nothing found, the "product
+            // name" echoes the technical key, or it is a bare ASCII label
+            // (H3C's stubs self-name  PrintDaemon / VDI USB Redirect  —
+            // components, not products). A PE that carries a real human
+            // product name (微信, Microsoft Edge-style CJK naming included)
+            // keeps its own group.
+            let honest = entry.named && !entry.display_name.eq_ignore_ascii_case(&entry.name);
+            if honest && has_cjk(&entry.display_name) {
+                continue;
+            }
+            let path = if entry.target.is_empty() {
+                &entry.command
+            } else {
+                &entry.target
+            };
+            let Some((vendor, _)) = suite_path(path) else {
+                continue;
+            };
+            let Some((vendor_label, children)) = families.get(&vendor.to_lowercase()) else {
+                continue;
+            };
+            if children.len() < 2 {
+                continue;
+            }
+            entry.display_name = if children.iter().any(|child| child == "workspace") {
+                format!("{vendor_label} Workspace")
+            } else {
+                vendor_label.clone()
+            };
+            entry.named = true;
+        }
     }
 
     /// One batched signature grade over every resolved target, then stamp the
@@ -2393,11 +2491,109 @@ mod windows {
     #[cfg(test)]
     mod tests {
         use super::{
-            approved_enabled, clean_module_path, exe_from_command, friendly_program_name, has_cjk,
-            is_placeholder_label, module_folder_name, parse_csv_line, split_run_path,
-            task_settings_enabled, windows_store_product, write_approved, CURRENT_VERSION,
+            approved_enabled, attribute_vendor_suites, clean_module_path, exe_from_command,
+            friendly_program_name, has_cjk, is_placeholder_label, module_folder_name,
+            parse_csv_line, split_run_path, suite_path, task_settings_enabled,
+            windows_store_product, write_approved, StartupEntry, CURRENT_VERSION,
         };
         use winreg::RegKey;
+
+        #[test]
+        fn suite_paths_need_a_vendor_and_a_child_folder() {
+            assert_eq!(
+                suite_path(r"C:\Program Files\H3C\Workspace\cameraservice.exe"),
+                Some(("H3C".into(), "Workspace".into()))
+            );
+            assert_eq!(
+                suite_path(r"C:\Program Files (x86)\Common Files\acme\x.exe"),
+                None,
+                "Common Files is not a vendor"
+            );
+            assert_eq!(
+                suite_path(r"C:\Program Files\Tencent\Weixin.exe"),
+                None,
+                "a loose file in Program Files has no suite"
+            );
+        }
+
+        #[test]
+        fn the_live_scan_folds_h3c_into_one_suite_group() {
+            // The real complaint on the H3C VDI machine: cameraservice,
+            // SpaceAgent and the Device Redirect services scattered across
+            // singleton groups and 其他软件 despite sharing no version
+            // strings. Skips silently off the affected hardware.
+            if !std::path::Path::new(r"C:\Program Files\H3C\Workspace").exists() {
+                eprintln!("skipping: no H3C Workspace on this machine");
+                return;
+            }
+            let entries = super::scan_startup();
+            let h3c: Vec<_> = entries
+                .iter()
+                .filter(|entry| {
+                    entry
+                        .target
+                        .to_lowercase()
+                        .starts_with(r"c:\program files\h3c\")
+                })
+                .collect();
+            assert!(!h3c.is_empty(), "H3C rows vanished from the scan");
+            assert!(
+                h3c.iter()
+                    .all(|entry| entry.display_name == "H3C Workspace"),
+                "H3C rows split: {:?}",
+                h3c.iter()
+                    .map(|entry| (&entry.name, &entry.display_name))
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        #[test]
+        fn one_vendor_two_products_fold_into_a_suite_group() {
+            fn entry(name: &str, target: &str) -> StartupEntry {
+                StartupEntry {
+                    id: format!("svc|{name}"),
+                    name: name.into(),
+                    command: target.into(),
+                    display_name: name.into(),
+                    icon: None,
+                    target: target.into(),
+                    target_exists: true,
+                    trigger: "boot".into(),
+                    system_item: false,
+                    signature: String::new(),
+                    signer: None,
+                    source: "service".into(),
+                    source_label: "服务（自动启动）".into(),
+                    scope: "machine".into(),
+                    enabled: true,
+                    named: false,
+                }
+            }
+            let mut entries = vec![
+                entry(
+                    "CameraRedirectService",
+                    r"C:\Program Files\H3C\Workspace\cameraservice.exe",
+                ),
+                entry(
+                    "PrintDaemon",
+                    r"C:\Program Files\H3C\Workspace\Device Redirect\PrintRedir\PrintDaemon.exe",
+                ),
+                entry(
+                    "SpaceAgent",
+                    r"C:\Program Files\H3C\SpaceAgent\SpaceAgent.exe",
+                ),
+                // Honest PE names never merge, even under a suite vendor.
+                entry("Weixin", r"C:\Program Files\Tencent\Weixin\Weixin.exe"),
+            ];
+            entries[3].display_name = "微信".into();
+            entries[3].named = true;
+            attribute_vendor_suites(&mut entries);
+            for entry in &entries[..3] {
+                assert_eq!(entry.display_name, "H3C Workspace", "{}", entry.name);
+                assert!(entry.named);
+            }
+            assert_eq!(entries[3].display_name, "微信");
+        }
 
         #[test]
         fn store_packages_are_attributed_by_their_package_folder() {
