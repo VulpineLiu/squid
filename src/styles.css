@@ -8448,3 +8448,198 @@ html.widget-mode body {
   gap: 10px;
   margin-top: 14px;
 }
+
+/* ── CleanBar ─────────────────────────────────────────────────────────────
+   The one clean-progress language every cleaner page speaks: the confirm
+   strip morphs in place into a per-file progress bar (busy), then settles
+   into a green / amber result banner (done). Colour contract: orange =
+   working, green = everything went, amber = some items stayed behind. */
+.cleanbar {
+  border: 1px solid;
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin: 4px 0 14px;
+  animation: cleanbar-in 0.22s ease-out;
+}
+
+@keyframes cleanbar-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.cleanbar.is-busy {
+  border-color: rgba(var(--nex-primary-rgb), 0.4);
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(var(--nex-primary-rgb), 0.12);
+}
+
+.cleanbar.is-done {
+  border-color: rgba(25, 169, 116, 0.4);
+  background: var(--green-soft);
+}
+
+.cleanbar.is-partial {
+  border-color: rgba(238, 132, 76, 0.45);
+  background: var(--orange-soft);
+}
+
+.cleanbar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cleanbar-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cleanbar-main b {
+  font-size: var(--nex-text-sm);
+  font-weight: var(--nex-weight-semibold);
+  color: var(--nex-ink);
+}
+
+.cleanbar-main small {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-2xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cleanbar-current {
+  font-family: var(--nex-font-mono);
+  font-size: var(--nex-text-3xs) !important;
+  color: var(--nex-muted-soft) !important;
+}
+
+.cleanbar-pct {
+  flex: 0 0 auto;
+  font-family: var(--nex-font-mono);
+  font-size: var(--nex-text-xs);
+  font-weight: var(--nex-weight-bold);
+  color: var(--nex-primary-strong);
+}
+
+.cleanbar-back {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--nex-muted-soft);
+  font-size: var(--nex-text-3xs);
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
+.cleanbar-back:hover {
+  color: var(--nex-primary-strong);
+}
+
+.cleanbar-mark {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+.cleanbar-mark.is-ok {
+  background: var(--green);
+}
+
+.cleanbar-mark.is-warn {
+  background: var(--orange);
+}
+
+.cleanbar .spin.is-primary {
+  color: var(--nex-primary);
+  flex: 0 0 auto;
+}
+
+.cleanbar-track {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(89, 51, 34, 0.08);
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.cleanbar-track > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background:
+    repeating-linear-gradient(
+      115deg,
+      rgba(255, 255, 255, 0.28) 0 10px,
+      rgba(255, 255, 255, 0) 10px 24px
+    ),
+    linear-gradient(90deg, #ff9a68, var(--nex-primary));
+  background-size:
+    34px 100%,
+    100% 100%;
+  animation: cleanbar-stripes 0.9s linear infinite;
+  transition: width 0.35s ease;
+}
+
+.cleanbar-track > span.is-indeterminate {
+  width: 36%;
+  animation:
+    cleanbar-stripes 0.9s linear infinite,
+    cleanbar-sweep 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes cleanbar-stripes {
+  to {
+    background-position:
+      34px 0,
+      0 0;
+  }
+}
+
+@keyframes cleanbar-sweep {
+  from {
+    transform: translateX(-10%);
+  }
+  to {
+    transform: translateX(200%);
+  }
+}
+
+.cleanbar-capsule {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--nex-primary-rgb), 0.35);
+  background: #fff;
+  color: var(--nex-primary-strong);
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-semibold);
+  box-shadow: 0 10px 24px rgba(var(--nex-primary-rgb), 0.22);
+  cursor: pointer;
+}
+
+.cleanbar-skips {
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(238, 132, 76, 0.4);
+}

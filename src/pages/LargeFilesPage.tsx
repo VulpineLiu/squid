@@ -26,7 +26,8 @@ import {
   ProgressCard,
   useToast,
 } from "../components/ui";
-import type { JobProgress, LargeFile } from "../types";
+import { CleanBar } from "../components/CleanBar";
+import type { DeleteResult, JobProgress, LargeFile } from "../types";
 
 const THRESHOLDS = [
   { value: 100 * 1024 * 1024, label: "≥100MB" },
@@ -56,10 +57,13 @@ const DORMANT_SECS = 180 * 86_400;
 export function LargeFilesPage({
   embedded = false,
   onBadge,
+  onHistory,
 }: {
   /** Rendered inside 空间清理 hub: page title hides, stats flow to onBadge. */
   embedded?: boolean;
   onBadge?: (value: string | null) => void;
+  /** Jump to 历史记录 for an undo. */
+  onHistory?: () => void;
 } = {}) {
   const { t, lang } = useI18n();
   const { push } = useToast();
@@ -74,6 +78,9 @@ export function LargeFilesPage({
   const [progress, setProgress] = useState<JobProgress | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
+  const [cleanDone, setCleanDone] = useState<
+    { outcome: DeleteResult; elapsedMs: number } | null
+  >(null);
   const job = useRef<string | null>(null);
 
   const run = useCallback(async () => {
@@ -143,12 +150,19 @@ export function LargeFilesPage({
 
   const confirmDelete = async () => {
     const id = crypto.randomUUID?.() ?? String(Date.now());
+    job.current = id;
     setDeleting(true);
+    setProgress(null);
+    const stop = await subscribeJobProgress(id, (event) => {
+      if (event.event === "tick" || event.event === "deleted") setProgress(event);
+    });
+    const startedAt = Date.now();
     try {
       const outcome = await apiClient.api.largeFilesDelete(id, [...picked], "trash");
       setFiles((current) => current?.filter((f) => !picked.has(f.path)) ?? null);
       setPicked(new Set());
       setConfirming(false);
+      setCleanDone({ outcome, elapsedMs: Date.now() - startedAt });
       push(
         lang === "zh"
           ? `已将 ${outcome.removed} 个大文件移入回收站（${formatBytes(outcome.freed)}），可在「历史记录」撤销`
@@ -158,7 +172,9 @@ export function LargeFilesPage({
     } catch (reason) {
       setError(messageFrom(reason));
     } finally {
+      stop();
       setDeleting(false);
+      job.current = null;
     }
   };
 
@@ -250,6 +266,29 @@ export function LargeFilesPage({
           onCancel={() => {
             if (job.current) void apiClient.api.cancelJob(job.current);
           }}
+        />
+      ) : null}
+
+      {deleting ? (
+        <CleanBar
+          spec={{ phase: "busy" }}
+          progress={progress}
+          noun={["个大文件", "files"]}
+          mode="trash"
+          onHistory={() => onHistory?.()}
+          onDismiss={() => undefined}
+        />
+      ) : null}
+
+      {!deleting && cleanDone ? (
+        <CleanBar
+          spec={{ phase: "done", outcome: cleanDone.outcome, elapsedMs: cleanDone.elapsedMs }}
+          progress={null}
+          noun={["个大文件", "files"]}
+          mode="trash"
+          onHistory={() => onHistory?.()}
+          onDismiss={() => setCleanDone(null)}
+          onRescan={() => void run()}
         />
       ) : null}
 

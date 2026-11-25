@@ -280,6 +280,12 @@ export function useDuplicatesWorkspace(): DuplicatesWorkspace {
       currentJob.current = id;
       setDeleting(true);
       setError(null);
+      setProgress(null);
+      // The delete loop streams the same tick/deleted frames the scan used
+      // to, so the page's in-place CleanBar can count files honestly.
+      const stop = await subscribeJobProgress(id, (event) => {
+        if (event.event === "tick" || event.event === "deleted") setProgress(event);
+      });
       try {
         const outcome = await api.duplicatesDelete(id, result.scanId, selections, mode);
         setSummary(outcome);
@@ -293,6 +299,7 @@ export function useDuplicatesWorkspace(): DuplicatesWorkspace {
         setError(messageFrom(reason));
         return null;
       } finally {
+        stop();
         setDeleting(false);
         currentJob.current = null;
       }

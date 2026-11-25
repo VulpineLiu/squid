@@ -85,10 +85,10 @@ export function SpaceHubPage({
         />
       </div>
       <div className="hub-pane" style={{ display: tab === "dups" ? undefined : "none" }}>
-        <DuplicateFilesPage embedded onBadge={report("dups")} />
+        <DuplicateFilesPage embedded onBadge={report("dups")} onHistory={onHistory} />
       </div>
       <div className="hub-pane" style={{ display: tab === "big" ? undefined : "none" }}>
-        <LargeFilesPage embedded onBadge={report("big")} />
+        <LargeFilesPage embedded onBadge={report("big")} onHistory={onHistory} />
       </div>
     </div>
   );

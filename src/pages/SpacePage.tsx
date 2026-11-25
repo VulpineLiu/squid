@@ -42,6 +42,8 @@ import type {
   PreflightResult,
 } from "../types";
 import type { ScanWorkspace } from "../hooks/useScanWorkspace";
+import { CleanBar } from "../components/CleanBar";
+import { skipGroupOf } from "../lib/skipGroups";
 import {
   Button,
   CATEGORY_META,
@@ -160,61 +162,8 @@ type Cluster = {
 
 /* A⑦: skipped items on the result page are grouped by *why* they were
  * skipped, each group with the concrete next step — Mole's ledger reads as
- * "here is what to do about it", not as a wall of paths. */
-type SkipGroup = {
-  key: string;
-  title: [string, string];
-  hint: [string, string];
-  action?: "rescan";
-};
-
-function skipGroupOf(reason: string): SkipGroup {
-  const lower = reason.toLowerCase();
-  if (lower.includes("running") || lower.includes("占用")) {
-    return {
-      key: "running",
-      title: ["应用正在运行", "应用正在运行"],
-      hint: ["退出这些应用后重新扫描，即可再次选中。", "退出这些应用后重新扫描，即可再次选中。"],
-      action: "rescan",
-    };
-  }
-  if (lower.includes("admin") || lower.includes("管理员")) {
-    return {
-      key: "admin",
-      title: ["需要管理员权限", "需要管理员权限"],
-      hint: [
-        "以管理员身份重新启动 Squid 后再清理这批项目。",
-        "以管理员身份重新启动 Squid 后再清理这批项目。",
-      ],
-      action: "rescan",
-    };
-  }
-  if (lower.includes("已不存在") || lower.includes("no longer") || lower.includes("missing")) {
-    return {
-      key: "gone",
-      title: ["扫描后已消失", "扫描后已消失"],
-      hint: ["这些路径在清理开始前就不在了，无需处理。", "这些路径在清理开始前就不在了，无需处理。"],
-    };
-  }
-  if (lower.includes("whitelist")) {
-    return {
-      key: "whitelist",
-      title: ["命中白名单", "命中白名单"],
-      hint: [
-        "在 设置 → 白名单 中移除对应规则后才会被清理。",
-        "在 设置 → 白名单 中移除对应规则后才会被清理。",
-      ],
-    };
-  }
-  return {
-    key: "protected",
-    title: ["受安全策略保护", "受安全策略保护"],
-    hint: [
-      "这些目录看似缓存，实际可能存有您自己的文件，Squid 不会删除。",
-      "这些目录看似缓存，实际可能存有您自己的文件，Squid 不会删除。",
-    ],
-  };
-}
+ * "here is what to do about it", not as a wall of paths. (The taxonomy
+ * itself lives in lib/skipGroups so CleanBar shares it.) */
 
 /* A③: a cluster is "dormant" when its newest member stopped changing more
  * than 90 days ago — size plus dormancy is what makes a deletion call easy. */
@@ -483,6 +432,7 @@ export function SpacePage({
   const [mode, setMode] = useState<DeleteMode>(deleteMode);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<DeleteResult | null>(null);
+  const [elapsed, setElapsed] = useState<number | null>(null);
   const scanning = cleanup.scanning || purge.scanning;
   const deleting = cleanup.deleting || purge.deleting;
   const inFlight = useRef(false);
@@ -745,6 +695,7 @@ export function SpacePage({
       return;
     }
     setBusy(true);
+    const startedAt = Date.now();
     const merged: DeleteResult = {
       freed: 0,
       freedAllocated: 0,
@@ -775,6 +726,7 @@ export function SpacePage({
       setPreflight(null);
     }
     setResult(merged);
+    setElapsed(Date.now() - startedAt);
     push(
       t(
         `${formatBytes(merged.freedAllocated || merged.freed)} cleaned`,
@@ -941,32 +893,16 @@ export function SpacePage({
             "机器上的其他内容未被改动。",
           )}
         />
-        <div className="hero">
-          <div>
-            <div className="k">{t("Done", "完成")}</div>
-            <div className="n">
-              {formatBytes(result.freedAllocated || result.freed)}{" "}
-              <small>
-                {t("freed", "已释放")} · {formatCount(result.removed)}{" "}
-                {t("items", "项")}
-                {result.failed > 0
-                  ? t(` · ${result.failed} failed`, ` · ${result.failed} 项失败`)
-                  : ""}
-              </small>
-            </div>
-          </div>
-          <div className="acts">
-            <Button variant="ghost" onClick={() => setResult(null)}>
-              {t("Back", "返回")}
-            </Button>
-            <Button variant="secondary" onClick={onHistory}>
-              {t("Open history", "查看历史")}
-            </Button>
-            <Button variant="primary" icon={<ScanSearch size={15} />} onClick={() => void runScan()}>
-              {t("Scan again", "再扫一次")}
-            </Button>
-          </div>
-        </div>
+        <CleanBar
+          spec={{ phase: "done", outcome: result, elapsedMs: elapsed ?? undefined }}
+          progress={null}
+          noun={["个清理项", "items"]}
+          mode={mode}
+          auto={false}
+          showSkips={false}
+          onHistory={onHistory}
+          onDismiss={() => setResult(null)}
+        />
         {result.skipped && result.skipped.length > 0 ? (
           <div className="result-skipped">
             <div className="result-skipped-head">
@@ -1133,20 +1069,15 @@ export function SpacePage({
         </div>
       ) : null}
 
-      {deleting ? (
-        <div className="space-stage-steps">
-          <span className="space-step is-done">
-            ✓ {t("Scan complete", "扫描完成")}
-          </span>
-          <span className="space-step is-now">
-            ◌ {t("Cleaning", "正在清理")}（{formatBytes(selectedStats.total)}）
-          </span>
-          <ProgressCard
-            progress={progress}
-            title={t("Removing selected items", "正在删除已选项目")}
-            onCancel={() => void (cleanup.deleting ? cleanup.cancel() : purge.cancel())}
-          />
-        </div>
+      {busy || deleting ? (
+        <CleanBar
+          spec={{ phase: "busy" }}
+          progress={progress}
+          noun={["个清理项", "items"]}
+          mode={mode}
+          onHistory={onHistory}
+          onDismiss={() => undefined}
+        />
       ) : null}
 
       {error && !scanning ? (

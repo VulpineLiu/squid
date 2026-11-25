@@ -25,7 +25,8 @@ import {
   ProgressCard,
   useToast,
 } from "../components/ui";
-import type { DupGroup } from "../types";
+import { CleanBar } from "../components/CleanBar";
+import type { DeleteResult, DupGroup } from "../types";
 
 const MIN_SIZE_OPTIONS = [
   { value: 1024 * 1024, label: "≥1MB" },
@@ -172,10 +173,13 @@ function DupGroupCard({
 export function DuplicateFilesPage({
   embedded = false,
   onBadge,
+  onHistory,
 }: {
   /** Rendered inside 空间清理 hub: page title hides, stats flow to onBadge. */
   embedded?: boolean;
   onBadge?: (value: string | null) => void;
+  /** Jump to 历史记录 for an undo. */
+  onHistory?: () => void;
 } = {}) {
   const { t, lang } = useI18n();
   const { push } = useToast();
@@ -183,6 +187,9 @@ export function DuplicateFilesPage({
   const [minSize, setMinSize] = useState(1024 * 1024);
   const [extraRoots, setExtraRoots] = useState<string[]>([]);
   const [confirming, setConfirming] = useState(false);
+  const [cleanDone, setCleanDone] = useState<{ outcome: DeleteResult; elapsedMs: number } | null>(
+    null,
+  );
 
   const entries = workspace.visible;
   const groups = entries.map((entry) => entry.group);
@@ -204,9 +211,11 @@ export function DuplicateFilesPage({
   };
 
   const confirmClean = async () => {
-    const outcome = await workspace.clean("trash");
     setConfirming(false);
+    const startedAt = Date.now();
+    const outcome = await workspace.clean("trash");
     if (outcome) {
+      setCleanDone({ outcome, elapsedMs: Date.now() - startedAt });
       push(
         lang === "zh"
           ? `已将 ${outcome.removed} 个副本移入回收站（${formatBytes(outcome.freed)}），可在「历史记录」撤销`
@@ -343,7 +352,35 @@ export function DuplicateFilesPage({
         />
       ) : null}
 
-      {!workspace.scanning && groups.length === 0 && !workspace.result && !workspace.error ? (
+      {workspace.deleting ? (
+        <CleanBar
+          spec={{ phase: "busy" }}
+          progress={workspace.progress}
+          noun={["个副本", "copies"]}
+          mode="trash"
+          onHistory={() => onHistory?.()}
+          onDismiss={() => undefined}
+        />
+      ) : null}
+
+      {!workspace.deleting && cleanDone ? (
+        <CleanBar
+          spec={{ phase: "done", outcome: cleanDone.outcome, elapsedMs: cleanDone.elapsedMs }}
+          progress={null}
+          noun={["个副本", "copies"]}
+          mode="trash"
+          onHistory={() => onHistory?.()}
+          onDismiss={() => setCleanDone(null)}
+          onRescan={() => void workspace.runScan(extraRoots, minSize)}
+        />
+      ) : null}
+
+      {!workspace.scanning &&
+      groups.length === 0 &&
+      !workspace.result &&
+      !workspace.error &&
+      !workspace.deleting &&
+      !cleanDone ? (
         <EmptyState
           icon={<FileQuestion size={26} />}
           title={t("No duplicate scan yet", "还没有扫描过重复文件")}

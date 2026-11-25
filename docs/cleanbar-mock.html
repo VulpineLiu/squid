@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --primary: #f26a33; --primary-strong: #d94f1f; --primary-soft: #fff0e7; --primary-tint: #fff7f2;
+    --primary-rgb: 242,106,51; --ink: #342019; --muted: #7d6256; --muted-soft: #a98f80;
+    --line: rgba(89,51,34,.1); --line-strong: rgba(89,51,34,.16);
+    --paper: #fbf7f2; --canvas: #f5eee7;
+    --green: #19a974; --green-soft: #e5f8f0; --orange: #ee844c; --orange-soft: #fff0e7;
+    --red: #e65a62; --red-soft: #ffeaeb;
+  }
+  body {
+    width: 1320px; background: var(--canvas); color: var(--ink);
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 14px;
+    padding: 30px 40px 44px; font-weight: 540;
+  }
+  h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13.5px; margin-bottom: 26px; }
+  h2 { font-size: 15px; font-weight: 700; margin: 26px 0 10px; color: var(--primary-strong); }
+  h2 span.en { color: var(--muted-soft); font-weight: 540; font-size: 12.5px; margin-left: 8px; }
+  .app { background: #fffdfb; border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 14px 34px rgba(89,51,34,.08); overflow: hidden; }
+  .tabs { display: flex; gap: 4px; padding: 14px 18px 0; border-bottom: 1px solid var(--line); background: #fffdfb; }
+  .tab { padding: 9px 16px 11px; font-size: 14.5px; color: var(--muted); border-radius: 10px 10px 0 0; }
+  .tab.on { color: var(--primary-strong); background: var(--primary-tint);
+    border: 1px solid rgba(var(--primary-rgb),.14); border-bottom: 2px solid var(--primary); font-weight: 620; }
+  .tab .n { font-size: 11.5px; background: var(--primary-soft); color: var(--primary-strong);
+    border-radius: 999px; padding: 1px 7px; margin-left: 6px; }
+  .rows { padding: 14px 18px 6px; }
+  .grp { font-size: 12.5px; color: var(--muted); margin: 8px 0 6px; display: flex; align-items: center; gap: 8px; }
+  .grp::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 9px; font-size: 13.5px; }
+  .row:hover { background: var(--primary-tint); }
+  .cb { width: 15px; height: 15px; border-radius: 4.5px; border: 1.5px solid var(--line-strong); flex: 0 0 auto; }
+  .cb.on { background: var(--primary); border-color: var(--primary); position: relative; }
+  .cb.on::after { content: "✓"; color: #fff; font-size: 11px; position: absolute; left: 2px; top: -1px; }
+  .path { font-family: Consolas, monospace; font-size: 12.5px; color: var(--muted); flex: 1 1 auto;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .size { font-family: Consolas, monospace; font-size: 12.5px; color: var(--ink); }
+  .kept { font-size: 11px; color: var(--green); background: var(--green-soft); border-radius: 999px; padding: 1px 8px; }
+  .fade { opacity: .45; }
+
+  /* ===== CleanBar ===== */
+  .bar-wrap { padding: 12px 18px 16px; }
+  .cleanbar { border-radius: 12px; border: 1px solid; padding: 12px 16px; }
+  .cb-row { display: flex; align-items: center; gap: 14px; }
+  .cb-icon { width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto; display: flex;
+    align-items: center; justify-content: center; font-size: 14px; color: #fff; }
+  .cb-main { flex: 1 1 auto; min-width: 0; }
+  .cb-title { font-size: 14px; font-weight: 650; }
+  .cb-detail { font-size: 12px; margin-top: 3px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; font-family: Consolas, monospace; }
+  .btn { border-radius: 10px; padding: 9px 18px; font-size: 13.5px; font-weight: 620;
+    border: 1px solid var(--line); background: #fff; color: var(--ink); flex: 0 0 auto; }
+  .btn.primary { background: linear-gradient(145deg, #ff9664, var(--primary) 55%, var(--primary-strong));
+    color: #fff; border: none; box-shadow: 0 6px 14px rgba(var(--primary-rgb),.25); }
+  .btn.ghost { border-color: rgba(var(--primary-rgb),.3); color: var(--primary-strong); background: #fff; }
+
+  .ready { background: var(--green-soft); border-color: rgba(25,169,116,.28); }
+  .ready .cb-icon { background: var(--green); }
+  .ready .cb-detail { color: var(--muted); font-family: inherit; }
+  .ready .btn { opacity: .55; }
+
+  .busy { background: #fff; border-color: rgba(var(--primary-rgb),.4); box-shadow: 0 8px 22px rgba(var(--primary-rgb),.14); }
+  .track { height: 10px; border-radius: 999px; background: rgba(89,51,34,.08); margin-top: 10px; overflow: hidden; }
+  .fill { height: 100%; border-radius: 999px; width: 29%;
+    background: linear-gradient(90deg, #ff9a68, var(--primary));
+    background-size: 34px 100%; background-image: repeating-linear-gradient(115deg,
+      rgba(255,255,255,.28) 0 10px, rgba(255,255,255,0) 10px 24px),
+      linear-gradient(90deg, #ff9a68, var(--primary)); }
+  .pct { font-family: Consolas, monospace; font-size: 13.5px; color: var(--primary-strong); font-weight: 700; }
+  .spin { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid rgba(var(--primary-rgb),.25);
+    border-top-color: var(--primary); }
+  .busy .cb-title { color: var(--ink); }
+  .busy .cb-detail { color: var(--muted); font-size: 11.5px; }
+  .cur { max-width: 560px; }
+  .bglink { font-size: 12px; color: var(--muted-soft); border: none; background: none; text-decoration: underline dotted; }
+
+  .done { background: var(--green-soft); border-color: rgba(25,169,116,.4); }
+  .done .cb-icon { background: var(--green); }
+  .done .cb-detail { color: var(--muted); font-family: inherit; }
+  .countdown { font-size: 11.5px; color: var(--muted-soft); }
+
+  .partial { background: var(--orange-soft); border-color: rgba(238,132,76,.45); }
+  .partial .cb-icon { background: var(--orange); }
+  .partial .cb-detail { color: var(--muted); font-family: inherit; }
+
+  .note { font-size: 12px; color: var(--muted-soft); margin: 8px 2px 0; }
+  .pill { display:inline-block; font-size: 11px; background: var(--primary-soft); color: var(--primary-strong);
+    border-radius: 999px; padding: 2px 9px; margin-right: 6px; }
+</style>
+</head>
+<body>
+  <h1>Squid 清理进度交互 · 统一 UI 语言</h1>
+  <div class="sub">重复文件 / 垃圾清理 / 大文件 三处共用同一组件（示意以「重复文件」页为底）。</div>
+
+  <h2>① 清理前 <span class="en">现状不变：底部绿色确认条</span></h2>
+  <div class="app">
+    <div class="tabs">
+      <div class="tab">垃圾清理</div>
+      <div class="tab on">重复文件<span class="n">612 组</span></div>
+      <div class="tab">大文件</div>
+    </div>
+    <div class="rows">
+      <div class="grp">安装包 · 2 个副本 · 共 1.9 GB</div>
+      <div class="row"><span class="cb on"></span><span class="path">C:\Users\34798\Downloads\wxworkwindows-4.1.35.6027.exe</span><span class="size">996 MB</span></div>
+      <div class="row"><span class="kept">建议保留</span><span class="path">D:\Program Files (x86)\WXWork\9999.1.0\WeCom_Setup.exe</span><span class="size">996 MB</span></div>
+    </div>
+    <div class="bar-wrap">
+      <div class="cleanbar ready">
+        <div class="cb-row">
+          <div class="cb-icon">✓</div>
+          <div class="cb-main">
+            <div class="cb-title">已选中 128 个副本 · 预计释放 3.2 GB</div>
+            <div class="cb-detail">其中 2 组将「完全删除」，删除后进入回收站，可从历史撤销</div>
+          </div>
+          <button class="btn primary">清理 128 个副本</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>② 清理中 <span class="en">确认条就地变形 · 真实逐文件进度 · 橙色流光</span></h2>
+  <div class="app">
+    <div class="tabs">
+      <div class="tab">垃圾清理</div>
+      <div class="tab on">重复文件<span class="n">612 组</span></div>
+      <div class="tab">大文件</div>
+    </div>
+    <div class="rows">
+      <div class="grp">安装包 · 2 个副本 · 共 1.9 GB</div>
+      <div class="row fade"><span class="cb on"></span><span class="path">C:\Users\34798\Downloads\wxworkwindows-4.1.35.6027.exe</span><span class="size">996 MB</span></div>
+      <div class="row fade"><span class="kept">建议保留</span><span class="path">D:\Program Files (x86)\WXWork\9999.1.0\WeCom_Setup.exe</span><span class="size">996 MB</span></div>
+    </div>
+    <div class="bar-wrap">
+      <div class="cleanbar busy">
+        <div class="cb-row">
+          <div class="spin"></div>
+          <div class="cb-main">
+            <div class="cb-title">正在清理 37 / 128 个文件 · 已释放 890 MB</div>
+            <div class="cb-detail cur">当前：C:\Users\34798\Downloads\VisualStudioProjSetup-2022.zip（移入回收站）</div>
+          </div>
+          <span class="pct">29%</span>
+          <button class="bglink">转入后台</button>
+        </div>
+        <div class="track"><div class="fill"></div></div>
+      </div>
+      <div class="note"><span class="pill">期间</span>可正常切页签 / 浏览其他页面，任务后台继续；按钮防重复提交；超过 10 秒才出现「转入后台」（缩成右下角小胶囊，点它随时唤回）。</div>
+    </div>
+  </div>
+
+  <h2>③ 清理完成 <span class="en">原地变绿 + 气泡双保险 · 5 秒自动收起</span></h2>
+  <div class="app">
+    <div class="tabs">
+      <div class="tab">垃圾清理</div>
+      <div class="tab on">重复文件<span class="n">604 组</span></div>
+      <div class="tab">大文件</div>
+    </div>
+    <div class="rows">
+      <div class="grp" style="margin-top:2px">已删除的 128 个副本从列表实时消失，组徽标同步减 8 组</div>
+    </div>
+    <div class="bar-wrap">
+      <div class="cleanbar done">
+        <div class="cb-row">
+          <div class="cb-icon">✓</div>
+          <div class="cb-main">
+            <div class="cb-title">清理完成 · 128 个文件已移入回收站 · 释放 3.2 GB</div>
+            <div class="cb-detail">用时 41 秒 · 可从「历史」一键撤销</div>
+          </div>
+          <button class="btn ghost">查看历史</button>
+          <button class="btn">知道了（5s）</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>④ 部分未处理 <span class="en">琥珀色 · 接入现有「未处理原因」分组页</span></h2>
+  <div class="app">
+    <div class="tabs">
+      <div class="tab">垃圾清理</div>
+      <div class="tab on">重复文件<span class="n">605 组</span></div>
+      <div class="tab">大文件</div>
+    </div>
+    <div class="rows">
+      <div class="grp" style="margin-top:2px">与完成态同位置，仅颜色与文案不同</div>
+    </div>
+    <div class="bar-wrap">
+      <div class="cleanbar partial">
+        <div class="cb-row">
+          <div class="cb-icon">!</div>
+          <div class="cb-main">
+            <div class="cb-title">已清理 120 个 · 释放 3.1 GB · 8 个未处理</div>
+            <div class="cb-detail">占用中 5 · 需要管理员 2 · 文件已消失 1 · 用时 38 秒</div>
+          </div>
+          <button class="btn ghost">查看原因并处理</button>
+          <button class="btn">知道了（5s）</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>⑤ 另两页同语言 <span class="en">只换名词，组件/颜色/节奏完全一致</span></h2>
+  <div class="app">
+    <div class="bar-wrap" style="display:flex; flex-direction:column; gap:12px;">
+      <div class="cleanbar busy">
+        <div class="cb-row">
+          <div class="spin"></div>
+          <div class="cb-main">
+            <div class="cb-title">正在清理 214 / 986 项 · 已释放 2.4 GB</div>
+            <div class="cb-detail cur">当前：Chrome 缓存 · index-dir\…（阶段 2/3：浏览器缓存）</div>
+          </div>
+          <span class="pct">22%</span>
+          <button class="bglink">转入后台</button>
+        </div>
+        <div class="track"><div class="fill" style="width:22%"></div></div>
+      </div>
+      <div class="cleanbar busy">
+        <div class="cb-row">
+          <div class="spin"></div>
+          <div class="cb-main">
+            <div class="cb-title">正在清理 4 / 12 个大文件 · 已释放 6.8 GB</div>
+            <div class="cb-detail cur">当前：D:\VMs\Ubuntu-24.04-disk001.vmdk（移入回收站）</div>
+          </div>
+          <span class="pct">33%</span>
+          <button class="bglink">转入后台</button>
+        </div>
+        <div class="track"><div class="fill" style="width:33%"></div></div>
+      </div>
+      <div class="cleanbar done">
+        <div class="cb-row">
+          <div class="cb-icon">✓</div>
+          <div class="cb-main">
+            <div class="cb-title">清理完成 · 986 项已处理 · 释放 11.6 GB</div>
+            <div class="cb-detail">回收站未清空前仍可恢复 · 用时 1 分 12 秒</div>
+          </div>
+          <button class="btn ghost">查看历史</button>
+          <button class="btn">知道了（5s）</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
