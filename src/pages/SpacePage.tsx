@@ -45,14 +45,18 @@ import type { ScanWorkspace } from "../hooks/useScanWorkspace";
 import { CleanBar } from "../components/CleanBar";
 import { skipGroupOf } from "../lib/skipGroups";
 import {
+  Badge,
   Button,
   CATEGORY_META,
   CATEGORY_ORDER,
   Checkbox,
   ConfirmDialog,
   InlineError,
+  Notice,
   ProgressCard,
-  SectionTitle,
+  Row,
+  Section,
+  Segmented,
   categoryLabel,
   lockLabel,
   useToast,
@@ -257,55 +261,63 @@ function ClusterRow({
   const dormancy = clusterDormancy(cluster);
   return (
     <>
-      <div className="space-rule" onClick={onOpen}>
-        <Checkbox
-          checked={allOn}
-          disabled={cluster.removable === 0}
-          onChange={() => onTick(!allOn)}
-          label={cluster.label}
-        />
-        <span className="space-rule-name">{cluster.label}</span>
-        {dormancy !== null && dormancy >= DORMANT_SECS ? (
-          <span className="space-rule-dormant">
-            {t(
-              `${ageLabel(dormancy, "en").replace(" untouched", "")} dormant`,
-              ageLabel(dormancy, "zh").replace("未修改", "未使用"),
-            )}
-          </span>
-        ) : null}
-        <span className="space-rule-cnt">
-          {t(
-            `${formatCount(cluster.entries.length)} location(s)`,
-            `${formatCount(cluster.entries.length)} 个位置`,
-          )}
-        </span>
-        <span className="space-rule-acts">
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onIgnore();
-            }}
-          >
-            {t("Ignore", "忽略")}
-          </button>
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onOpen();
-            }}
-          >
-            {t("Paths", "查看路径")}
-          </button>
-        </span>
-        <span className="space-rule-size">{formatBytes(cluster.total)}</span>
-        <ChevronRight
-          className={`space-rule-chv ${open ? "is-open" : ""}`}
-          size={13}
-          aria-hidden="true"
-        />
-      </div>
+      <Row
+        className="space-rule"
+        leading={
+          <Checkbox
+            checked={allOn}
+            disabled={cluster.removable === 0}
+            onChange={() => onTick(!allOn)}
+            label={cluster.label}
+          />
+        }
+        title={cluster.label}
+        tags={
+          dormancy !== null && dormancy >= DORMANT_SECS ? (
+            <Badge tone="warning">
+              {t(
+                `${ageLabel(dormancy, "en").replace(" untouched", "")} dormant`,
+                ageLabel(dormancy, "zh").replace("未修改", "未使用"),
+              )}
+            </Badge>
+          ) : undefined
+        }
+        subtitle={t(
+          `${formatCount(cluster.entries.length)} location(s)`,
+          `${formatCount(cluster.entries.length)} 个位置`,
+        )}
+        trailing={
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(event) => {
+                event.stopPropagation();
+                onIgnore();
+              }}
+            >
+              {t("Ignore", "忽略")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpen();
+              }}
+            >
+              {t("Paths", "查看路径")}
+            </Button>
+            <span className="space-rule-size">{formatBytes(cluster.total)}</span>
+            <ChevronRight
+              className={`space-rule-chv ${open ? "is-open" : ""}`}
+              size={13}
+              aria-hidden="true"
+            />
+          </>
+        }
+        onClick={onOpen}
+      />
       {open ? (
         <div className="space-rule-paths">
           {cluster.entries.map((entry) => (
@@ -328,59 +340,56 @@ function AccItem({ entry }: { entry: Entry }) {
   const evidence = item.evidence ?? [];
   return (
     <>
-      <div
+      <Row
         className={`space-item ${item.lock ? "is-locked" : ""}`}
+        leading={
+          <Checkbox
+            checked={checked}
+            disabled={Boolean(item.lock)}
+            onChange={() => source.toggleItem(index)}
+            label={item.label}
+          />
+        }
+        title={item.label}
+        subtitle={
+          item.lock
+            ? lockLabel(item.lock, t)
+            : [item.lastWriteSecs != null ? ageLabel(item.lastWriteSecs, lang) : null, item.note]
+                .filter(Boolean)
+                .join(" · ")
+        }
+        detail={shortPath(item.displayPath, 96)}
+        muted={Boolean(item.lock)}
+        tags={
+          evidence.length > 0 ? (
+            <button
+              type="button"
+              className={`chip ${
+                evidence.some(
+                  (token) => token.startsWith("modified:") && Number(token.slice(9)) > 0,
+                )
+                  ? "is-active"
+                  : ""
+              }`}
+              onClick={(event) => {
+                event.stopPropagation();
+                setShowEvidence((current) => !current);
+              }}
+            >
+              {showEvidence
+                ? t("Hide evidence", "收起依据")
+                : t("Why safe · evidence", "可删依据")}
+            </button>
+          ) : undefined
+        }
+        trailing={
+          <>
+            <span className="space-item-size">{formatBytes(item.onDisk)}</span>
+            <ArrowUpRight className="space-item-go" size={14} />
+          </>
+        }
         onClick={() => void api.revealPath(item.path).catch(() => undefined)}
-        title={t("Open the location in Explorer", "在资源管理器中打开所在位置")}
-      >
-        <Checkbox
-          checked={checked}
-          disabled={Boolean(item.lock)}
-          onChange={() => source.toggleItem(index)}
-          label={item.label}
-        />
-        <span className="space-item-name">{item.label}</span>
-        <span className="space-item-path" title={item.displayPath}>
-          {shortPath(item.displayPath, 96)}
-        </span>
-        {item.lock ? (
-          <span className="space-item-meta is-locked">{lockLabel(item.lock, t)}</span>
-        ) : null}
-        {item.lastWriteSecs != null ? (
-          <span
-            className={`space-item-meta ${item.lastWriteSecs >= DORMANT_SECS ? "is-dormant" : ""}`}
-            title={t(
-              "Newest last-write inside, from the scan walk",
-              "扫描时记录的内部最新写入时间",
-            )}
-          >
-            {ageLabel(item.lastWriteSecs, lang)}
-          </span>
-        ) : null}
-        {evidence.length > 0 ? (
-          <button
-            type="button"
-            className={`space-item-evidence ${
-              evidence.some((token) => token.startsWith("modified:") && Number(token.slice(9)) > 0)
-                ? "is-warn"
-                : ""
-            }`}
-            onClick={(event) => {
-              event.stopPropagation();
-              setShowEvidence((current) => !current);
-            }}
-          >
-            {showEvidence
-              ? t("Hide evidence", "收起依据")
-              : t("Why safe · evidence", "可删依据")}
-          </button>
-        ) : null}
-        {!item.lock && item.note ? (
-          <span className="space-item-meta">{item.note}</span>
-        ) : null}
-        <span className="space-item-size">{formatBytes(item.onDisk)}</span>
-        <ArrowUpRight className="space-item-go" size={14} />
-      </div>
+      />
       {showEvidence ? (
         <div className="space-evidence">
           <strong>{t("Why Squid judges this folder", "Squid 对该目录的判定依据")}</strong>
@@ -886,23 +895,24 @@ export function SpacePage({
   if (result) {
     return (
       <div className="page">
-        <SectionTitle
+        <Section
           title={t("Cleaning finished", "清理完成")}
-          subtitle={t(
+          hint={t(
             "Everything else on this machine is untouched.",
             "机器上的其他内容未被改动。",
           )}
-        />
-        <CleanBar
-          spec={{ phase: "done", outcome: result, elapsedMs: elapsed ?? undefined }}
-          progress={null}
-          noun={["个清理项", "items"]}
-          mode={mode}
-          auto={false}
-          showSkips={false}
-          onHistory={onHistory}
-          onDismiss={() => setResult(null)}
-        />
+        >
+          <CleanBar
+            spec={{ phase: "done", outcome: result, elapsedMs: elapsed ?? undefined }}
+            progress={null}
+            noun={["个清理项", "items"]}
+            mode={mode}
+            auto={false}
+            showSkips={false}
+            onHistory={onHistory}
+            onDismiss={() => setResult(null)}
+          />
+        </Section>
         {result.skipped && result.skipped.length > 0 ? (
           <div className="result-skipped">
             <div className="result-skipped-head">
@@ -994,18 +1004,15 @@ export function SpacePage({
           <span className="space-config-label">
             {t("Older than", "仅处理早于")}
           </span>
-          <div className="space-seg">
-            {AGE_CHOICES.map((days) => (
-              <button
-                key={days}
-                type="button"
-                className={minAge === days ? "is-on" : ""}
-                onClick={() => setMinAge(days)}
-              >
-                {t(`${days} days`, `${days}天`)}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            value={minAge}
+            label={t("Older than", "仅处理早于")}
+            onChange={setMinAge}
+            options={AGE_CHOICES.map((days) => ({
+              value: days,
+              label: t(`${days} days`, `${days}天`),
+            }))}
+          />
         </div>
         <Button
           size="lg"
@@ -1262,56 +1269,51 @@ export function SpacePage({
                   const hidden = hiddenProtected.get(category) ?? 0;
                   return (
                     <div key={category} className={`space-cat ${open ? "is-open" : ""}`}>
-                      <div
+                      <Row
                         className="space-cat-head"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => toggleExpanded(category)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            toggleExpanded(category);
-                          }
-                        }}
-                      >
-                        <Checkbox
-                          checked={groupSelected(category)}
-                          disabled={groupDisabled(category)}
-                          onChange={() => toggleGroup(category)}
-                          label={categoryLabel(category, lang, bin)}
-                        />
-                        <span className={`space-cat-icon tone-${meta.tone}`}>
-                          <Icon size={15} />
-                        </span>
-                        <span className="space-cat-name">
-                          {categoryLabel(category, lang, bin)}
-                        </span>
-                        <span className="space-cat-desc">
-                          {lang === "zh" ? meta.blurbZh : meta.blurbEn}
-                        </span>
-                        <span className="space-cat-n">
-                          {flat
-                            ? t(
-                                `${formatCount(shown.length)} items`,
-                                `${formatCount(shown.length)} 项`,
-                              )
-                            : t(
-                                `${formatCount(clusters.length)} clean-up spots`,
-                                `${formatCount(clusters.length)} 个清理点`,
+                        leading={
+                          <span className="space-cat-lead">
+                            <Checkbox
+                              checked={groupSelected(category)}
+                              disabled={groupDisabled(category)}
+                              onChange={() => toggleGroup(category)}
+                              label={categoryLabel(category, lang, bin)}
+                            />
+                            <span className={`space-cat-icon tone-${meta.tone}`}>
+                              <Icon size={15} />
+                            </span>
+                          </span>
+                        }
+                        title={categoryLabel(category, lang, bin)}
+                        subtitle={lang === "zh" ? meta.blurbZh : meta.blurbEn}
+                        trailing={
+                          <>
+                            <span className="space-cat-n">
+                              {flat
+                                ? t(
+                                    `${formatCount(shown.length)} items`,
+                                    `${formatCount(shown.length)} 项`,
+                                  )
+                                : t(
+                                    `${formatCount(clusters.length)} clean-up spots`,
+                                    `${formatCount(clusters.length)} 个清理点`,
+                                  )}
+                            </span>
+                            <span className={`space-cat-size ${optional ? "is-opt" : ""}`}>
+                              {optional ? `${t("optional", "可选")} ` : ""}
+                              {formatBytes(
+                                shown.reduce((sum, entry) => sum + entry.item.onDisk, 0),
                               )}
-                        </span>
-                        <span className={`space-cat-size ${optional ? "is-opt" : ""}`}>
-                          {optional ? `${t("optional", "可选")} ` : ""}
-                          {formatBytes(
-                            shown.reduce((sum, entry) => sum + entry.item.onDisk, 0),
-                          )}
-                        </span>
-                        <ChevronRight
-                          className="space-cat-chv"
-                          size={15}
-                          aria-hidden="true"
-                        />
-                      </div>
+                            </span>
+                            <ChevronRight
+                              className="space-cat-chv"
+                              size={15}
+                              aria-hidden="true"
+                            />
+                          </>
+                        }
+                        onClick={() => toggleExpanded(category)}
+                      />
                       {open ? (
                         <div className="space-cat-items">
                           {flat
@@ -1409,58 +1411,67 @@ export function SpacePage({
         busy={busy}
         icon={<Trash2 size={23} />}
       >
-        <div className="mode-picker">
-          <button
-            className={mode === "trash" ? "is-active" : ""}
-            onClick={() => setMode("trash")}
-          >
-            <FolderOpen size={17} />
-            <span>{bin}</span>
-          </button>
-          <button
-            className={mode === "permanent" ? "is-active" : ""}
-            onClick={() => setMode("permanent")}
-          >
-            <Trash2 size={17} />
-            <span>{t("Permanent", "永久")}</span>
-          </button>
-        </div>
+        <Segmented
+          value={mode}
+          label={t("Deletion mode", "删除方式")}
+          onChange={setMode}
+          options={[
+            {
+              value: "trash",
+              label: (
+                <>
+                  <FolderOpen size={17} />
+                  {bin}
+                </>
+              ),
+            },
+            {
+              value: "permanent",
+              label: (
+                <>
+                  <Trash2 size={17} />
+                  {t("Permanent", "永久")}
+                </>
+              ),
+            },
+          ]}
+        />
         {selectedUpdaters.count > 0 ? (
-          <div className="confirm-updater-banner">
-            <DownloadCloud size={18} />
-            <div>
-              <strong>
-                {t(
-                  `Includes ${formatCount(selectedUpdaters.count)} update installers (${formatBytes(selectedUpdaters.total)})`,
-                  `其中包含 ${formatCount(selectedUpdaters.count)} 个升级安装包（${formatBytes(selectedUpdaters.total)}）`,
-                )}
-              </strong>
-              <span>
-                {t(
-                  "Apps re-download them when needed. Delete them too?",
-                  "应用需要时会自动重新下载。要一并清理吗？",
-                )}
-              </span>
-            </div>
-            <div className="confirm-updater-actions">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onClick={() => void cleanSelected({ installerOnly: true })}
-              >
-                {t("Only installers", "只清升级包")}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onClick={() => void cleanSelected({ skipInstallers: true })}
-              >
-                {t("Skip installers, clean rest", "跳过升级包，只删其余")}
-              </Button>
-            </div>
-          </div>
+          <Notice
+            icon={<DownloadCloud size={18} />}
+            actions={
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void cleanSelected({ installerOnly: true })}
+                >
+                  {t("Only installers", "只清升级包")}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void cleanSelected({ skipInstallers: true })}
+                >
+                  {t("Skip installers, clean rest", "跳过升级包，只删其余")}
+                </Button>
+              </>
+            }
+          >
+            <strong>
+              {t(
+                `Includes ${formatCount(selectedUpdaters.count)} update installers (${formatBytes(selectedUpdaters.total)})`,
+                `其中包含 ${formatCount(selectedUpdaters.count)} 个升级安装包（${formatBytes(selectedUpdaters.total)}）`,
+              )}
+            </strong>
+            <br />
+            {t(
+              "Apps re-download them when needed. Delete them too?",
+              "应用需要时会自动重新下载。要一并清理吗？",
+            )}
+          </Notice>
         ) : null}
         {preflight && preflight.checked > 0 ? (
           <details className="confirm-preflight">

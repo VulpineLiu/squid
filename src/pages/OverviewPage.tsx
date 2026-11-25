@@ -25,7 +25,9 @@ import {
   Button,
   PageHeader,
   ProgressCard,
-  SectionTitle,
+  Row,
+  Section,
+  Stat,
   UsageBar,
 } from "../components/ui";
 
@@ -59,11 +61,12 @@ function SpecRow({
   t: (en: string, zh: string) => string;
 }) {
   return (
-    <div className="spec-row">
-      <span className="spec-icon">{icon}</span>
-      <span className="spec-label">{label}</span>
-      <strong title={value || undefined}>{value || t("—", "—")}</strong>
-    </div>
+    <Row
+      className="spec-row"
+      leading={<span className="spec-icon">{icon}</span>}
+      title={label}
+      detail={<span title={value || undefined}>{value || t("—", "—")}</span>}
+    />
   );
 }
 
@@ -274,20 +277,20 @@ export function OverviewPage({
       ) : null}
 
       {scanned && !scanning ? (
-        <section className="overview-found">
-          <SectionTitle
-            title={t("What the scan found", "扫描发现")}
-            subtitle={t(
-              "Uncheck anything you want to keep.",
-              "不想清理的项目可以随时取消勾选。",
-            )}
-            action={
-              <Button variant="ghost" size="sm" onClick={() => onNavigate("space")}>
-                {t("Open space cleaning", "打开空间清理")}
-                <ChevronRight size={14} />
-              </Button>
-            }
-          />
+        <Section
+          className="overview-found"
+          title={t("What the scan found", "扫描发现")}
+          hint={t(
+            "Uncheck anything you want to keep.",
+            "不想清理的项目可以随时取消勾选。",
+          )}
+          actions={
+            <Button variant="ghost" size="sm" onClick={() => onNavigate("space")}>
+              {t("Open space cleaning", "打开空间清理")}
+              <ChevronRight size={14} />
+            </Button>
+          }
+        >
           {cleanup.result ? (
             <CategorySummary
               result={cleanup.result}
@@ -296,155 +299,143 @@ export function OverviewPage({
               onInspect={() => onNavigate("space")}
             />
           ) : null}
-        </section>
+        </Section>
       ) : null}
 
-      {/* 指标行 30% / 42% / 28%：处理器+内存共用一框上下分布；存储每盘
-          一行；日常维护三入口竖排放右列，与左两卡等高。独立的「日常维护」
-          区块随此改版取消。 */}
       <section className="overview-metrics">
-        <div className="metric-panel metric-combo">
-          <div className="m-block">
-            <div className="metric-panel-head">
-              <span className="metric-icon tone-blue">
-                <CircleGauge size={18} />
-              </span>
-              <div>
-                <strong>{t("Processor", "处理器")}</strong>
-                <span>
-                  {snapshot
-                    ? `${snapshot.cpu.physical_cores} ${t("cores", "核")} / ${snapshot.cpu.logical_cores} ${t("threads", "线程")}`
-                    : t("Sampling…", "正在采样…")}
-                </span>
-              </div>
-              <b>{Math.round(snapshot?.cpu.total ?? 0)}%</b>
-            </div>
-            <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="blue" />
-            <small>
-              {snapshot?.cpu.brand || t("Processor details unavailable", "暂无处理器信息")}
-            </small>
-          </div>
-          <div className="m-block">
-            <div className="metric-panel-head">
-              <span className="metric-icon tone-violet">
-                <Boxes size={18} />
-              </span>
-              <div>
-                <strong>{t("Memory", "内存")}</strong>
-                <span>
-                  {snapshot
-                    ? `${formatMemory(snapshot.memory.used)} / ${formatMemory(memoryInstalled)}`
-                    : t("Sampling…", "正在采样…")}
-                </span>
-              </div>
-              <b>
-                {Math.round(
-                  snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0,
-                )}
-                %
-              </b>
-            </div>
-            <UsageBar
-              used={snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0}
-              total={100}
-              tone="violet"
-            />
-            <small>
-              {memoryReserved > 0
-                ? t(
-                    `Hardware reserved (integrated graphics): ${formatMemory(memoryReserved)}`,
-                    `硬件保留（含核显）：${formatMemory(memoryReserved)}`,
-                  )
-                : snapshot
+        <Section
+          className="overview-panel overview-performance"
+          icon={<CircleGauge size={16} />}
+          title={t("Live performance", "运行状态")}
+        >
+          <div className="stat-row overview-stat-row">
+            <Stat
+              icon={<Cpu size={15} />}
+              label={t("Processor", "处理器")}
+              value={`${Math.round(snapshot?.cpu.total ?? 0)}%`}
+              hint={
+                snapshot
+                  ? `${snapshot.cpu.physical_cores} ${t("cores", "核")} / ${snapshot.cpu.logical_cores} ${t("threads", "线程")}`
+                  : t("Sampling…", "正在采样…")
+              }
+            >
+              <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="blue" />
+              <small className="stat-note">
+                {snapshot?.cpu.brand || t("Processor details unavailable", "暂无处理器信息")}
+              </small>
+            </Stat>
+            <Stat
+              icon={<Boxes size={15} />}
+              label={t("Memory", "内存")}
+              value={`${Math.round(
+                snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0,
+              )}%`}
+              hint={
+                snapshot
+                  ? `${formatMemory(snapshot.memory.used)} / ${formatMemory(memoryInstalled)}`
+                  : t("Sampling…", "正在采样…")
+              }
+            >
+              <UsageBar
+                used={snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0}
+                total={100}
+                tone="violet"
+              />
+              <small className="stat-note">
+                {memoryReserved > 0
                   ? t(
-                      `${formatCount(snapshot.processes)} processes running`,
-                      `${formatCount(snapshot.processes)} 个进程正在运行`,
+                      `Hardware reserved (integrated graphics): ${formatMemory(memoryReserved)}`,
+                      `硬件保留（含核显）：${formatMemory(memoryReserved)}`,
                     )
-                  : t("Reading activity", "正在读取活动")}
-            </small>
+                  : snapshot
+                    ? t(
+                        `${formatCount(snapshot.processes)} processes running`,
+                        `${formatCount(snapshot.processes)} 个进程正在运行`,
+                      )
+                    : t("Reading activity", "正在读取活动")}
+              </small>
+            </Stat>
           </div>
-        </div>
-        <div className="metric-panel metric-drives">
-          <div className="metric-panel-head">
-            <span className="metric-icon tone-green">
-              <HardDrive size={18} />
-            </span>
-            <div>
-              <strong>{t("Storage", "存储空间")}</strong>
-              <span>
-                {volumes.length > 0
-                  ? t(
-                      `${volumes.length} drives`,
-                      `${volumes.length} 个分区`,
-                    )
-                  : t("Reading volumes…", "正在读取磁盘…")}
-              </span>
-            </div>
-          </div>
-          <div className="drive-list">
+        </Section>
+        <Section
+          className="overview-panel overview-storage"
+          icon={<HardDrive size={16} />}
+          title={t("Storage", "存储空间")}
+          hint={
+            volumes.length > 0
+              ? t(`${volumes.length} drives`, `${volumes.length} 个分区`)
+              : t("Reading volumes…", "正在读取磁盘…")
+          }
+        >
+          <div className="row-list">
             {volumes.slice(0, 4).map((volume) => {
               const usedPercent = percent(volume.total - volume.free, volume.total);
               return (
-                <div className="drive-row" key={volume.mount_point}>
-                  <strong className="drive-name" title={volume.name || undefined}>
-                    {driveLabel(volume)}
-                  </strong>
-                  <span className="drive-bar">
-                    <UsageBar
-                      used={usedPercent}
-                      total={100}
-                      tone={usedPercent > 85 ? "red" : "green"}
-                    />
-                  </span>
-                  <span className="drive-info">
-                    <b className="drive-pct">{Math.round(usedPercent)}%</b>
-                    {t(
-                      `total ${formatBytes(volume.total)} · ${formatBytes(volume.free)} free`,
-                      `总 ${formatBytes(volume.total)} · 可用 ${formatBytes(volume.free)}`,
-                    )}
-                  </span>
-                </div>
+                <Row
+                  key={volume.mount_point}
+                  title={
+                    <span title={volume.name || undefined}>{driveLabel(volume)}</span>
+                  }
+                  subtitle={t(
+                    `total ${formatBytes(volume.total)} · ${formatBytes(volume.free)} free`,
+                    `总 ${formatBytes(volume.total)} · 可用 ${formatBytes(volume.free)}`,
+                  )}
+                  trailing={<b>{Math.round(usedPercent)}%</b>}
+                >
+                  <UsageBar
+                    used={usedPercent}
+                    total={100}
+                    tone={usedPercent > 85 ? "red" : "green"}
+                  />
+                </Row>
               );
             })}
           </div>
-        </div>
-        <div className="quick-col">
-          <button className="quick-card tone-cyan" onClick={() => onNavigate("applications")}>
-            <span className="quick-icon">
-              <AppWindow size={22} />
-            </span>
-            <span className="quick-copy">
-              <strong>{t("Uninstall apps", "卸载应用")}</strong>
-              <small>{t("Remove apps and their leftovers", "连同残留一起彻底移除")}</small>
-            </span>
-            <ChevronRight size={17} />
-          </button>
-          <button className="quick-card tone-indigo" onClick={() => onOpenSpaceTab?.("big")}>
-            <span className="quick-icon">
-              <HardDrive size={22} />
-            </span>
-            <span className="quick-copy">
-              <strong>{t("Large files", "大文件")}</strong>
-              <small>{t("See what is taking up space", "查看空间都被什么占用")}</small>
-            </span>
-            <ChevronRight size={17} />
-          </button>
-          <button className="quick-card tone-violet" onClick={smartScan}>
-            <span className="quick-icon">
-              <Sparkles size={22} />
-            </span>
-            <span className="quick-copy">
-              <strong>{t("Space cleaning", "空间清理")}</strong>
-              <small>
-                {t(
-                  "Caches, logs and build artefacts in one scan",
-                  "一次扫描清掉缓存、垃圾与构建产物",
-                )}
-              </small>
-            </span>
-            <ChevronRight size={17} />
-          </button>
-        </div>
+        </Section>
+        <Section
+          className="overview-panel overview-shortcuts"
+          icon={<Sparkles size={16} />}
+          title={t("Shortcuts", "快捷入口")}
+        >
+          <div className="row-list">
+            <Row
+              leading={
+                <span className="quick-icon">
+                  <AppWindow size={18} />
+                </span>
+              }
+              title={t("Uninstall apps", "卸载应用")}
+              subtitle={t("Remove apps and their leftovers", "连同残留一起彻底移除")}
+              trailing={<ChevronRight size={16} />}
+              onClick={() => onNavigate("applications")}
+            />
+            <Row
+              leading={
+                <span className="quick-icon">
+                  <HardDrive size={18} />
+                </span>
+              }
+              title={t("Large files", "大文件")}
+              subtitle={t("See what is taking up space", "查看空间都被什么占用")}
+              trailing={<ChevronRight size={16} />}
+              onClick={() => onOpenSpaceTab?.("big")}
+            />
+            <Row
+              leading={
+                <span className="quick-icon">
+                  <Sparkles size={18} />
+                </span>
+              }
+              title={t("Space cleaning", "空间清理")}
+              subtitle={t(
+                "Caches, logs and build artefacts in one scan",
+                "一次扫描清掉缓存、垃圾与构建产物",
+              )}
+              trailing={<ChevronRight size={16} />}
+              onClick={smartScan}
+            />
+          </div>
+        </Section>
       </section>
     </div>
   );

@@ -26,13 +26,18 @@ import type { ProcessSample, SystemSnapshot, WidgetPrefs } from "../types";
 import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
 import { ProcessTable } from "../components/ProcessTable";
 import {
+  Badge,
   Button,
   ConfirmDialog,
   Gauge,
+  IconButton,
   InlineError,
   MetricBar,
+  Notice,
   PageHeader,
-  SectionTitle,
+  Row,
+  Section,
+  Tabs,
   Toggle,
   UsageBar,
   useToast,
@@ -132,37 +137,28 @@ export function SystemPage({
       <PageHeader
         title={t("The pulse of your machine", "掌握设备的每一次呼吸")}
         actions={
-          <button
-            className={`refresh-pill ${loading ? "is-busy" : ""}`}
+          <Button
+            variant="secondary"
+            icon={<RefreshCw size={14} className={loading ? "spin" : ""} />}
             onClick={() => void refresh()}
             disabled={loading}
           >
-            <RefreshCw size={14} className={loading ? "spin" : ""} />
             {t("Refresh", "刷新")}
-          </button>
+          </Button>
         }
       />
 
       {error ? <InlineError message={error} /> : null}
 
-      <div className="chip-row page-tabs" role="tablist">
-        {(
-          [
-            ["performance", t("Performance", "性能")],
-            ["processes", t("Processes", "进程")],
-          ] as ["performance" | "processes", string][]
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            role="tab"
-            aria-selected={tab === key}
-            className={`filter-chip ${tab === key ? "is-active" : ""}`}
-            onClick={() => setTab(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        label={t("System sections", "系统分区")}
+        value={tab}
+        onChange={setTab}
+        items={[
+          { id: "performance", label: t("Performance", "性能") },
+          { id: "processes", label: t("Processes", "进程") },
+        ]}
+      />
 
       {tab === "processes" ? (
         <ProcessTable
@@ -174,45 +170,41 @@ export function SystemPage({
       ) : null}
 
       <div className="system-performance" hidden={tab !== "performance"}>
-        <section className={`system-widget-bar ${widget?.enabled ? "is-on" : ""}`}>
-          <span className="system-widget-icon">
-            <MonitorSmartphone size={18} />
-          </span>
-          <div className="system-widget-copy">
-            <strong>{t("Desktop live monitor", "桌面实时监控")}</strong>
-            <span>
-              {t(
-                "Keep these live stats on your desktop. Open the settings from the top of the widget.",
-                "把实时数据固定在桌面；设置可在小工具顶部下拉打开。",
-              )}
-            </span>
-          </div>
-          {widget ? (
-            <div className="system-widget-switch">
-              <span>{widget.enabled ? t("On desktop", "已显示") : t("Hidden", "已隐藏")}</span>
-              <Toggle
-                checked={widget.enabled}
-                disabled={widgetBusy}
-                onChange={(next) => void toggleWidget(next)}
-                label={t("Desktop live monitor", "桌面实时监控")}
-              />
-            </div>
-          ) : (
-            <span className="system-widget-loading">{t("Reading…", "读取中…")}</span>
+        <Notice
+          icon={<MonitorSmartphone size={17} />}
+          actions={
+            widget ? (
+              <div className="row-actions">
+                <Badge tone={widget.enabled ? "success" : "neutral"}>
+                  {widget.enabled ? t("On desktop", "已显示") : t("Hidden", "已隐藏")}
+                </Badge>
+                <Toggle
+                  checked={widget.enabled}
+                  disabled={widgetBusy}
+                  onChange={(next) => void toggleWidget(next)}
+                  label={t("Desktop live monitor", "桌面实时监控")}
+                />
+              </div>
+            ) : (
+              <span>{t("Reading…", "读取中…")}</span>
+            )
+          }
+        >
+          <strong>{t("Desktop live monitor", "桌面实时监控")}</strong>
+          {" — "}
+          {t(
+            "Keep these live stats on your desktop. Open the settings from the top of the widget.",
+            "把实时数据固定在桌面；设置可在小工具顶部下拉打开。",
           )}
-        </section>
+        </Notice>
 
         <div className="system-gauges">
-        <section className="system-gauge-card">
-          <div className="system-gauge-head">
-            <span className="metric-icon tone-primary">
-              <Cpu size={18} />
-            </span>
-            <div>
-              <strong>{t("Processor", "处理器")}</strong>
-              <span>{snapshot?.cpu.brand || t("Reading processor…", "正在读取处理器…")}</span>
-            </div>
-          </div>
+        <Section
+          className="system-gauge-card"
+          icon={<Cpu size={16} />}
+          title={t("Processor", "处理器")}
+          hint={snapshot?.cpu.brand || t("Reading processor…", "正在读取处理器…")}
+        >
           <Gauge
             value={snapshot?.cpu.total ?? 0}
             size={168}
@@ -247,24 +239,20 @@ export function SystemPage({
               </span>
             ))}
           </div>
-        </section>
+        </Section>
 
-        <section className="system-gauge-card">
-          <div className="system-gauge-head">
-            <span className="metric-icon tone-neutral">
-              <Activity size={18} />
-            </span>
-            <div>
-              <strong>{t("Memory", "内存")}</strong>
-              <span>
-                {snapshot
-                  ? `${formatMemoryBytes(snapshot.memory.used)} / ${formatMemoryBytes(
-                      Math.max(snapshot.memory.installed, snapshot.memory.total),
-                    )}`
-                  : t("Reading memory…", "正在读取内存…")}
-              </span>
-            </div>
-          </div>
+        <Section
+          className="system-gauge-card"
+          icon={<Activity size={16} />}
+          title={t("Memory", "内存")}
+          hint={
+            snapshot
+              ? `${formatMemoryBytes(snapshot.memory.used)} / ${formatMemoryBytes(
+                  Math.max(snapshot.memory.installed, snapshot.memory.total),
+                )}`
+              : t("Reading memory…", "正在读取内存…")
+          }
+        >
           <Gauge
             value={memoryPercent}
             size={168}
@@ -304,20 +292,14 @@ export function SystemPage({
               </strong>
             </div>
           </div>
-        </section>
+        </Section>
 
-        <section className="system-gauge-card system-activity-card">
-          <div className="system-gauge-head">
-            <span className="metric-icon tone-primary">
-              <Network size={18} />
-            </span>
-            <div>
-              <strong>{t("Network", "网络")}</strong>
-              <span>
-                {snapshot?.network.primary || t("All interfaces", "全部接口")}
-              </span>
-            </div>
-          </div>
+        <Section
+          className="system-gauge-card system-activity-card"
+          icon={<Network size={16} />}
+          title={t("Network", "网络")}
+          hint={snapshot?.network.primary || t("All interfaces", "全部接口")}
+        >
           <div className="activity-pair">
             <div>
               <span className="activity-arrow is-down">↓</span>
@@ -352,135 +334,136 @@ export function SystemPage({
                 )
               : t("Sampling…", "正在采样…")}
           </div>
-        </section>
+        </Section>
       </div>
 
       {snapshot?.battery?.present ? (
-        <section className="battery-panel">
-          <div className="battery-icon">
-            <BatteryCharging size={24} />
-          </div>
-          <div className="battery-main">
-            <span className="field-label">{t("Battery", "电池")}</span>
-            <strong>{snapshot.battery.percent}%</strong>
-            <span>
+        <Section
+          className="battery-panel"
+          icon={<BatteryCharging size={16} />}
+          title={t("Battery", "电池")}
+          actions={
+            <Badge tone={snapshot.battery.charging ? "success" : "neutral"}>
               {snapshot.battery.charging
                 ? t("Charging", "正在充电")
                 : snapshot.battery.on_ac
                   ? t("Connected to power", "已接通电源")
                   : t("On battery", "使用电池")}
-            </span>
+            </Badge>
+          }
+        >
+          <div className="battery-body">
+            <div className="battery-main">
+              <strong>{snapshot.battery.percent}%</strong>
+            </div>
+            <div className="battery-facts">
+              {snapshot.battery.health_percent !== null ? (
+                <div>
+                  <span>{t("Health", "健康度")}</span>
+                  <strong>{snapshot.battery.health_percent}%</strong>
+                </div>
+              ) : null}
+              {snapshot.battery.cycle_count !== null ? (
+                <div>
+                  <span>{t("Cycles", "循环次数")}</span>
+                  <strong>{snapshot.battery.cycle_count}</strong>
+                </div>
+              ) : null}
+              {snapshot.battery.temperature_c !== null ? (
+                <div>
+                  <span>{t("Temperature", "温度")}</span>
+                  <strong>{snapshot.battery.temperature_c.toFixed(1)}°C</strong>
+                </div>
+              ) : null}
+            </div>
+            <div className="battery-track">
+              <span style={{ width: `${snapshot.battery.percent}%` }} />
+            </div>
           </div>
-          <div className="battery-facts">
-            {snapshot.battery.health_percent !== null ? (
-              <div>
-                <span>{t("Health", "健康度")}</span>
-                <strong>{snapshot.battery.health_percent}%</strong>
-              </div>
-            ) : null}
-            {snapshot.battery.cycle_count !== null ? (
-              <div>
-                <span>{t("Cycles", "循环次数")}</span>
-                <strong>{snapshot.battery.cycle_count}</strong>
-              </div>
-            ) : null}
-            {snapshot.battery.temperature_c !== null ? (
-              <div>
-                <span>{t("Temperature", "温度")}</span>
-                <strong>{snapshot.battery.temperature_c.toFixed(1)}°C</strong>
-              </div>
-            ) : null}
-          </div>
-          <div className="battery-track">
-            <span style={{ width: `${snapshot.battery.percent}%` }} />
-          </div>
-        </section>
+        </Section>
       ) : null}
 
       <div className="system-lower">
-        <section className="process-panel">
-          <SectionTitle
-            title={t("Top processes", "高占用进程")}
-            action={
-              <Button variant="ghost" size="sm" onClick={() => setTab("processes")}>
-                {t("View all processes", "查看全部进程")}
-              </Button>
-            }
-          />
-          <div className="process-head">
-            <span />
-            <span>{t("Process", "进程")}</span>
-            <span>CPU</span>
-            <span>{t("Memory", "内存")}</span>
-            <span />
-          </div>
-          <div className="process-list">
+        <Section
+          className="process-panel"
+          title={t("Top processes", "高占用进程")}
+          actions={
+            <Button variant="ghost" size="sm" onClick={() => setTab("processes")}>
+              {t("View all processes", "查看全部进程")}
+            </Button>
+          }
+        >
+          <div className="row-list">
             {(snapshot?.top_processes ?? []).map((process) => (
-              <div className="process-row" key={process.pid}>
-                <span className="process-dot" />
-                <span className="process-name">
-                  <strong>{process.name}</strong>
-                  <small>PID {process.pid}</small>
-                </span>
-                <span className="process-cpu">{process.cpu.toFixed(1)}%</span>
-                <span className="process-memory">{formatMemoryBytes(process.memory)}</span>
-                <button
-                  className="process-stop"
-                  title={t("Stop process", "结束进程")}
-                  onClick={() => setVictim(process)}
-                >
-                  <Power size={13} />
-                </button>
-              </div>
+              <Row
+                key={process.pid}
+                leading={<span className="process-dot" />}
+                title={process.name}
+                subtitle={`PID ${process.pid}`}
+                tags={
+                  <>
+                    <Badge>CPU {process.cpu.toFixed(1)}%</Badge>
+                    <Badge>{formatMemoryBytes(process.memory)}</Badge>
+                  </>
+                }
+                trailing={
+                  <IconButton
+                    label={t("Stop process", "结束进程")}
+                    onClick={() => setVictim(process)}
+                  >
+                    <Power size={13} />
+                  </IconButton>
+                }
+              />
             ))}
           </div>
-        </section>
+        </Section>
 
-        <section className="health-side">
-          <SectionTitle
-            title={t("Volumes", "磁盘卷")}
-            subtitle={t("Mounted storage and free space.", "已挂载存储与可用空间。")}
-          />
-          <div className="volume-list">
+        <Section
+          className="health-side"
+          title={t("Volumes", "磁盘卷")}
+          hint={t("Mounted storage and free space.", "已挂载存储与可用空间。")}
+        >
+          <div className="row-list">
             {(snapshot?.volumes ?? []).map((volume) => {
               const use = percent(volume.total - volume.free, volume.total);
               return (
-                <div className="volume-row" key={volume.mount_point}>
-                  <span className="metric-icon tone-primary">
-                    <HardDrive size={17} />
-                  </span>
-                  <div>
-                    <strong>{volume.name || volume.mount_point}</strong>
-                    <span>
-                      {formatBytes(volume.free)} {t("free of", "可用，共")}{" "}
-                      {formatBytes(volume.total)}
+                <Row
+                  key={volume.mount_point}
+                  leading={
+                    <span className="metric-icon tone-primary">
+                      <HardDrive size={16} />
                     </span>
-                    <UsageBar
-                      used={volume.total - volume.free}
-                      total={volume.total}
-                      tone={use > 88 ? "danger" : "primary"}
-                    />
-                  </div>
-                  <b>{Math.round(use)}%</b>
-                </div>
+                  }
+                  title={volume.name || volume.mount_point}
+                  subtitle={`${formatBytes(volume.free)} ${t("free of", "可用，共")} ${formatBytes(
+                    volume.total,
+                  )}`}
+                  trailing={<b>{Math.round(use)}%</b>}
+                >
+                  <UsageBar
+                    used={volume.total - volume.free}
+                    total={volume.total}
+                    tone={use > 88 ? "danger" : "primary"}
+                  />
+                </Row>
               );
             })}
           </div>
-          <div className="host-card">
-            <ShieldAlert size={17} />
-            <div>
-              <strong>{snapshot?.host.hostname || t("This computer", "这台电脑")}</strong>
-              <span>
-                {[
-                  snapshot?.host.os_version || snapshot?.host.os_name,
-                  snapshot?.host.arch,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            </div>
+          <div className="row-list">
+            <Row
+              leading={
+                <span className="metric-icon tone-neutral">
+                  <ShieldAlert size={16} />
+                </span>
+              }
+              title={snapshot?.host.hostname || t("This computer", "这台电脑")}
+              subtitle={[snapshot?.host.os_version || snapshot?.host.os_name, snapshot?.host.arch]
+                .filter(Boolean)
+                .join(" · ")}
+            />
           </div>
-        </section>
+        </Section>
       </div>
 
       <div className="system-process-count">

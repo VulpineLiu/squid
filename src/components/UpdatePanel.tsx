@@ -11,7 +11,7 @@ import { useI18n } from "../i18n";
 import { formatBytes } from "../lib/format";
 import type { UpdateFlow } from "../hooks/useUpdateFlow";
 import type { Bootstrap } from "../types";
-import { Button, Toggle } from "./ui";
+import { Badge, Button, Row, Section, Toggle } from "./ui";
 
 function architectureLabel(arch: string): string {
   if (arch === "aarch64") return "ARM64";
@@ -44,14 +44,11 @@ export function UpdatePanel({
       : null;
 
   return (
-    <section className="settings-section update-section">
-      <div className="settings-section-head">
-        <div>
-          <h2>
-            <Sparkles size={18} />
-            {t("Software updates", "软件更新")}
-          </h2>
-        </div>
+    <Section
+      className="update-section"
+      icon={<Sparkles size={16} />}
+      title={t("Software updates", "软件更新")}
+      actions={
         <Button
           variant="secondary"
           size="sm"
@@ -61,22 +58,24 @@ export function UpdatePanel({
         >
           {flow.checking ? t("Checking…", "检查中…") : t("Check now", "立即检查")}
         </Button>
-      </div>
-
-      <div className="update-system-panel">
-        <span className="update-system-icon">
-          <Monitor size={16} />
-        </span>
-        <div className="update-system-copy">
-          <small>{t("Current system", "当前系统")}</small>
-          <strong>
-            {bootstrap.osVersion || bootstrap.osName}
-          </strong>
-        </div>
-        <div className="update-system-facts">
-          <span>{architectureLabel(bootstrap.arch)}</span>
-          <span className="is-app">Squid {bootstrap.version}</span>
-        </div>
+      }
+    >
+      <div className="row-list">
+        <Row
+          leading={
+            <span className="whitelist-icon">
+              <Monitor size={16} />
+            </span>
+          }
+          title={t("Current system", "当前系统")}
+          subtitle={bootstrap.osVersion || bootstrap.osName}
+          tags={
+            <>
+              <Badge>{architectureLabel(bootstrap.arch)}</Badge>
+              <Badge tone="primary">Squid {bootstrap.version}</Badge>
+            </>
+          }
+        />
       </div>
 
       {available && status ? (
@@ -188,17 +187,22 @@ export function UpdatePanel({
         ) : null}
       </div>
 
-      <div className="settings-row">
-        <div>
-          <strong>{t("Check for updates daily", "每天自动检查更新")}</strong>
-          <span>{t("At most once a day, when Squid starts.", "每天最多一次，在启动时进行。")}</span>
-        </div>
-        <Toggle
-          checked={autoCheck}
-          onChange={onAutoCheckChange}
-          label={t("Check for updates automatically", "自动检查更新")}
+      <div className="row-list">
+        <Row
+          title={t("Check for updates daily", "每天自动检查更新")}
+          subtitle={t(
+            "At most once a day, when Squid starts.",
+            "每天最多一次，在启动时进行。",
+          )}
+          trailing={
+            <Toggle
+              checked={autoCheck}
+              onChange={onAutoCheckChange}
+              label={t("Check for updates automatically", "自动检查更新")}
+            />
+          }
         />
       </div>
-    </section>
+    </Section>
   );
 }

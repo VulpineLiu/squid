@@ -19,11 +19,16 @@ import {
 } from "../lib/format";
 import type { HistorySession } from "../types";
 import {
+  Badge,
   Button,
   ConfirmDialog,
   EmptyState,
+  IconButton,
   InlineError,
   PageHeader,
+  Row,
+  Section,
+  Stat,
   useToast,
 } from "../components/ui";
 
@@ -105,25 +110,17 @@ export function HistoryPage() {
       {error ? <InlineError message={error} /> : null}
 
       {sessions.length > 0 ? (
-        <div className="history-summary">
-          <div>
-            <span>{t("Space kept clean", "当前已释放")}</span>
-            <strong>{formatBytes(totalKept)}</strong>
-          </div>
-          <div>
-            <span>{t("Cleanup sessions", "清理记录")}</span>
-            <strong>{formatCount(sessions.length)}</strong>
-          </div>
-          <div>
-            <span>{t("Restorable sessions", "可还原记录")}</span>
-            <strong>
-              {formatCount(
-                sessions.filter(
-                  (session) => session.mode === "trash" && !session.restored,
-                ).length,
-              )}
-            </strong>
-          </div>
+        <div className="stat-row">
+          <Stat label={t("Space kept clean", "当前已释放")} value={formatBytes(totalKept)} />
+          <Stat label={t("Cleanup sessions", "清理记录")} value={formatCount(sessions.length)} />
+          <Stat
+            label={t("Restorable sessions", "可还原记录")}
+            value={formatCount(
+              sessions.filter(
+                (session) => session.mode === "trash" && !session.restored,
+              ).length,
+            )}
+          />
         </div>
       ) : null}
 
@@ -151,50 +148,52 @@ export function HistoryPage() {
               session.entries.some((entry) => entry.trash_path);
             const isOpen = expanded === session.id;
             return (
-              <article
-                key={session.id}
-                className={`history-card ${session.restored ? "is-restored" : ""}`}
-              >
-                <button
-                  className="history-card-head"
-                  onClick={() => setExpanded(isOpen ? null : session.id)}
-                >
-                  <span className={`history-mode ${session.restored ? "is-restored" : ""}`}>
-                    {session.restored ? <RotateCcw size={18} /> : <Trash2 size={18} />}
-                  </span>
-                  <span className="history-main">
-                    <strong>
-                      {session.command.replace(/^Squid · /, "") ||
-                        t("Cleanup", "清理")}
-                    </strong>
-                    <small>
-                      {formatDate(session.started, lang)} ·{" "}
-                      {session.mode === "trash"
-                        ? t(`Moved to ${bin}`, `已移入${bin}`)
-                        : t("Permanently removed", "已永久删除")}
-                    </small>
-                  </span>
-                  <span className="history-count">
-                    <strong>{formatBytes(bytes)}</strong>
-                    <small>
-                      {formatCount(session.removed)} {t("items", "项")}
-                      {session.failed > 0 ? ` · ${session.failed} ${t("failed", "失败")}` : ""}
-                    </small>
-                  </span>
-                  {session.restored ? (
-                    <span className="status-chip is-restored">
-                      <RotateCcw size={11} />
-                      {t("Restored", "已还原")}
+              <article key={session.id} className="section history-card">
+                <Row
+                  className="history-head"
+                  leading={
+                    <span className={`history-mode ${session.restored ? "is-restored" : ""}`}>
+                      {session.restored ? <RotateCcw size={18} /> : <Trash2 size={18} />}
                     </span>
-                  ) : null}
-                  <span className="history-time">
-                    {(session.duration_ms / 1000).toFixed(1)}s
-                  </span>
-                  <ChevronDown
-                    size={17}
-                    className={`history-chevron ${isOpen ? "is-open" : ""}`}
-                  />
-                </button>
+                  }
+                  title={
+                    session.command.replace(/^Squid · /, "") || t("Cleanup", "清理")
+                  }
+                  subtitle={`${formatDate(session.started, lang)} · ${
+                    session.mode === "trash"
+                      ? t(`Moved to ${bin}`, `已移入${bin}`)
+                      : t("Permanently removed", "已永久删除")
+                  }`}
+                  tags={
+                    session.restored ? (
+                      <Badge tone="neutral">
+                        <RotateCcw size={11} />
+                        {t("Restored", "已还原")}
+                      </Badge>
+                    ) : undefined
+                  }
+                  trailing={
+                    <>
+                      <span className="history-count">
+                        <strong>{formatBytes(bytes)}</strong>
+                        <small>
+                          {formatCount(session.removed)} {t("items", "项")}
+                          {session.failed > 0
+                            ? ` · ${session.failed} ${t("failed", "失败")}`
+                            : ""}
+                        </small>
+                      </span>
+                      <span className="history-time">
+                        {(session.duration_ms / 1000).toFixed(1)}s
+                      </span>
+                      <ChevronDown
+                        size={17}
+                        className={`history-chevron ${isOpen ? "is-open" : ""}`}
+                      />
+                    </>
+                  }
+                  onClick={() => setExpanded(isOpen ? null : session.id)}
+                />
 
                 {isOpen ? (
                   <div className="history-detail">
@@ -216,30 +215,29 @@ export function HistoryPage() {
                         </Button>
                       ) : null}
                     </div>
-                    <div className="history-entries">
+                    <div className="row-list history-entries">
                       {session.entries.slice(0, 40).map((entry, index) => (
-                        <div className="history-entry" key={`${entry.path}-${index}`}>
-                          <span className="history-entry-dot" />
-                          <span className="history-entry-copy">
-                            <strong title={entry.path}>{shortPath(entry.path, 78)}</strong>
-                            <small>
-                              {entry.category || entry.kind}
-                              {entry.trash_path
-                                ? ` · ${t(`in ${bin}`, `位于${bin}`)}`
-                                : ""}
-                            </small>
-                          </span>
-                          <span>{formatBytes(entry.allocated || entry.logical)}</span>
-                          <button
-                            className="row-reveal"
-                            title={t("Show in Finder", "在访达中显示")}
-                            onClick={() =>
-                              void api.revealPath(entry.path).catch(() => undefined)
-                            }
-                          >
-                            <ExternalLink size={13} />
-                          </button>
-                        </div>
+                        <Row
+                          key={`${entry.path}-${index}`}
+                          className="history-entry"
+                          title={shortPath(entry.path, 78)}
+                          subtitle={`${entry.category || entry.kind}${
+                            entry.trash_path ? ` · ${t(`in ${bin}`, `位于${bin}`)}` : ""
+                          }`}
+                          trailing={
+                            <>
+                              <span>{formatBytes(entry.allocated || entry.logical)}</span>
+                              <IconButton
+                                label={t("Show in Finder", "在访达中显示")}
+                                onClick={() =>
+                                  void api.revealPath(entry.path).catch(() => undefined)
+                                }
+                              >
+                                <ExternalLink size={13} />
+                              </IconButton>
+                            </>
+                          }
+                        />
                       ))}
                     </div>
                   </div>

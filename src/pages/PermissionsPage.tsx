@@ -4,8 +4,8 @@ import {
   ChevronRight,
   FolderOpen,
   LayoutGrid,
+  Power,
   RefreshCw,
-  Search,
   ShieldCheck,
   Trash2,
   X,
@@ -17,14 +17,22 @@ import { shortPath } from "../lib/format";
 import type { PermissionsWorkspace } from "../hooks/usePermissionsWorkspace";
 import type { StartupItem } from "../types";
 import {
+  Badge,
   Button,
+  Chip,
   ConfirmDialog,
   EmptyState,
   IconButton,
   InlineError,
+  Notice,
   PageHeader,
-  SectionTitle,
+  Row,
+  SearchField,
+  Section,
+  Subhead,
+  Tabs,
   Toggle,
+  Toolbar,
 } from "../components/ui";
 
 function scopeLabel(scope: string, t: (en: string, zh: string) => string): string {
@@ -315,36 +323,32 @@ export function PermissionsPage({
         }
       />
 
-      <div className="perm-tabs" role="tablist">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            role="tab"
-            aria-selected={workspace.tab === tab.id}
-            className={`perm-tab ${workspace.tab === tab.id ? "is-active" : ""}`}
-            onClick={() => workspace.setTab(tab.id)}
-          >
-            {tab.label}
-            <b>{tab.count}</b>
-          </button>
-        ))}
-      </div>
+      <Tabs
+        label={t("Permission sections", "权限管理分区")}
+        value={workspace.tab}
+        onChange={workspace.setTab}
+        items={tabs.map((tab) => ({
+          id: tab.id,
+          label: tab.label,
+          badge: tab.count,
+        }))}
+      />
 
       {workspace.error ? (
         <InlineError message={workspace.error} onDismiss={workspace.dismissError} />
       ) : null}
 
       {workspace.tab === "startup" ? (
-        <section className="settings-section">
-          <SectionTitle
-            title={t("Startup items", "开机启动项")}
-            subtitle={t(
-              `${view.startupEnabledCount} of ${view.startupCount} entries start with Windows.`,
-              `共 ${view.startupCount} 项，其中 ${view.startupEnabledCount} 项已开启。`,
-            )}
-          />
-          <div className="perm-startup-bar">
-            <div className="perm-filter" role="tablist" aria-label={t("Status filter", "状态筛选")}>
+        <Section
+          icon={<Power size={16} />}
+          title={t("Startup items", "开机启动项")}
+          hint={t(
+            `${view.startupEnabledCount} of ${view.startupCount} entries start with Windows.`,
+            `共 ${view.startupCount} 项，其中 ${view.startupEnabledCount} 项已开启。`,
+          )}
+        >
+          <Toolbar>
+            <div className="chip-row" role="group" aria-label={t("Status filter", "状态筛选")}>
               {(
                 [
                   ["all", "All", "全部"],
@@ -353,22 +357,19 @@ export function PermissionsPage({
                   ["leftover", "Leftover", "残留"],
                 ] as const
               ).map(([id, en, zh]) => (
-                <button
+                <Chip
                   key={id}
-                  role="tab"
-                  aria-selected={startupFilter === id}
-                  className={`perm-filter-tab ${startupFilter === id ? "is-active" : ""} ${
-                    id === "leftover" && counts.leftover > 0 ? "has-leftover" : ""
-                  }`}
+                  active={startupFilter === id}
+                  count={counts[id]}
+                  tone={id === "leftover" && counts.leftover > 0 ? "danger" : undefined}
                   onClick={() => setStartupFilter(id)}
                 >
                   {t(en, zh)}
-                  <b>{counts[id]}</b>
-                </button>
+                </Chip>
               ))}
             </div>
-            <div className="perm-startup-tools">
-              <label className="perm-system-toggle">
+            <div className="toolbar-group">
+              <label className="toggle-label">
                 <Toggle
                   checked={showSystem}
                   onChange={setShowSystem}
@@ -376,16 +377,14 @@ export function PermissionsPage({
                 />
                 <span>{t("Show system items", "显示系统项")}</span>
               </label>
-              <label className="search-field">
-                <Search size={14} />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t("Filter by name or path…", "按名称或路径筛选…")}
-                />
-              </label>
+              <SearchField
+                value={query}
+                onChange={setQuery}
+                label={t("Filter startup items", "筛选开机启动项")}
+                placeholder={t("Filter by name or path…", "按名称或路径筛选…")}
+              />
             </div>
-          </div>
+          </Toolbar>
           {orderedGroups.map(([software, items]) => {
             const onCount = items.filter((item) => item.enabled && !isLeftover(item)).length;
             const allOn = onCount === items.length;
@@ -395,32 +394,39 @@ export function PermissionsPage({
             return (
               <div
                 key={software}
-                className={`perm-group-card ${open ? "is-open" : ""} ${
-                  leftovers.length > 0 && leftovers.length === items.length ? "is-leftover" : ""
-                }`}
+                className={`perm-group-card ${open ? "is-open" : ""}`}
               >
-                <h4 className="perm-group" onClick={() => toggleGroupOpen(software)}>
-                  <GroupIcon software={software} items={items} neutral={software === otherName} />
-                  <span className="perm-group-name">{software}</span>
-                  {leftovers.length > 0 ? (
-                    <span className="perm-sig is-leftover">
-                      {t(`${leftovers.length} leftover`, `${leftovers.length} 个残留`)}
-                    </span>
-                  ) : null}
-                  <b className={allOn ? "is-all" : onCount === 0 ? "is-none" : "is-part"}>
-                    {allOn
+                <Row
+                  className="perm-group-head"
+                  leading={
+                    <GroupIcon
+                      software={software}
+                      items={items}
+                      neutral={software === otherName}
+                    />
+                  }
+                  title={
+                    <>
+                      {software}
+                      {leftovers.length > 0 ? (
+                        <Badge tone="danger">
+                          {t(`${leftovers.length} leftover`, `${leftovers.length} 个残留`)}
+                        </Badge>
+                      ) : null}
+                    </>
+                  }
+                  subtitle={
+                    allOn
                       ? t("All on", "全部开启")
                       : onCount === 0
                         ? t("All off", "已全部关闭")
                         : t(
                             `${onCount}/${items.length} on`,
                             `部分开启 ${onCount}/${items.length}`,
-                          )}
-                  </b>
-                  <span
-                    className="perm-group-tail"
-                    onClick={(event) => event.stopPropagation()}
-                  >
+                          )
+                  }
+                  trailing={
+                    <span className="row-actions" onClick={(event) => event.stopPropagation()}>
                     <span
                       className="perm-group-count"
                       onClick={(event) => {
@@ -442,86 +448,94 @@ export function PermissionsPage({
                       onChange={(next) => void workspace.toggleStartupGroup(groupIds, next)}
                       label={`${software} master ${allOn ? "disable" : "enable"}`}
                     />
-                  </span>
-                </h4>
+                    </span>
+                  }
+                  onClick={() => toggleGroupOpen(software)}
+                />
                 {open ? (
-                  <div className="perm-rows">
+                  <div className="row-list perm-rows">
                     {items.map((item) => {
                       const [statusText, statusTone] = statusChip(item, t);
                       const reveal = rowRevealPath(item);
                       return (
-                        <div
-                          className={`settings-row ${
-                            workspace.busyId === item.id ? "is-busy" : ""
-                          } ${isLeftover(item) ? "is-leftover-row" : ""}`}
+                        <Row
                           key={item.id}
-                        >
-                          <div className="perm-row perm-row-noicon">
-                            <div>
-                              <span>
-                                {item.name}{" "}
-                                <em className={`perm-row-tag ${statusTone}`}>{statusText}</em>
-                              </span>
-                              <small title={item.command}>
-                                {item.sourceLabel} · {scopeLabel(item.scope, t)}
-                                {item.command ? ` · ${shortPath(item.command, 72)}` : ""}
-                              </small>
-                              <small className="perm-row-full" title={item.command}>
-                                {item.command || t("(no command line)", "（无命令行记录）")}
-                              </small>
-                            </div>
-                          </div>
-                          <div className="perm-row-actions">
-                            {isLeftover(item) ? (
-                              <Button
-                                size="sm"
-                                variant="danger"
-                                icon={<Trash2 size={13} />}
+                          leading={<RowIcon icon={item.icon} label={item.name} />}
+                          title={item.name}
+                          tags={
+                            <Badge
+                              tone={
+                                statusTone === "is-leftover"
+                                  ? "danger"
+                                  : item.enabled
+                                    ? "success"
+                                    : "neutral"
+                              }
+                            >
+                              {statusText}
+                            </Badge>
+                          }
+                          subtitle={`${item.sourceLabel} · ${scopeLabel(item.scope, t)}`}
+                          detail={
+                            item.command || t("(no command line)", "（无命令行记录）")
+                          }
+                          muted={isLeftover(item)}
+                          busy={workspace.busyId === item.id}
+                          trailing={
+                            <>
+                              {isLeftover(item) ? (
+                                <Button
+                                  size="sm"
+                                  variant="danger"
+                                  icon={<Trash2 size={13} />}
+                                  disabled={workspace.busyId !== null}
+                                  onClick={() => setRemovingIds([item.id])}
+                                >
+                                  {t("Delete entry", "删除启动项")}
+                                </Button>
+                              ) : null}
+                              {reveal ? (
+                                <IconButton
+                                  label={t("Open its folder", "打开所在文件夹")}
+                                  onClick={() => void api.revealPath(reveal).catch(() => {})}
+                                >
+                                  <FolderOpen size={15} />
+                                </IconButton>
+                              ) : null}
+                              <Toggle
+                                checked={item.enabled}
                                 disabled={workspace.busyId !== null}
-                                onClick={() => setRemovingIds([item.id])}
-                              >
-                                {t("Delete entry", "删除启动项")}
-                              </Button>
-                            ) : null}
-                            {reveal ? (
-                              <IconButton
-                                label={t("Open its folder", "打开所在文件夹")}
-                                onClick={() => void api.revealPath(reveal).catch(() => {})}
-                              >
-                                <FolderOpen size={15} />
-                              </IconButton>
-                            ) : null}
-                            <Toggle
-                              checked={item.enabled}
-                              disabled={workspace.busyId !== null}
-                              onChange={(next) => void workspace.toggleStartup(item.id, next)}
-                              label={`${item.name} ${item.enabled ? "disable" : "enable"}`}
-                            />
-                          </div>
-                        </div>
+                                onChange={(next) => void workspace.toggleStartup(item.id, next)}
+                                label={`${item.name} ${item.enabled ? "disable" : "enable"}`}
+                              />
+                            </>
+                          }
+                        />
                       );
                     })}
                     {leftovers.length > 0 && leftovers.length < items.length ? (
-                      <div className="perm-group-leftover-bar">
-                        <AlertTriangle size={13} />
-                        <span>
-                          {t(
-                            `${leftovers.length} leftover entries in this group — their programs are gone.`,
-                            `该组有 ${leftovers.length} 个残留项：程序已不存在，只剩启动配置。`,
-                          )}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          disabled={workspace.busyId !== null}
-                          onClick={() => setRemovingIds(leftovers.map((item) => item.id))}
-                        >
-                          {t(
-                            `Delete ${leftovers.length} leftover(s)`,
-                            `删除 ${leftovers.length} 个残留项`,
-                          )}
-                        </Button>
-                      </div>
+                      <Notice
+                        tone="danger"
+                        icon={<AlertTriangle size={13} />}
+                        actions={
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            disabled={workspace.busyId !== null}
+                            onClick={() => setRemovingIds(leftovers.map((item) => item.id))}
+                          >
+                            {t(
+                              `Delete ${leftovers.length} leftover(s)`,
+                              `删除 ${leftovers.length} 个残留项`,
+                            )}
+                          </Button>
+                        }
+                      >
+                        {t(
+                          `${leftovers.length} leftover entries in this group — their programs are gone.`,
+                          `该组有 ${leftovers.length} 个残留项：程序已不存在，只剩启动配置。`,
+                        )}
+                      </Notice>
                     ) : null}
                   </div>
                 ) : null}
@@ -529,13 +543,13 @@ export function PermissionsPage({
             );
           })}
           {startup.length === 0 ? (
-            <p className="perm-empty">
+            <p className="row-empty">
               {counts.all === 0
                 ? t("No matches.", "没有匹配的项目。")
                 : t("Nothing here under this filter.", "当前筛选下没有项目。")}
             </p>
           ) : null}
-        </section>
+        </Section>
       ) : null}
 
       <ConfirmDialog
@@ -563,67 +577,66 @@ export function PermissionsPage({
       />
 
       {workspace.tab === "extensions" ? (
-        <section className="settings-section">
-          <SectionTitle
-            title={t("Context menu handlers", "右键菜单扩展")}
-            subtitle={t(
-              "Unregistered handlers disappear immediately; Squid keeps a restore recipe for each.",
-              "取消注册后右键菜单立即消失；Squid 为每一项保留恢复配方。",
-            )}
-          />
-          <div className="perm-ext-head">
-            <div className="perm-cats" role="tablist" aria-label={t("Menu surfaces", "菜单位置")}>
+        <Section
+          icon={<LayoutGrid size={16} />}
+          title={t("Context menu handlers", "右键菜单扩展")}
+          hint={t(
+            "Unregistered handlers disappear immediately; Squid keeps a restore recipe for each.",
+            "取消注册后右键菜单立即消失；Squid 为每一项保留恢复配方。",
+          )}
+        >
+          <Toolbar>
+            <div className="chip-row" role="group" aria-label={t("Menu surfaces", "菜单位置")}>
               {extCategories.map((point) => {
                 const entries = groupedExtensions[point];
                 const on = entries.filter((e) => e.registered).length;
                 return (
-                  <button
+                  <Chip
                     key={point}
-                    role="tab"
-                    aria-selected={activeCategory === point}
-                    className={`perm-cat ${activeCategory === point ? "is-active" : ""}`}
+                    active={activeCategory === point}
+                    count={`${on}/${entries.length}`}
                     onClick={() => setExtCat(point)}
                   >
                     {point}
-                    <b>
-                      {on}/{entries.length}
-                    </b>
-                  </button>
+                  </Chip>
                 );
               })}
             </div>
-            <label className="search-field">
-              <Search size={14} />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={t("Filter by name, creator or module…", "按名称、创建者或模块筛选…")}
-              />
-            </label>
-          </div>
+            <SearchField
+              value={query}
+              onChange={setQuery}
+              label={t("Filter context menu handlers", "筛选右键菜单扩展")}
+              placeholder={t("Filter by name, creator or module…", "按名称、创建者或模块筛选…")}
+            />
+          </Toolbar>
           {extGroups.map(([software, items]) => {
             const onCount = items.filter((entry) => entry.registered).length;
             const allOn = onCount === items.length;
             const open = isExtGroupOpen(software);
             return (
               <div key={software} className={`perm-group-card ${open ? "is-open" : ""}`}>
-                <h4 className="perm-group" onClick={() => toggleExtGroupOpen(software)}>
-                  <GroupIcon software={software} items={items} neutral={software === otherName} />
-                  <span className="perm-group-name">{software}</span>
-                  <b className={allOn ? "is-all" : onCount === 0 ? "is-none" : "is-part"}>
-                    {allOn
+                <Row
+                  className="perm-group-head"
+                  leading={
+                    <GroupIcon
+                      software={software}
+                      items={items}
+                      neutral={software === otherName}
+                    />
+                  }
+                  title={software}
+                  subtitle={
+                    allOn
                       ? t("All on", "全部开启")
                       : onCount === 0
                         ? t("All off", "已全部关闭")
                         : t(
                             `${onCount}/${items.length} on`,
                             `部分开启 ${onCount}/${items.length}`,
-                          )}
-                  </b>
-                  <span
-                    className="perm-group-tail"
-                    onClick={(event) => event.stopPropagation()}
-                  >
+                          )
+                  }
+                  trailing={
+                    <span className="row-actions" onClick={(event) => event.stopPropagation()}>
                     <span
                       className="perm-group-count"
                       onClick={(event) => {
@@ -654,37 +667,41 @@ export function PermissionsPage({
                       }}
                       label={`${software} master ${allOn ? "disable" : "enable"}`}
                     />
-                  </span>
-                </h4>
+                    </span>
+                  }
+                  onClick={() => toggleExtGroupOpen(software)}
+                />
                 {open ? (
-                  <div className="perm-rows">
+                  <div className="row-list perm-rows">
                     {items.map((entry) => (
-                      <div
-                        className={`settings-row ${!entry.registered ? "is-muted" : ""} ${
-                          workspace.busyId === entry.id ? "is-busy" : ""
-                        }`}
+                      <Row
                         key={entry.id}
-                      >
-                        <div className="perm-row perm-row-noicon">
-                          <div>
-                            <span>{entry.friendlyName ?? entry.name}</span>
-                            <small title={entry.module ?? entry.handler}>
-                              {entry.publisher
-                                ? `${t("Creator", "创建者")} ${entry.publisher} · `
-                                : ""}
-                              {scopeLabel(entry.scope, t)}
-                              {entry.module ? ` · ${shortPath(entry.module, 56)}` : ""}
-                              {!entry.registered ? ` · ${t("removed", "已移除")}` : ""}
-                            </small>
-                          </div>
-                        </div>
-                        <Toggle
-                          checked={entry.registered}
-                          disabled={workspace.busyId !== null}
-                          onChange={(next) => void workspace.toggleExtension(entry.id, next)}
-                          label={`${entry.name} ${entry.registered ? "remove" : "restore"}`}
-                        />
-                      </div>
+                        title={entry.friendlyName ?? entry.name}
+                        tags={
+                          !entry.registered ? (
+                            <Badge tone="neutral">{t("removed", "已移除")}</Badge>
+                          ) : undefined
+                        }
+                        subtitle={
+                          <>
+                            {entry.publisher
+                              ? `${t("Creator", "创建者")} ${entry.publisher} · `
+                              : ""}
+                            {scopeLabel(entry.scope, t)}
+                          </>
+                        }
+                        detail={entry.module ?? entry.handler}
+                        muted={!entry.registered}
+                        busy={workspace.busyId === entry.id}
+                        trailing={
+                          <Toggle
+                            checked={entry.registered}
+                            disabled={workspace.busyId !== null}
+                            onChange={(next) => void workspace.toggleExtension(entry.id, next)}
+                            label={`${entry.name} ${entry.registered ? "remove" : "restore"}`}
+                          />
+                        }
+                      />
                     ))}
                   </div>
                 ) : null}
@@ -692,19 +709,23 @@ export function PermissionsPage({
             );
           })}
           {extCategories.length === 0 ? (
-            <p className="perm-empty">{t("No matches.", "没有匹配的项目。")}</p>
+            <p className="row-empty">{t("No matches.", "没有匹配的项目。")}</p>
           ) : null}
-        </section>
+        </Section>
       ) : null}
 
       {workspace.tab === "advanced" ? (
-        <section className="settings-section perm-advanced">
-          <div className="perm-adv-note">
+        <Section
+          className="perm-advanced"
+          icon={<ShieldCheck size={16} />}
+          title={t("Advanced startup", "进阶启动项")}
+        >
+          <Notice tone="warning" icon={<AlertTriangle size={13} />}>
             {t(
               "Advanced rows can break boot or logon if changed carelessly — Squid only displays them here, every change records its original value, and nothing is auto-disabled.",
               "进阶区的项目改错了可能影响系统行为——默认只展示不勾选，每一项带数字签名与位置说明；改动会原样记录，可逐项恢复。",
             )}
-          </div>
+          </Notice>
           {workspace.advancedScanning && !workspace.advanced ? (
             <div className="perm-loading">
               <RefreshCw size={18} className="perm-spin" />
@@ -717,7 +738,7 @@ export function PermissionsPage({
             </div>
           ) : null}
           {workspace.advanced && workspace.advanced.entries.length === 0 ? (
-            <p className="perm-empty">
+            <p className="row-empty">
               {t(
                 "No third-party Winlogon hooks, AppInit DLLs, IFEO debuggers or BHOs found — the machine is clean.",
                 "没有发现第三方 Winlogon 挂钩、AppInit DLL、IFEO 调试器或 BHO——系统很干净。",
@@ -735,139 +756,159 @@ export function PermissionsPage({
                   bho: ["Browser helper objects", "浏览器加载项 BHO"],
                 };
                 return (
-                  <div className="perm-adv-group" key={kind}>
-                    <SectionTitle
+                  <div key={kind}>
+                    <Subhead
                       title={t(titles[kind][0], titles[kind][1])}
-                      subtitle={t(`${rows.length} item(s)`, `发现 ${rows.length} 项`)}
+                      hint={t(`${rows.length} item(s)`, `发现 ${rows.length} 项`)}
                     />
-                    {rows.map((entry) => (
-                      <div className="perm-adv-row" key={entry.id}>
-                        <span className={`perm-sig is-${entry.signature}`} title={entry.signer ?? undefined}>
-                          {entry.signature === "microsoft"
-                            ? t("Microsoft signed", "微软签名")
-                            : entry.signature === "vendor"
-                              ? t("Signed by", "已知厂商")
-                              : entry.signature === "unsigned"
-                                ? t("Not signed", "无数字签名")
-                                : entry.signature === "invalid"
-                                  ? t("Signature invalid", "签名无效")
-                                  : t("Signature n/a", "无签名信息")}
-                        </span>
-                        <div className="perm-adv-main">
-                          <b>{entry.name}</b>
-                          <small title={entry.command}>{shortPath(entry.command, 90)}</small>
-                          <small className="perm-adv-loc">{entry.location}</small>
-                          {entry.warning ? (
-                            <small className="perm-adv-warn">{entry.warning}</small>
-                          ) : null}
-                        </div>
-                        <Toggle
-                          checked={entry.enabled}
-                          disabled={workspace.busyId !== null}
-                          onChange={(next) => void workspace.toggleAdvanced(entry.id, next)}
-                          label={entry.name}
+                    <div className="row-list">
+                      {rows.map((entry) => (
+                        <Row
+                          key={entry.id}
+                          title={entry.name}
+                          tags={
+                            <Badge
+                              tone={
+                                entry.signature === "microsoft"
+                                  ? "success"
+                                  : entry.signature === "vendor"
+                                    ? "info"
+                                    : entry.signature === "invalid"
+                                      ? "danger"
+                                      : "warning"
+                              }
+                              title={entry.signer ?? undefined}
+                            >
+                              {entry.signature === "microsoft"
+                                ? t("Microsoft signed", "微软签名")
+                                : entry.signature === "vendor"
+                                  ? t("Signed by", "已知厂商")
+                                  : entry.signature === "unsigned"
+                                    ? t("Not signed", "无数字签名")
+                                    : entry.signature === "invalid"
+                                      ? t("Signature invalid", "签名无效")
+                                      : t("Signature n/a", "无签名信息")}
+                            </Badge>
+                          }
+                          subtitle={shortPath(entry.command, 90)}
+                          detail={
+                            entry.warning
+                              ? `${entry.location} · ${entry.warning}`
+                              : entry.location
+                          }
+                          busy={workspace.busyId === entry.id}
+                          trailing={
+                            <Toggle
+                              checked={entry.enabled}
+                              disabled={workspace.busyId !== null}
+                              onChange={(next) => void workspace.toggleAdvanced(entry.id, next)}
+                              label={entry.name}
+                            />
+                          }
                         />
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 );
               })
           : null}
           {workspace.advanced && workspace.advanced.extras.length > 0 ? (
-            <div className="perm-adv-group">
-              <SectionTitle
+            <div>
+              <Subhead
                 title={t("Automatic services", "服务（自动启动）")}
-                subtitle={t(
+                hint={t(
                   "Services set to start automatically — toggling uses the same rights as Task Manager.",
                   "设置为自动启动的服务；开关与任务管理器同一套权限。",
                 )}
               />
-              {workspace.advanced.extras.map((entry) => (
-                <div className="perm-adv-row" key={entry.id}>
-                  <span className="perm-scope">{scopeLabel(entry.scope, t)}</span>
-                  <div className="perm-adv-main">
-                    <b>{entry.displayName || entry.name}</b>
-                    <small title={entry.command}>{shortPath(entry.command, 90)}</small>
-                    <small className="perm-adv-loc">{entry.sourceLabel}</small>
-                  </div>
-                  <Toggle
-                    checked={entry.enabled}
-                    disabled={workspace.busyId !== null}
-                    onChange={(next) => void workspace.toggleStartup(entry.id, next)}
-                    label={entry.name}
+              <div className="row-list">
+                {workspace.advanced.extras.map((entry) => (
+                  <Row
+                    key={entry.id}
+                    title={entry.displayName || entry.name}
+                    tags={<Badge tone="neutral">{scopeLabel(entry.scope, t)}</Badge>}
+                    subtitle={shortPath(entry.command, 90)}
+                    detail={entry.sourceLabel}
+                    busy={workspace.busyId === entry.id}
+                    trailing={
+                      <Toggle
+                        checked={entry.enabled}
+                        disabled={workspace.busyId !== null}
+                        onChange={(next) => void workspace.toggleStartup(entry.id, next)}
+                        label={entry.name}
+                      />
+                    }
                   />
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           ) : null}
-        </section>
+        </Section>
       ) : null}
 
       {workspace.tab === "popup" ? (
         <>
-          <section className="settings-section">
-            <SectionTitle
-              title={t("Popup blocker", "弹窗拦截")}
-              subtitle={t(
-                `Blocked ${workspace.closedTotal} popup windows since install.`,
-                `累计拦截 ${workspace.closedTotal} 次弹窗。`,
-              )}
-              action={
+          <Section
+            icon={<BellRing size={16} />}
+            title={t("Popup blocker", "弹窗拦截")}
+            hint={t(
+              `Blocked ${workspace.closedTotal} popup windows since install.`,
+              `累计拦截 ${workspace.closedTotal} 次弹窗。`,
+            )}
+            actions={
                 <Toggle
                   checked={view.watcherEnabled}
                   onChange={(next) => void workspace.setWatcher(next)}
                   label={t("Popup blocker switch", "弹窗拦截总开关")}
                 />
-              }
-            />
+            }
+          >
             {workspace.recentClosed.length > 0 ? (
-              <div className="perm-recent">
-                <BellRing size={14} />
-                <span>
-                  {workspace.recentClosed[0].process} · {workspace.recentClosed[0].title}
-                </span>
-              </div>
+              <Notice icon={<BellRing size={13} />}>
+                {workspace.recentClosed[0].process} · {workspace.recentClosed[0].title}
+              </Notice>
             ) : null}
-          </section>
+          </Section>
 
-          <section className="settings-section">
-            <SectionTitle
-              title={t("Rules", "拦截规则")}
-              subtitle={t(
-                "Each rule closes windows from one program whose title contains the text.",
-                "每条规则会关闭指定程序中标题包含该文字的窗口。",
-              )}
-            />
-            <div className="perm-rows">
+          <Section
+            icon={<ShieldCheck size={16} />}
+            title={t("Rules", "拦截规则")}
+            hint={t(
+              "Each rule closes windows from one program whose title contains the text.",
+              "每条规则会关闭指定程序中标题包含该文字的窗口。",
+            )}
+          >
+            <div className="row-list">
               {view.rules.map((rule, index) => (
-                <div className="settings-row" key={`${rule.exe}-${index}`}>
-                  <div className="perm-row">
+                <Row
+                  key={`${rule.exe}-${index}`}
+                  leading={
                     <RowIcon icon={rule.icon} label={rule.exe.split(/[\\/]/).pop() ?? rule.exe} />
-                    <div>
-                      <span>{rule.title}</span>
-                      <small title={rule.exe}>
-                        {shortPath(rule.exe, 64)} ·{" "}
-                        {t(`closed ${rule.closed}×`, `已关闭 ${rule.closed} 次`)}
-                      </small>
-                    </div>
-                  </div>
-                  <div className="perm-row-actions">
-                    <Toggle
-                      checked={rule.enabled}
-                      onChange={(next) => void workspace.toggleRule(index, next)}
-                      label={`${rule.title} ${rule.enabled ? "disable" : "enable"}`}
-                    />
-                    <IconButton
-                      label={t("Remove rule", "删除规则")}
-                      onClick={() => void workspace.removeRule(index)}
-                    >
-                      <Trash2 size={15} />
-                    </IconButton>
-                  </div>
-                </div>
+                  }
+                  title={rule.title}
+                  subtitle={`${shortPath(rule.exe, 64)} · ${t(
+                    `closed ${rule.closed}×`,
+                    `已关闭 ${rule.closed} 次`,
+                  )}`}
+                  trailing={
+                    <>
+                      <Toggle
+                        checked={rule.enabled}
+                        onChange={(next) => void workspace.toggleRule(index, next)}
+                        label={`${rule.title} ${rule.enabled ? "disable" : "enable"}`}
+                      />
+                      <IconButton
+                        label={t("Remove rule", "删除规则")}
+                        onClick={() => void workspace.removeRule(index)}
+                      >
+                        <Trash2 size={15} />
+                      </IconButton>
+                    </>
+                  }
+                />
               ))}
               {view.rules.length === 0 ? (
-                <p className="perm-empty">
+                <p className="row-empty">
                   {t(
                     "No rules yet — pick a window below.",
                     "还没有规则，先从下面的当前窗口里“拦截”一个。",
@@ -875,16 +916,16 @@ export function PermissionsPage({
                 </p>
               ) : null}
             </div>
-          </section>
+          </Section>
 
-          <section className="settings-section">
-            <SectionTitle
-              title={t("Current windows", "当前窗口")}
-              subtitle={t(
-                "Refresh, then block a noisy window or close it once.",
-                "刷新后可直接拦截某个烦人的窗口，或只关闭这一次。",
-              )}
-              action={
+          <Section
+            icon={<LayoutGrid size={16} />}
+            title={t("Current windows", "当前窗口")}
+            hint={t(
+              "Refresh, then block a noisy window or close it once.",
+              "刷新后可直接拦截某个烦人的窗口，或只关闭这一次。",
+            )}
+            actions={
                 <Button
                   variant="ghost"
                   size="sm"
@@ -893,38 +934,38 @@ export function PermissionsPage({
                 >
                   {t("Refresh", "刷新")}
                 </Button>
-              }
-            />
-            <div className="perm-rows">
+            }
+          >
+            <div className="row-list">
               {workspace.windows.map((window) => (
-                <div className="settings-row" key={window.hwnd}>
-                  <div className="perm-row">
-                    <RowIcon icon={window.icon} label={window.process} />
-                    <div>
-                      <span>{window.title}</span>
-                      <small title={window.exe ?? undefined}>{window.process}</small>
-                    </div>
-                  </div>
-                  <div className="perm-row-actions">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={!window.exe}
-                      onClick={() => void workspace.addRule(window.hwnd, "contains")}
-                    >
-                      {t("Block", "拦截")}
-                    </Button>
-                    <IconButton
-                      label={t("Close window", "关闭这个窗口")}
-                      onClick={() => void workspace.closeWindow(window.hwnd)}
-                    >
-                      <X size={15} />
-                    </IconButton>
-                  </div>
-                </div>
+                <Row
+                  key={window.hwnd}
+                  leading={<RowIcon icon={window.icon} label={window.process} />}
+                  title={window.title}
+                  subtitle={window.process}
+                  detail={window.exe ?? undefined}
+                  trailing={
+                    <>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={!window.exe}
+                        onClick={() => void workspace.addRule(window.hwnd, "contains")}
+                      >
+                        {t("Block", "拦截")}
+                      </Button>
+                      <IconButton
+                        label={t("Close window", "关闭这个窗口")}
+                        onClick={() => void workspace.closeWindow(window.hwnd)}
+                      >
+                        <X size={15} />
+                      </IconButton>
+                    </>
+                  }
+                />
               ))}
             </div>
-          </section>
+          </Section>
         </>
       ) : null}
     </div>

@@ -6,7 +6,15 @@ import { useI18n } from "../i18n";
 import { api } from "../lib/api";
 import { messageFrom } from "../lib/format";
 import type { SystemSnapshot, WidgetCorner, WidgetPrefs } from "../types";
-import { InlineError, PageHeader, SectionTitle, Toggle } from "../components/ui";
+import {
+  InlineError,
+  Notice,
+  PageHeader,
+  Row,
+  Section,
+  Select,
+  Toggle,
+} from "../components/ui";
 import { WidgetPanels, useHistory } from "../components/WidgetPanels";
 
 const CORNERS: { id: WidgetCorner; en: string; zh: string }[] = [
@@ -140,64 +148,56 @@ export function WidgetPage() {
 
       {error ? <InlineError message={error} onDismiss={() => setError(null)} /> : null}
 
-      <div className="widget-note">
+      <Notice>
         {t(
           "The widget is a borderless desktop-layer window (below your app windows) that never steals focus; it hides itself when every panel or the master switch is off.",
           "小工具以无边框的桌面层窗口显示：贴在壁纸上、位于其他软件窗口之下，不抢焦点；关闭全部面板或总开关后窗口自动隐藏。",
         )}
-      </div>
+      </Notice>
 
       <div className="widget-grid">
-        <section className="settings-section">
-          <SectionTitle
-            title={t("Panels", "面板")}
-            subtitle={t(
-              "Pick the cards that show on the desktop; the order matches the widget.",
-              "选择要出现在桌面小工具里的卡片，顺序与桌面上的排列一致。",
-            )}
-          />
-          <div className="perm-rows">
+        <Section
+          title={t("Panels", "面板")}
+          hint={t(
+            "Pick the cards that show on the desktop; the order matches the widget.",
+            "选择要出现在桌面小工具里的卡片，顺序与桌面上的排列一致。",
+          )}
+        >
+          <div className="row-list">
             {panels.map((panel) => (
-              <div className="settings-row" key={panel.key}>
-                <div className="perm-row">
-                  <span className="widget-row-ico">{panel.icon}</span>
-                  <div>
-                    <span>{panel.name}</span>
-                    <small>{panel.desc}</small>
-                  </div>
-                </div>
-                <Toggle
-                  checked={prefs[panel.key]}
-                  disabled={!prefs.enabled}
-                  onChange={(next) => patch({ [panel.key]: next })}
-                  label={panel.name}
-                />
-              </div>
+              <Row
+                key={panel.key}
+                leading={<span className="widget-row-ico">{panel.icon}</span>}
+                title={panel.name}
+                subtitle={panel.desc}
+                trailing={
+                  <Toggle
+                    checked={prefs[panel.key]}
+                    disabled={!prefs.enabled}
+                    onChange={(next) => patch({ [panel.key]: next })}
+                    label={panel.name}
+                  />
+                }
+              />
             ))}
           </div>
-        </section>
+        </Section>
 
-        <section className="settings-section">
-          <SectionTitle
-            title={t("Appearance & behaviour", "外观与行为")}
-            subtitle={t(
-              "The widget window stays borderless, desktop-layer and focus-free.",
-              "小工具窗口始终无边框、贴在桌面层、不抢焦点。",
-            )}
-          />
-          <div className="perm-rows">
-            <div className="settings-row">
-              <div className="perm-row">
-                <div>
-                  <span>{t("Opacity", "不透明度")}</span>
-                  <small>
-                    {t(
-                      "100% is fully solid; at most 10% of the desktop shows through.",
-                      "100% 为完全不透明，最多透出 10% 桌面背景",
-                    )}
-                  </small>
-                </div>
-              </div>
+        <Section
+          title={t("Appearance & behaviour", "外观与行为")}
+          hint={t(
+            "The widget window stays borderless, desktop-layer and focus-free.",
+            "小工具窗口始终无边框、贴在桌面层、不抢焦点。",
+          )}
+        >
+          <div className="row-list">
+            <Row
+              title={t("Opacity", "不透明度")}
+              subtitle={t(
+                "100% is fully solid; at most 10% of the desktop shows through.",
+                "100% 为完全不透明，最多透出 10% 桌面背景",
+              )}
+              trailing={
               <input
                 className="widget-range"
                 type="range"
@@ -207,90 +207,73 @@ export function WidgetPage() {
                 disabled={!prefs.enabled}
                 onChange={(event) => patch({ opacity: Number(event.target.value) })}
               />
-            </div>
-            <div className="settings-row">
-              <div className="perm-row">
-                <div>
-                  <span>{t("Refresh rate", "更新频率")}</span>
-                  <small>
-                    {t(
-                      "Sampling interval; higher rates cost a little more power.",
-                      "采样间隔，频率越高越耗电",
-                    )}
-                  </small>
-                </div>
-              </div>
-              <select
-                className="settings-select"
+              }
+            />
+            <Row
+              title={t("Refresh rate", "更新频率")}
+              subtitle={t(
+                "Sampling interval; higher rates cost a little more power.",
+                "采样间隔，频率越高越耗电",
+              )}
+              trailing={
+              <Select
                 value={prefs.intervalMs}
+                label={t("Refresh rate", "更新频率")}
+                options={INTERVALS.map((ms) => ({
+                  value: ms,
+                  label: t(`${ms / 1000} seconds`, `${ms / 1000} 秒`),
+                }))}
                 disabled={!prefs.enabled}
-                onChange={(event) => patch({ intervalMs: Number(event.target.value) })}
-              >
-                {INTERVALS.map((ms) => (
-                  <option key={ms} value={ms}>
-                    {t(`${ms / 1000} seconds`, `${ms / 1000} 秒`)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="settings-row">
-              <div className="perm-row">
-                <div>
-                  <span>{t("Dock corner", "显示位置")}</span>
-                  <small>
-                    {t(
-                      "Where it lands when opened; drag it anywhere afterwards.",
-                      "初次打开停靠的屏幕角，之后可用鼠标拖到任意位置",
-                    )}
-                  </small>
-                </div>
-              </div>
-              <select
-                className="settings-select"
+                onChange={(next) => patch({ intervalMs: next })}
+              />
+              }
+            />
+            <Row
+              title={t("Dock corner", "显示位置")}
+              subtitle={t(
+                "Where it lands when opened; drag it anywhere afterwards.",
+                "初次打开停靠的屏幕角，之后可用鼠标拖到任意位置",
+              )}
+              trailing={
+              <Select
                 value={prefs.corner}
+                label={t("Dock corner", "显示位置")}
+                options={CORNERS.map((corner) => ({
+                  value: corner.id,
+                  label: zh ? corner.zh : corner.en,
+                }))}
                 disabled={!prefs.enabled}
-                onChange={(event) =>
-                  patch({ corner: event.target.value as WidgetCorner })
-                }
-              >
-                {CORNERS.map((corner) => (
-                  <option key={corner.id} value={corner.id}>
-                    {zh ? corner.zh : corner.en}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="settings-row">
-              <div className="perm-row">
-                <div>
-                  <span>{t("Remember folded state", "折叠记忆")}</span>
-                  <small>
-                    {t(
-                      "Keep the collapsed/expanded choice across restarts.",
-                      "记住上次是否折叠，重启后保持",
-                    )}
-                  </small>
-                </div>
-              </div>
+                onChange={(next) => patch({ corner: next })}
+              />
+              }
+            />
+            <Row
+              title={t("Remember folded state", "折叠记忆")}
+              subtitle={t(
+                "Keep the collapsed/expanded choice across restarts.",
+                "记住上次是否折叠，重启后保持",
+              )}
+              trailing={
               <Toggle
                 checked={prefs.rememberCollapsed}
                 disabled={!prefs.enabled}
                 onChange={(next) => patch({ rememberCollapsed: next })}
                 label={t("Remember folded state", "折叠记忆")}
               />
-            </div>
+              }
+            />
           </div>
-        </section>
+        </Section>
       </div>
 
-      <section className="settings-section widget-preview-section">
-        <SectionTitle
-          title={t("Preview", "预览")}
-          subtitle={t(
-            "Live look of the desktop widget (top of the screen).",
-            "桌面小工具的实时效果（屏幕上方）。",
-          )}
-        />
+      <Section
+        className="widget-preview-section"
+        title={t("Preview", "预览")}
+        hint={t(
+          "Live look of the desktop widget (top of the screen).",
+          "桌面小工具的实时效果（屏幕上方）。",
+        )}
+      >
         <div className="widget-preview-stage">
           <div className="widget widget-preview" style={{ opacity: prefs.opacity / 100 }}>
             <div className="wd-card wd-head">
@@ -310,7 +293,7 @@ export function WidgetPage() {
             )}
           </div>
         </div>
-      </section>
+      </Section>
     </div>
   );
 }

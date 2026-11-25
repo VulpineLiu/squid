@@ -15,6 +15,7 @@ import {
   LoaderCircle,
   PackageOpen,
   Puzzle,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -792,6 +793,364 @@ export function SectionTitle({
       </div>
       {action}
     </div>
+  );
+}
+
+/* ── Standard library ─────────────────────────────────────────────────
+   Every page composes these instead of inventing its own tab bar, row,
+   section card or status pill. The matching CSS lives in one place in
+   styles.css under the same names. */
+
+export interface TabItem<T extends string> {
+  id: T;
+  label: ReactNode;
+  icon?: ReactNode;
+  badge?: ReactNode;
+  disabled?: boolean;
+}
+
+export function Tabs<T extends string>({
+  items,
+  value,
+  onChange,
+  label,
+  className = "",
+}: {
+  items: TabItem<T>[];
+  value: T;
+  onChange: (next: T) => void;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <div className={`tabs ${className}`} role="tablist" aria-label={label}>
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          role="tab"
+          aria-selected={value === item.id}
+          disabled={item.disabled}
+          className={`tab ${value === item.id ? "is-active" : ""}`}
+          onClick={() => onChange(item.id)}
+        >
+          {item.icon}
+          <span>{item.label}</span>
+          {item.badge != null ? <b className="tab-badge">{item.badge}</b> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function Chip({
+  active = false,
+  count,
+  tone,
+  onClick,
+  children,
+}: {
+  active?: boolean;
+  count?: ReactNode;
+  tone?: "danger";
+  onClick?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      className={`chip ${active ? "is-active" : ""} ${tone ? `is-${tone}` : ""}`}
+      onClick={onClick}
+    >
+      {children}
+      {count != null ? <b className="chip-count">{count}</b> : null}
+    </button>
+  );
+}
+
+export function Segmented<T extends string | number>({
+  value,
+  options,
+  onChange,
+  label,
+  className = "",
+}: {
+  value: T;
+  options: { value: T; label: ReactNode }[];
+  onChange: (next: T) => void;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <div className={`segmented ${className}`} role="group" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={String(option.value)}
+          type="button"
+          aria-pressed={option.value === value}
+          className={`segmented-item ${option.value === value ? "is-active" : ""}`}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function ChoiceCard({
+  selected,
+  onClick,
+  icon,
+  title,
+  description,
+  disabled = false,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  icon?: ReactNode;
+  title: ReactNode;
+  description?: ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      disabled={disabled}
+      className={`choice-card ${selected ? "is-active" : ""}`}
+      onClick={onClick}
+    >
+      {icon ? <span className="choice-icon">{icon}</span> : null}
+      <span className="choice-copy">
+        <strong>{title}</strong>
+        {description ? <small>{description}</small> : null}
+      </span>
+      <span className="choice-dot" />
+    </button>
+  );
+}
+
+export function Section({
+  icon,
+  title,
+  hint,
+  actions,
+  children,
+  className = "",
+}: {
+  icon?: ReactNode;
+  title: ReactNode;
+  hint?: ReactNode;
+  actions?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`section ${className}`}>
+      <header className="section-head">
+        <div className="section-head-main">
+          {icon ? <span className="section-icon">{icon}</span> : null}
+          <div className="section-copy">
+            <h2>{title}</h2>
+            {hint ? <p>{hint}</p> : null}
+          </div>
+        </div>
+        {actions ? <div className="section-actions">{actions}</div> : null}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+export function Subhead({
+  title,
+  hint,
+  action,
+}: {
+  title: ReactNode;
+  hint?: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="subhead">
+      <div className="subhead-copy">
+        <h3>{title}</h3>
+        {hint ? <span>{hint}</span> : null}
+      </div>
+      {action ? <div className="subhead-action">{action}</div> : null}
+    </div>
+  );
+}
+
+export function Row({
+  leading,
+  title,
+  subtitle,
+  detail,
+  tags,
+  trailing,
+  children,
+  onClick,
+  selected = false,
+  muted = false,
+  busy = false,
+  className = "",
+}: {
+  leading?: ReactNode;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  detail?: ReactNode;
+  tags?: ReactNode;
+  trailing?: ReactNode;
+  children?: ReactNode;
+  onClick?: () => void;
+  selected?: boolean;
+  muted?: boolean;
+  busy?: boolean;
+  className?: string;
+}) {
+  const body = (
+    <>
+      {leading ? <div className="row-leading">{leading}</div> : null}
+      <div className="row-copy">
+        <div className="row-title">
+          <span className="row-title-text">{title}</span>
+          {tags}
+        </div>
+        {subtitle ? <div className="row-sub">{subtitle}</div> : null}
+        {detail ? <div className="row-detail">{detail}</div> : null}
+        {children}
+      </div>
+      {trailing ? <div className="row-trailing">{trailing}</div> : null}
+    </>
+  );
+  const classes = `row ${onClick ? "is-clickable" : ""} ${selected ? "is-selected" : ""} ${
+    muted ? "is-muted" : ""
+  } ${busy ? "is-busy" : ""} ${className}`;
+  return (
+    <div
+      className={classes}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+    >
+      {body}
+    </div>
+  );
+}
+
+export function Badge({
+  tone = "neutral",
+  children,
+  className = "",
+  title,
+}: {
+  tone?: "neutral" | "success" | "warning" | "danger" | "info" | "primary";
+  children: ReactNode;
+  className?: string;
+  title?: string;
+}) {
+  return (
+    <span className={`badge is-${tone} ${className}`} title={title}>
+      {children}
+    </span>
+  );
+}
+
+export function Toolbar({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <div className={`toolbar ${className}`}>{children}</div>;
+}
+
+export function SearchField({
+  value,
+  onChange,
+  placeholder,
+  label,
+  className = "",
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder: string;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <label className={`search-field ${className}`}>
+      <Search size={14} />
+      <input
+        value={value}
+        aria-label={label}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+      />
+    </label>
+  );
+}
+
+export function Notice({
+  tone = "info",
+  icon,
+  children,
+  actions,
+}: {
+  tone?: "info" | "warning" | "danger";
+  icon?: ReactNode;
+  children: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className={`notice is-${tone}`}>
+      {icon ? <span className="notice-icon">{icon}</span> : null}
+      <div className="notice-copy">{children}</div>
+      {actions ? <div className="notice-actions">{actions}</div> : null}
+    </div>
+  );
+}
+
+export function Stat({
+  icon,
+  label,
+  value,
+  hint,
+  tone,
+  children,
+}: {
+  icon?: ReactNode;
+  label: ReactNode;
+  value: ReactNode;
+  hint?: ReactNode;
+  tone?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <section className={`stat ${tone ? `tone-${tone}` : ""}`}>
+      <header className="stat-head">
+        {icon ? <span className="stat-icon">{icon}</span> : null}
+        <span className="stat-label">{label}</span>
+      </header>
+      <strong className="stat-value">{value}</strong>
+      {hint ? <span className="stat-hint">{hint}</span> : null}
+      {children}
+    </section>
   );
 }
 

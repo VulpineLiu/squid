@@ -12,19 +12,25 @@ import { api, subscribeJobProgress } from "../lib/api";
 import { useI18n } from "../i18n";
 import { messageFrom } from "../lib/format";
 import {
+  Badge,
   Button,
   InlineError,
+  Notice,
   PageHeader,
   ProgressCard,
+  Row,
+  Section,
   useToast,
 } from "../components/ui";
 import type { JobProgress, MaintenanceResult, MaintenanceTask } from "../types";
 
-const RISK_CHIP: Record<MaintenanceTask["risk"], [string, string, string]> = {
-  // [class, zh, en]
-  safe: ["is-safe", "安全", "Safe"],
-  admin: ["is-admin", "需要管理员", "Admin rights"],
-  slow: ["is-slow", "较慢", "Slow"],
+const RISK_CHIP: Record<
+  MaintenanceTask["risk"],
+  [tone: "success" | "warning" | "neutral", zh: string, en: string]
+> = {
+  safe: ["success", "安全", "Safe"],
+  admin: ["warning", "需要管理员", "Admin rights"],
+  slow: ["neutral", "较慢", "Slow"],
 };
 
 export function MaintenancePage({
@@ -115,28 +121,56 @@ export function MaintenancePage({
       )}
       {error ? <InlineError message={error} onDismiss={() => setError(null)} /> : null}
 
-      <div className="maint-summary">
-        <ShieldCheck size={15} />
-        <span>
-          {t(
-            "All repairs below touch only system caches / services / indexes — never your documents.",
-            "以下修复只影响系统缓存 / 服务 / 索引，不碰你的文档。",
-          )}
-        </span>
-      </div>
+      <Notice icon={<ShieldCheck size={15} />}>
+        {t(
+          "All repairs below touch only system caches / services / indexes — never your documents.",
+          "以下修复只影响系统缓存 / 服务 / 索引，不碰你的文档。",
+        )}
+      </Notice>
 
-      <ul className="maint-list">
-        {tasks.map((task) => {
-          const [chipClass, chipZh, chipEn] = RISK_CHIP[task.risk];
-          const isRunning = running === task.id;
-          return (
-            <li key={task.id} className={`maint-row ${isRunning ? "is-running" : ""}`}>
-              <span className="maint-icon">
-                <Wrench size={16} />
-              </span>
-              <div className="maint-copy">
-                <b>{lang === "zh" ? task.titleZh : task.titleEn}</b>
-                <small>{lang === "zh" ? task.detailZh : task.detailEn}</small>
+      <Section title={t("Repairs", "修复项目")}>
+        <div className="row-list">
+          {tasks.map((task) => {
+            const [chipTone, chipZh, chipEn] = RISK_CHIP[task.risk];
+            const isRunning = running === task.id;
+            return (
+              <Row
+                key={task.id}
+                className={isRunning ? "is-busy" : ""}
+                leading={
+                  <span className="whitelist-icon">
+                    <Wrench size={16} />
+                  </span>
+                }
+                title={lang === "zh" ? task.titleZh : task.titleEn}
+                subtitle={lang === "zh" ? task.detailZh : task.detailEn}
+                tags={
+                  <>
+                    <Badge tone={chipTone}>{lang === "zh" ? chipZh : chipEn}</Badge>
+                    <Badge>{task.estimate}</Badge>
+                  </>
+                }
+                trailing={
+                  isRunning ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => job.current && void api.cancelJob(job.current)}
+                    >
+                      {t("Cancel", "取消")}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={running !== null}
+                      onClick={() => void runTask(task)}
+                    >
+                      {t("Repair", "修复")}
+                    </Button>
+                  )
+                }
+              >
                 {isRunning && progress ? (
                   <ProgressCard
                     progress={progress}
@@ -152,61 +186,46 @@ export function MaintenancePage({
                     {logs.slice(-8).join("\n")}
                   </pre>
                 ) : null}
-              </div>
-              <span className="maint-estimate">{task.estimate}</span>
-              <span className={`maint-risk ${chipClass}`}>{lang === "zh" ? chipZh : chipEn}</span>
-              {isRunning ? (
-                <Button variant="ghost" size="sm" onClick={() => job.current && void api.cancelJob(job.current)}>
-                  {t("Cancel", "取消")}
-                </Button>
-              ) : (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={running !== null}
-                  onClick={() => void runTask(task)}
-                >
-                  {t("Repair", "修复")}
-                </Button>
-              )}
-            </li>
-          );
-        })}
-        {tasks.length === 0 && !error ? (
-          <li className="maint-row is-muted">
-            <Search size={16} />
-            {t("Loading the repair list…", "正在加载修复清单…")}
-          </li>
-        ) : null}
-      </ul>
+              </Row>
+            );
+          })}
+          {tasks.length === 0 && !error ? (
+            <p className="row-empty">
+              <Search size={16} /> {t("Loading the repair list…", "正在加载修复清单…")}
+            </p>
+          ) : null}
+        </div>
+      </Section>
 
       {result ? (
-        <div className={`maint-result ${result.ok ? "is-ok" : "is-fail"}`}>
-          {result.ok ? <Check size={15} /> : <AlertTriangle size={15} />}
-          <div>
-            <b>
-              {result.ok
-                ? t("Repair completed", "修复完成")
-                : t("Repair stopped early", "修复提前停止")}
-            </b>
-            <ul>
-              {result.steps.map((step, index) => (
-                <li key={index}>
-                  <Activity size={11} /> {step}
-                </li>
-              ))}
-            </ul>
-            {result.outputTail ? (
-              <details>
-                <summary>{t("Command output", "命令输出")}</summary>
-                <pre>{result.outputTail}</pre>
-              </details>
-            ) : null}
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => setResult(null)}>
-            <X size={13} />
-          </Button>
-        </div>
+        <Notice
+          tone={result.ok ? "info" : "danger"}
+          icon={result.ok ? <Check size={15} /> : <AlertTriangle size={15} />}
+          actions={
+            <Button variant="ghost" size="sm" onClick={() => setResult(null)}>
+              <X size={13} />
+            </Button>
+          }
+        >
+          <strong>
+            {result.ok
+              ? t("Repair completed", "修复完成")
+              : t("Repair stopped early", "修复提前停止")}
+          </strong>
+          <ul className="notice-list">
+            {result.steps.map((step, index) => (
+              <li key={index}>
+                <Activity size={11} /> {step}
+              </li>
+            ))}
+          </ul>
+          {result.outputTail ? (
+            <details>
+              <summary>{t("Command output", "命令输出")}</summary>
+              <pre>{result.outputTail}</pre>
+            </details>
+          ) : null}
+        </Notice>
       ) : null}
     </div>
   );

@@ -1,7 +1,7 @@
 import { CopyX, Eraser, FileArchive } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
-import { PageHeader } from "../components/ui";
+import { PageHeader, Tabs } from "../components/ui";
 import { SpacePage } from "./SpacePage";
 import { DuplicateFilesPage } from "./DuplicateFilesPage";
 import { LargeFilesPage } from "./LargeFilesPage";
@@ -49,26 +49,20 @@ export function SpaceHubPage({
       <PageHeader
         title={t("Space cleaning", "空间清理")}
       />
-      <div className="hub-tabs" role="tablist">
-        {TABS.map((item) => {
+      <Tabs
+        label={t("Space cleaning sections", "空间清理分区")}
+        value={tab}
+        onChange={setTab}
+        items={TABS.map((item) => {
           const Icon = item.icon;
-          const badge = badges[item.id];
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === item.id}
-              className={`hub-tab ${tab === item.id ? "is-active" : ""}`}
-              onClick={() => setTab(item.id)}
-            >
-              <Icon size={15} />
-              {t(item.en, item.zh)}
-              {badge ? <b>{badge}</b> : null}
-            </button>
-          );
+          return {
+            id: item.id,
+            label: t(item.en, item.zh),
+            icon: <Icon size={15} />,
+            badge: badges[item.id] ?? undefined,
+          };
         })}
-      </div>
+      />
       <div className="hub-pane" style={{ display: tab === "junk" ? undefined : "none" }}>
         <SpacePage
           embedded

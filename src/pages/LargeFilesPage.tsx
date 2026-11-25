@@ -18,12 +18,18 @@ import { subscribeJobProgress } from "../lib/api";
 import { useI18n } from "../i18n";
 import { agoLabel, formatBytes, formatCount, messageFrom } from "../lib/format";
 import {
+  Badge,
   Button,
   Checkbox,
   EmptyState,
+  IconButton,
   InlineError,
+  Notice,
   PageHeader,
   ProgressCard,
+  Row,
+  Segmented,
+  Toolbar,
   useToast,
 } from "../components/ui";
 import { CleanBar } from "../components/CleanBar";
@@ -191,54 +197,45 @@ export function LargeFilesPage({
 
       <section className="bigfiles-config">
         <span className="dup-config-label">{t("Scope", "范围")}</span>
-        <div className="dup-seg" role="group">
-          <button
-            type="button"
-            className={scope.length === 0 ? "is-active" : ""}
-            onClick={() => setScope([])}
-          >
-            {t("All local drives", "全部本地磁盘")}
-          </button>
-          {["C:", "D:", "E:"].map((drive) => (
-            <button
-              key={drive}
-              type="button"
-              className={scope.length === 1 && scope[0] === `${drive}\\` ? "is-active" : ""}
-              onClick={() => setScope([`${drive}\\`])}
-            >
-              {drive}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          value={scope.length === 1 ? scope[0] : ""}
+          label={t("Scope", "范围")}
+          onChange={(next) => setScope(next ? [next] : [])}
+          options={[
+            { value: "", label: t("All local drives", "全部本地磁盘") },
+            ...["C:", "D:", "E:"].map((drive) => ({
+              value: `${drive}\\`,
+              label: drive,
+            })),
+          ]}
+        />
         <span className="dup-config-label">{t("At least", "阈值")}</span>
-        <div className="dup-seg" role="group">
-          {THRESHOLDS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={threshold === option.value ? "is-active" : ""}
-              onClick={() => setThreshold(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          value={threshold}
+          label={t("At least", "阈值")}
+          onChange={setThreshold}
+          options={THRESHOLDS.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+        />
         <span className="dup-config-label">{t("Type", "类型")}</span>
-        <div className="dup-seg is-classes" role="group">
-          {CLASSES.map((option) => {
+        <Segmented
+          value={klass}
+          label={t("Type", "类型")}
+          onChange={setKlass}
+          options={CLASSES.map((option) => {
             const Icon = option.icon;
-            return (
-              <button
-                key={option.id}
-                type="button"
-                className={klass === option.id ? "is-active" : ""}
-                onClick={() => setKlass(option.id)}
-              >
-                <Icon size={12} /> {lang === "zh" ? option.zh : option.en}
-              </button>
-            );
+            return {
+              value: option.id,
+              label: (
+                <>
+                  <Icon size={12} /> {lang === "zh" ? option.zh : option.en}
+                </>
+              ),
+            };
           })}
-        </div>
+        />
         <Button
           size="lg"
           variant="primary"
@@ -312,8 +309,8 @@ export function LargeFilesPage({
 
       {visible && visible.length > 0 ? (
         <>
-          <section className="bigfiles-list-head">
-            <div>
+          <Toolbar className="bigfiles-list-head">
+            <div className="toolbar-copy">
               <b>
                 {formatCount(visible.length)} {t("large files", "个大文件")} ·{" "}
                 <span className="is-accent">{formatBytes(totalBytes)}</span>
@@ -330,7 +327,8 @@ export function LargeFilesPage({
                     )}
               </small>
             </div>
-            <label className="bigfiles-hide-critical">
+            <div className="toolbar-group">
+            <label className="toggle-label">
               <Checkbox
                 checked={hideCritical}
                 onChange={() => setHideCritical((v) => !v)}
@@ -346,78 +344,106 @@ export function LargeFilesPage({
               <Trash2 size={14} />
               <span>{t("Clean selected", "清理已选")}</span>
             </Button>
-          </section>
+            </div>
+          </Toolbar>
           {confirming ? (
-            <section className="dup-confirm">
-              <ShieldAlert size={15} />
-              <div>
-                <b>
-                  {lang === "zh"
-                    ? `将 ${pickedCount} 个大文件（${formatBytes(pickedBytes)}）移入回收站？`
-                    : `Move ${pickedCount} files (${formatBytes(pickedBytes)}) to the Recycle Bin?`}
-                </b>
-                <small>
-                  {t(
-                    "Undo from History while the Recycle Bin holds them.",
-                    "回收站清空前，可随时在「历史记录」撤销。",
-                  )}
-                </small>
-              </div>
-              <Button onClick={() => setConfirming(false)}>{t("Cancel", "取消")}</Button>
-              <Button variant="danger" disabled={deleting} onClick={() => void confirmDelete()}>
-                {deleting ? t("Cleaning…", "清理中…") : t("Confirm", "确认清理")}
-              </Button>
-            </section>
+            <Notice
+              tone="danger"
+              icon={<ShieldAlert size={15} />}
+              actions={
+                <>
+                  <Button onClick={() => setConfirming(false)}>{t("Cancel", "取消")}</Button>
+                  <Button
+                    variant="danger"
+                    disabled={deleting}
+                    onClick={() => void confirmDelete()}
+                  >
+                    {deleting ? t("Cleaning…", "清理中…") : t("Confirm", "确认清理")}
+                  </Button>
+                </>
+              }
+            >
+              <b>
+                {lang === "zh"
+                  ? `将 ${pickedCount} 个大文件（${formatBytes(pickedBytes)}）移入回收站？`
+                  : `Move ${pickedCount} files (${formatBytes(pickedBytes)}) to the Recycle Bin?`}
+              </b>
+              <br />
+              {t(
+                "Undo from History while the Recycle Bin holds them.",
+                "回收站清空前，可随时在「历史记录」撤销。",
+              )}
+            </Notice>
           ) : null}
-          <ul className="bigfiles-list">
+          <div className="row-list bigfiles-list">
             {visible.map((file, index) => {
               const Icon = CLASS_ICON[file.class] ?? HardDrive;
               const dormant =
                 file.modifiedMs > 0 && (now - file.modifiedMs) / 1000 > DORMANT_SECS;
               return (
-                <li key={file.path} className={`bigfile-row ${picked.has(file.path) ? "is-picked" : ""}`}>
-                  <Checkbox
-                    checked={picked.has(file.path)}
-                    onChange={() => toggle(file.path)}
-                    label={file.displayPath}
-                  />
-                  <span className="bigfile-index">{String(index + 1).padStart(2, "0")}</span>
-                  <span className="bigfile-icon">
-                    <Icon size={15} />
-                  </span>
-                  <div className="bigfile-main">
-                    <b>{file.path.split(/[\\/]/).pop()}</b>
-                    <span className="bigfile-path">{file.displayPath}</span>
-                  </div>
-                  {dormant ? (
-                    <span className="space-rule-dormant">
-                      {agoLabel(file.modifiedMs, lang)} {t("untouched", "未修改")}
+                <Row
+                  key={file.path}
+                  className="bigfile-row"
+                  selected={picked.has(file.path)}
+                  leading={
+                    <span className="space-cat-lead">
+                      <Checkbox
+                        checked={picked.has(file.path)}
+                        onChange={() => toggle(file.path)}
+                        label={file.displayPath}
+                      />
+                      <span className="bigfile-index">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <span className="bigfile-icon">
+                        <Icon size={15} />
+                      </span>
                     </span>
-                  ) : null}
-                  {file.cloudHint ? (
-                    <span className="bigfile-cloud-chip">
-                      <Cloud size={11} /> {t("cloud copy?", "网盘可能有副本？")}
-                    </span>
-                  ) : null}
-                  {file.maybeMounted ? (
-                    <span className="dup-lock-chip" title={t("May be in use by Hyper-V/WSL", "可能正被 Hyper-V/WSL 使用")}>
-                      <Lock size={11} /> {t("check in use", "占用检查")}
-                    </span>
-                  ) : null}
-                  <span className="bigfile-size">{formatBytes(file.size)}</span>
-                  <button
-                    type="button"
-                    className="dup-copy-reveal"
-                    onClick={() => void apiClient.api.revealPath(file.path).catch(() => undefined)}
-                    title={t("Reveal in Explorer", "在文件夹中显示")}
-                  >
-                    <MapPin size={12} />
-                    {t("Reveal", "定位")}
-                  </button>
-                </li>
+                  }
+                  title={file.path.split(/[\\/]/).pop()}
+                  tags={
+                    <>
+                      {dormant ? (
+                        <Badge tone="warning">
+                          {agoLabel(file.modifiedMs, lang)} {t("untouched", "未修改")}
+                        </Badge>
+                      ) : null}
+                      {file.cloudHint ? (
+                        <Badge tone="info">
+                          <Cloud size={11} /> {t("cloud copy?", "网盘可能有副本？")}
+                        </Badge>
+                      ) : null}
+                      {file.maybeMounted ? (
+                        <Badge
+                          tone="neutral"
+                          title={t(
+                            "May be in use by Hyper-V/WSL",
+                            "可能正被 Hyper-V/WSL 使用",
+                          )}
+                        >
+                          <Lock size={11} /> {t("check in use", "占用检查")}
+                        </Badge>
+                      ) : null}
+                    </>
+                  }
+                  detail={file.displayPath}
+                  trailing={
+                    <>
+                      <span className="bigfile-size">{formatBytes(file.size)}</span>
+                      <IconButton
+                        label={t("Reveal in Explorer", "在文件夹中显示")}
+                        onClick={() =>
+                          void apiClient.api.revealPath(file.path).catch(() => undefined)
+                        }
+                      >
+                        <MapPin size={12} />
+                      </IconButton>
+                    </>
+                  }
+                />
               );
             })}
-          </ul>
+          </div>
         </>
       ) : null}
     </div>

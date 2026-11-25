@@ -1,7 +1,7 @@
 import { EyeOff, SlidersHorizontal, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
-import { EmptyState, PageHeader } from "../components/ui";
+import { EmptyState, PageHeader, Tabs } from "../components/ui";
 import { MaintenancePage } from "./MaintenancePage";
 import { PrivacyPage } from "./PrivacyPage";
 import { OptimizationPage } from "./OptimizationPage";
@@ -56,26 +56,20 @@ export function MaintenanceHubPage({
       <PageHeader
         title={t("System maintenance", "系统维护")}
       />
-      <div className="hub-tabs" role="tablist">
-        {TABS.map((item) => {
+      <Tabs
+        label={t("System maintenance sections", "系统维护分区")}
+        value={tab}
+        onChange={setTab}
+        items={TABS.map((item) => {
           const Icon = item.icon;
-          const badge = badges[item.id];
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === item.id}
-              className={`hub-tab ${tab === item.id ? "is-active" : ""}`}
-              onClick={() => setTab(item.id)}
-            >
-              <Icon size={15} />
-              {t(item.en, item.zh)}
-              {badge ? <b>{badge}</b> : null}
-            </button>
-          );
+          return {
+            id: item.id,
+            label: t(item.en, item.zh),
+            icon: <Icon size={15} />,
+            badge: badges[item.id] ?? undefined,
+          };
         })}
-      </div>
+      />
       <div className="hub-pane" style={{ display: tab === "repair" ? undefined : "none" }}>
         <MaintenancePage embedded onBadge={report("repair")} />
       </div>

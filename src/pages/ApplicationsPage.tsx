@@ -17,14 +17,20 @@ import { formatBytes, formatCount, messageFrom, shortPath } from "../lib/format"
 import type { AppInfo, DeleteMode } from "../types";
 import type { AppsWorkspace } from "../hooks/useAppsWorkspace";
 import {
+  Badge,
   Button,
   Checkbox,
   ConfirmDialog,
   EmptyState,
   InlineError,
+  Notice,
   PageHeader,
   ProgressCard,
   ResultSummary,
+  Row,
+  SearchField,
+  Section,
+  Segmented,
   categoryLabel,
   lockLabel,
   useToast,
@@ -60,40 +66,49 @@ function AppRow({
   const letter = app.name.trim().slice(0, 1).toUpperCase() || "?";
   const badge = sourceBadge(app.source);
   return (
-    <button className={`app-row ${selected ? "is-selected" : ""}`} onClick={onSelect}>
-      <span className="app-glyph" aria-hidden="true">
-        {app.icon ? <img src={app.icon} alt="" /> : letter}
-      </span>
-      <span className="app-row-copy">
-        <span className="app-row-title">
-          <strong>{app.name}</strong>
+    <Row
+      className="app-row"
+      selected={selected}
+      onClick={onSelect}
+      leading={
+        <span className="app-glyph" aria-hidden="true">
+          {app.icon ? <img src={app.icon} alt="" /> : letter}
+        </span>
+      }
+      title={app.name}
+      tags={
+        <>
           {app.running ? (
-            <span className="status-chip is-live">
+            <Badge tone="success">
               <Play size={10} fill="currentColor" />
               {t("Running", "运行中")}
-            </span>
+            </Badge>
           ) : null}
           {app.dead ? (
-            <span className="status-chip is-danger">
+            <Badge tone="danger">
               <ShieldAlert size={10} />
               {t("Incomplete install", "安装不完整")}
-            </span>
+            </Badge>
           ) : null}
           {badge ? (
-            <span className="status-chip is-source" title={badge[1]}>
+            <Badge tone="info" title={badge[1]}>
               <Hammer size={10} />
               {badge[0]}
-            </span>
+            </Badge>
           ) : null}
-        </span>
-        <span>{app.bundle_id || shortPath(app.path, 45)}</span>
-      </span>
-      <span className="app-row-meta">
-        <strong>{formatBytes(app.size)}</strong>
-        <small>{app.version ? `v${app.version}` : app.publisher || app.source}</small>
-      </span>
-      <ChevronRight size={16} />
-    </button>
+        </>
+      }
+      subtitle={app.bundle_id || shortPath(app.path, 45)}
+      trailing={
+        <>
+          <span className="app-row-meta">
+            <strong>{formatBytes(app.size)}</strong>
+            <small>{app.version ? `v${app.version}` : app.publisher || app.source}</small>
+          </span>
+          <ChevronRight size={16} />
+        </>
+      }
+    />
   );
 }
 export function ApplicationsPage({
@@ -203,30 +218,26 @@ export function ApplicationsPage({
 
       {workspace.scanned && !workspace.scanning && !workspace.summary ? (
         <div className="apps-layout">
-          <section className="apps-list-panel">
-            <div className="apps-list-head">
-              <div>
-                <h2>{t("Installed applications", "已安装应用")}</h2>
-                <p>
-                  {t(
-                    `${formatCount(workspace.apps.length)} apps · ${formatBytes(
-                      workspace.total,
-                    )}`,
-                    `${formatCount(workspace.apps.length)} 个应用 · ${formatBytes(
-                      workspace.total,
-                    )}`,
-                  )}
-                </p>
-              </div>
-              <label className="search-field">
-                <Search size={15} />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t("Search apps", "搜索应用")}
-                />
-              </label>
-            </div>
+          <Section
+            className="apps-list-panel"
+            title={t("Installed applications", "已安装应用")}
+            hint={t(
+              `${formatCount(workspace.apps.length)} apps · ${formatBytes(
+                workspace.total,
+              )}`,
+              `${formatCount(workspace.apps.length)} 个应用 · ${formatBytes(
+                workspace.total,
+              )}`,
+            )}
+            actions={
+              <SearchField
+                value={query}
+                onChange={setQuery}
+                label={t("Search apps", "搜索应用")}
+                placeholder={t("Search apps", "搜索应用")}
+              />
+            }
+          >
             <div className="app-list">
               {apps.map((app) => (
                 <AppRow
@@ -246,9 +257,9 @@ export function ApplicationsPage({
                 </div>
               ) : null}
             </div>
-          </section>
+          </Section>
 
-          <aside className="app-plan-panel">
+          <aside className="section app-plan-panel">
             {workspace.planning ? (
               <ProgressCard
                 progress={workspace.progress}
@@ -282,16 +293,10 @@ export function ApplicationsPage({
                 </div>
 
                 {workspace.plan.app.dead ? (
-                  <div className="plan-dead-callout">
-                    <ShieldAlert size={16} />
-                    <div>
-                      <strong>{t("Incomplete install", "安装不完整")}</strong>
-                      <p>
-                        {t(
-                          "The program files are already gone; only its registry record and leftovers remain. Removing the record makes Windows stop listing it.",
-                          "程序本体已经不存在，只剩下注册表记录和残留文件。清除记录后，系统将不再列出这个应用。",
-                        )}
-                      </p>
+                  <Notice
+                    tone="warning"
+                    icon={<ShieldAlert size={16} />}
+                    actions={
                       <Button
                         size="sm"
                         variant="secondary"
@@ -303,14 +308,23 @@ export function ApplicationsPage({
                           ? t("Cleaning…", "正在清理…")
                           : t("Clean leftovers", "清理残留记录")}
                       </Button>
-                    </div>
-                  </div>
+                    }
+                  >
+                    <strong>{t("Incomplete install", "安装不完整")}</strong>
+                    <br />
+                    {t(
+                      "The program files are already gone; only its registry record and leftovers remain. Removing the record makes Windows stop listing it.",
+                      "程序本体已经不存在，只剩下注册表记录和残留文件。清除记录后，系统将不再列出这个应用。",
+                    )}
+                  </Notice>
                 ) : null}
 
                 {workspace.plan.warnings.length > 0 ? (
                   <div className="plan-warnings">
                     {workspace.plan.warnings.map((warning) => (
-                      <p key={warning}>{warning}</p>
+                      <Notice key={warning} tone="warning" icon={<ShieldAlert size={13} />}>
+                        {warning}
+                      </Notice>
                     ))}
                   </div>
                 ) : null}
@@ -332,32 +346,30 @@ export function ApplicationsPage({
                   </Button>
                 </div>
 
-                <div className="plan-items">
+                <div className="row-list plan-items">
                   {workspace.plan.items.map((item, index) => (
-                    <div
+                    <Row
                       key={`${item.path}-${index}`}
                       className={`plan-item ${item.lock ? "is-locked" : ""}`}
+                      leading={
+                        <Checkbox
+                          checked={workspace.planSelected.has(index)}
+                          disabled={Boolean(item.lock)}
+                          onChange={() => workspace.togglePlanItem(index)}
+                          label={item.label}
+                        />
+                      }
+                      title={item.label}
+                      subtitle={shortPath(item.displayPath, 44)}
+                      detail={`${categoryLabel(item.category, lang, bin)}${
+                        item.note ? ` · ${item.note}` : ""
+                      }${item.lock ? ` · ${lockLabel(item.lock, t)}` : ""}`}
+                      trailing={<b>{formatBytes(item.onDisk)}</b>}
+                      muted={Boolean(item.lock)}
                       onClick={() => {
                         if (!item.lock) workspace.togglePlanItem(index);
                       }}
-                    >
-                      <Checkbox
-                        checked={workspace.planSelected.has(index)}
-                        disabled={Boolean(item.lock)}
-                        onChange={() => workspace.togglePlanItem(index)}
-                        label={item.label}
-                      />
-                      <span className="plan-item-copy">
-                        <strong>{item.label}</strong>
-                        <span title={item.displayPath}>{shortPath(item.displayPath, 44)}</span>
-                        <small>
-                          {categoryLabel(item.category, lang, bin)}
-                          {item.note ? ` · ${item.note}` : ""}
-                          {item.lock ? ` · ${lockLabel(item.lock, t)}` : ""}
-                        </small>
-                      </span>
-                      <b>{formatBytes(item.onDisk)}</b>
-                    </div>
+                    />
                   ))}
                 </div>
 
@@ -442,22 +454,31 @@ export function ApplicationsPage({
         busy={workspace.deleting}
         icon={<Trash2 size={23} />}
       >
-        <div className="mode-picker">
-          <button
-            className={mode === "trash" ? "is-active" : ""}
-            onClick={() => setMode("trash")}
-          >
-            <FolderOpen size={17} />
-            <span>{bin}</span>
-          </button>
-          <button
-            className={mode === "permanent" ? "is-active" : ""}
-            onClick={() => setMode("permanent")}
-          >
-            <Trash2 size={17} />
-            <span>{t("Permanent", "永久")}</span>
-          </button>
-        </div>
+        <Segmented
+          value={mode}
+          label={t("Deletion mode", "删除方式")}
+          onChange={setMode}
+          options={[
+            {
+              value: "trash",
+              label: (
+                <>
+                  <FolderOpen size={17} />
+                  {bin}
+                </>
+              ),
+            },
+            {
+              value: "permanent",
+              label: (
+                <>
+                  <Trash2 size={17} />
+                  {t("Permanent", "永久")}
+                </>
+              ),
+            },
+          ]}
+        />
       </ConfirmDialog>
 
       {workspace.deleting ? (

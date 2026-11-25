@@ -13,7 +13,17 @@ import { api } from "../lib/api";
 import { messageFrom, shortPath } from "../lib/format";
 import type { ScanSchedule, SecurityStatus } from "../types";
 import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
-import { Button, ConfirmDialog, Select, Toggle, useToast } from "./ui";
+import {
+  Button,
+  ConfirmDialog,
+  IconButton,
+  Row,
+  Section,
+  Select,
+  Subhead,
+  Toggle,
+  useToast,
+} from "./ui";
 
 const SCHEDULES: [ScanSchedule, string, string][] = [
   ["manual", "Only when I ask", "仅在我要求时"],
@@ -110,21 +120,12 @@ export function SecuritySettingsCard({
   };
 
   return (
-    <section className="settings-section">
-      <div className="settings-section-head">
-        <div>
-          <h2>
-            <ShieldCheck size={18} />
-            {t("Security", "安全")}
-          </h2>
-        </div>
-      </div>
-
-      <div className="settings-row is-first">
-        <div>
-          <strong>{t("Scan schedule", "扫描计划")}</strong>
-          <span>
-            {settings.scanSchedule === "manual"
+    <Section icon={<ShieldCheck size={16} />} title={t("Security", "安全")}>
+      <div className="row-list">
+        <Row
+          title={t("Scan schedule", "扫描计划")}
+          subtitle={
+            settings.scanSchedule === "manual"
               ? t(
                   "Nothing is scanned unless you start it.",
                   "不主动扫描，只在你点开始时才扫描。",
@@ -132,59 +133,57 @@ export function SecuritySettingsCard({
               : t(
                   "No background service, so a scheduled scan runs only while Squid is in the tray.",
                   "Squid 无后台服务，定时扫描只在驻留托盘时才会运行。",
-                )}
-          </span>
-        </div>
-        <Select
-          value={settings.scanSchedule}
-          disabled={busy}
-          label={t("Scan schedule", "扫描计划")}
-          options={SCHEDULES.map(([value, en, zh]) => ({ value, label: t(en, zh) }))}
-          onChange={(next) => void save({ scanSchedule: next })}
+                )
+          }
+          trailing={
+            <Select
+              value={settings.scanSchedule}
+              disabled={busy}
+              label={t("Scan schedule", "扫描计划")}
+              options={SCHEDULES.map(([value, en, zh]) => ({ value, label: t(en, zh) }))}
+              onChange={(next) => void save({ scanSchedule: next })}
+            />
+          }
         />
-      </div>
 
-      <div className="settings-row">
-        <div>
-          <strong>{t("Notify on confirmed findings", "发现高危时通知")}</strong>
-          <span>
-            {t(
-              "The banner and the tray report the same thing without it.",
-              "关闭后，应用内提示与托盘仍会显示相同状态。",
-            )}
-          </span>
-        </div>
-        <Toggle
-          checked={settings.notifyOnFindings}
-          disabled={busy}
-          label={t("Notify on confirmed findings", "发现高危时通知")}
-          onChange={(next) => void save({ notifyOnFindings: next })}
+        <Row
+          title={t("Notify on confirmed findings", "发现高危时通知")}
+          subtitle={t(
+            "The banner and the tray report the same thing without it.",
+            "关闭后，应用内提示与托盘仍会显示相同状态。",
+          )}
+          trailing={
+            <Toggle
+              checked={settings.notifyOnFindings}
+              disabled={busy}
+              label={t("Notify on confirmed findings", "发现高危时通知")}
+              onChange={(next) => void save({ notifyOnFindings: next })}
+            />
+          }
         />
-      </div>
 
-      <div className="settings-row">
-        <div>
-          <strong>{t("Auto-quarantine confirmed findings", "自动隔离已确认项")}</strong>
-          <span>
-            {t(
-              "Confirmed findings only. A suspicious file is never moved on its own.",
-              "仅针对已确认发现，可疑项不会被自动移动。",
-            )}
-          </span>
-        </div>
-        <Toggle
-          checked={settings.autoQuarantine}
-          disabled={busy}
-          label={t("Auto-quarantine confirmed findings", "自动隔离已确认项")}
-          onChange={(next) => (next ? setConfirmAuto(true) : void save({ autoQuarantine: false }))}
+        <Row
+          title={t("Auto-quarantine confirmed findings", "自动隔离已确认项")}
+          subtitle={t(
+            "Confirmed findings only. A suspicious file is never moved on its own.",
+            "仅针对已确认发现，可疑项不会被自动移动。",
+          )}
+          trailing={
+            <Toggle
+              checked={settings.autoQuarantine}
+              disabled={busy}
+              label={t("Auto-quarantine confirmed findings", "自动隔离已确认项")}
+              onChange={(next) =>
+                next ? setConfirmAuto(true) : void save({ autoQuarantine: false })
+              }
+            />
+          }
         />
-      </div>
 
-      <div className="settings-row">
-        <div>
-          <strong>{t("Update rules automatically", "自动更新规则")}</strong>
-          <span>
-            {intel.source === "pack"
+        <Row
+          title={t("Update rules automatically", "自动更新规则")}
+          subtitle={
+            intel.source === "pack"
               ? t(
                   `Rule pack r${intel.revision} · ${intel.installedRules} rules · published ${intel.published} · ${
                     intel.signed
@@ -198,62 +197,62 @@ export function SecuritySettingsCard({
               : t(
                   `${intel.builtinRules} built-in rules in this build; nothing downloaded yet.`,
                   `当前构建内置 ${intel.builtinRules} 条规则，尚未下载规则包。`,
-                )}
-          </span>
-        </div>
-        <Toggle
-          checked={settings.updateRules}
-          disabled={busy}
-          label={t("Update rules automatically", "自动更新规则")}
-          onChange={(next) => void save({ updateRules: next })}
+                )
+          }
+          trailing={
+            <Toggle
+              checked={settings.updateRules}
+              disabled={busy}
+              label={t("Update rules automatically", "自动更新规则")}
+              onChange={(next) => void save({ updateRules: next })}
+            />
+          }
+        />
+
+        <Row
+          title={t("Rule pack", "规则包")}
+          subtitle={
+            rulesNote ??
+            t(
+              "Rules are downloaded to this machine; nothing is ever sent out.",
+              "规则只下载到本机，不上传任何内容。",
+            )
+          }
+          trailing={
+            <div className="row-actions">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Download size={14} />}
+                disabled={busy || !settings.updateRules}
+                onClick={() => void runRules(security.updateRules)}
+              >
+                {t("Check for rules", "检查规则更新")}
+              </Button>
+              {intel.fallbackAvailable ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<RotateCcw size={14} />}
+                  disabled={busy}
+                  onClick={() => void runRules(security.rollbackRules)}
+                >
+                  {t("Roll back one pack", "回滚上一版规则")}
+                </Button>
+              ) : null}
+            </div>
+          }
         />
       </div>
 
-      <div className="settings-row is-actions">
-        <div>
-          <strong>{t("Rule pack", "规则包")}</strong>
-          <span>
-            {rulesNote ??
-              t(
-                "Rules are downloaded to this machine; nothing is ever sent out.",
-                "规则只下载到本机，不上传任何内容。",
-              )}
-          </span>
-        </div>
-        <div className="settings-row-buttons">
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<Download size={14} />}
-            disabled={busy || !settings.updateRules}
-            onClick={() => void runRules(security.updateRules)}
-          >
-            {t("Check for rules", "检查规则更新")}
-          </Button>
-          {intel.fallbackAvailable ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<RotateCcw size={14} />}
-              disabled={busy}
-              onClick={() => void runRules(security.rollbackRules)}
-            >
-              {t("Roll back one pack", "回滚上一版规则")}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="settings-subsection">
-        <div className="settings-subsection-head">
-          <strong>{t("Scan exclusions", "安全扫描排除项")}</strong>
-          <span>
-            {t(
-              "Separate from the cleanup whitelist. Nothing inside is reported.",
-              "与清理白名单彼此独立。被排除目录内的威胁不会上报。",
-            )}
-          </span>
-        </div>
+      <div>
+        <Subhead
+          title={t("Scan exclusions", "安全扫描排除项")}
+          hint={t(
+            "Separate from the cleanup whitelist. Nothing inside is reported.",
+            "与清理白名单彼此独立。被排除目录内的威胁不会上报。",
+          )}
+        />
         <div className="whitelist-add">
           <input
             value={draft}
@@ -274,120 +273,133 @@ export function SecuritySettingsCard({
             {t("Add", "添加")}
           </Button>
         </div>
-        <div className="whitelist-list">
+        <div className="row-list">
           {settings.scanExclusions.length === 0 ? (
-            <p className="settings-empty">
+            <p className="row-empty">
               {t("No folders are excluded from scanning.", "没有排除扫描的文件夹。")}
             </p>
           ) : (
             settings.scanExclusions.map((pattern) => (
-              <div className="whitelist-row" key={pattern}>
-                <span className="whitelist-icon is-warning">
-                  <AlertTriangle size={15} />
-                </span>
-                <code title={pattern}>{shortPath(pattern, 88)}</code>
-                <button
-                  className="row-reveal"
-                  aria-label={t("Stop excluding", "取消排除")}
-                  onClick={() => setPendingRemove(pattern)}
-                  disabled={busy}
-                >
-                  <X size={14} />
-                </button>
-              </div>
+              <Row
+                key={pattern}
+                leading={
+                  <span className="whitelist-icon is-warning">
+                    <AlertTriangle size={15} />
+                  </span>
+                }
+                title={<code title={pattern}>{shortPath(pattern, 88)}</code>}
+                trailing={
+                  <IconButton
+                    label={t("Stop excluding", "取消排除")}
+                    onClick={() => setPendingRemove(pattern)}
+                    disabled={busy}
+                  >
+                    <X size={14} />
+                  </IconButton>
+                }
+              />
             ))
           )}
         </div>
       </div>
 
       {settings.allowlist.length ? (
-        <div className="settings-subsection">
-          <div className="settings-subsection-head">
-            <strong>{t("Trusted software", "已信任的软件")}</strong>
-            <span>
-              {t(
-                `${settings.allowlist.length} rules quiet ordinary advisories. Confirmed threats are never trusted.`,
-                `${settings.allowlist.length} 条规则用于静默普通提示，已确认威胁永远不会被信任。`,
-              )}
-            </span>
-          </div>
-          <div className="whitelist-list">
+        <div>
+          <Subhead
+            title={t("Trusted software", "已信任的软件")}
+            hint={t(
+              `${settings.allowlist.length} rules quiet ordinary advisories. Confirmed threats are never trusted.`,
+              `${settings.allowlist.length} 条规则用于静默普通提示，已确认威胁永远不会被信任。`,
+            )}
+          />
+          <div className="row-list">
             {settings.allowlist.map((entry) => (
-              <div className="whitelist-row" key={`${entry.kind}:${entry.value}`}>
-                <span className="whitelist-icon">
-                  <ShieldCheck size={15} />
-                </span>
-                <span className="allowlist-kind">
-                  {entry.kind === "publisher"
-                    ? t("Publisher", "发布者")
-                    : entry.kind === "path"
-                      ? t("Folder", "文件夹")
-                      : t("Note type", "提示类型")}
-                </span>
-                <code title={entry.value}>
-                  {entry.kind === "evidence"
-                    ? t(
-                        EVIDENCE_LABELS[entry.value]?.[0] ?? entry.value,
-                        EVIDENCE_LABELS[entry.value]?.[1] ?? entry.value,
-                      )
-                    : entry.kind === "path"
-                      ? shortPath(entry.value, 88)
-                      : entry.value}
-                </code>
-                <button
-                  className="row-reveal"
-                  aria-label={t("Stop trusting", "取消信任")}
-                  onClick={() => void untrust(entry.kind, entry.value)}
-                  disabled={busy}
-                >
-                  <X size={14} />
-                </button>
-              </div>
+              <Row
+                key={`${entry.kind}:${entry.value}`}
+                leading={
+                  <span className="whitelist-icon">
+                    <ShieldCheck size={15} />
+                  </span>
+                }
+                title={
+                  <code title={entry.value}>
+                    {entry.kind === "evidence"
+                      ? t(
+                          EVIDENCE_LABELS[entry.value]?.[0] ?? entry.value,
+                          EVIDENCE_LABELS[entry.value]?.[1] ?? entry.value,
+                        )
+                      : entry.kind === "path"
+                        ? shortPath(entry.value, 88)
+                        : entry.value}
+                  </code>
+                }
+                tags={
+                  <span className="allowlist-kind">
+                    {entry.kind === "publisher"
+                      ? t("Publisher", "发布者")
+                      : entry.kind === "path"
+                        ? t("Folder", "文件夹")
+                        : t("Note type", "提示类型")}
+                  </span>
+                }
+                trailing={
+                  <IconButton
+                    label={t("Stop trusting", "取消信任")}
+                    onClick={() => void untrust(entry.kind, entry.value)}
+                    disabled={busy}
+                  >
+                    <X size={14} />
+                  </IconButton>
+                }
+              />
             ))}
           </div>
         </div>
       ) : null}
 
       {settings.ignoredFindings.length ? (
-        <div className="settings-subsection">
-          <div className="settings-subsection-head">
-            <strong>{t("Ignored findings", "已忽略的发现")}</strong>
-            <span>
-              {t(
-                `${settings.ignoredFindings.length} dismissed. Future scans hide them until you restore them here.`,
-                `已忽略 ${settings.ignoredFindings.length} 项。在恢复之前，后续扫描不会再次报告。`,
-              )}
-            </span>
-          </div>
-          <div className="whitelist-list">
+        <div>
+          <Subhead
+            title={t("Ignored findings", "已忽略的发现")}
+            hint={t(
+              `${settings.ignoredFindings.length} dismissed. Future scans hide them until you restore them here.`,
+              `已忽略 ${settings.ignoredFindings.length} 项。在恢复之前，后续扫描不会再次报告。`,
+            )}
+          />
+          <div className="row-list">
             {settings.ignoredFindings.map((fingerprint) => (
-              <div className="whitelist-row" key={fingerprint}>
-                <code title={fingerprint}>{shortPath(fingerprint, 88)}</code>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => {
-                    const match = status.scan?.findings.find(
-                      (finding) =>
-                        `${finding.confidence}|${finding.path}` === fingerprint,
-                    );
-                    if (match) {
-                      void security.dismiss(match.id, false).then((message) => push(message, "success"));
-                    } else {
-                      push(
-                        t(
-                          "This finding is not in the last scan — run a scan to restore it.",
-                          "该发现不在上次扫描结果中，请先扫描再恢复。",
-                        ),
-                        "danger",
+              <Row
+                key={fingerprint}
+                title={<code title={fingerprint}>{shortPath(fingerprint, 88)}</code>}
+                trailing={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      const match = status.scan?.findings.find(
+                        (finding) =>
+                          `${finding.confidence}|${finding.path}` === fingerprint,
                       );
-                    }
-                  }}
-                >
-                  {t("Report again", "重新报告")}
-                </Button>
-              </div>
+                      if (match) {
+                        void security
+                          .dismiss(match.id, false)
+                          .then((message) => push(message, "success"));
+                      } else {
+                        push(
+                          t(
+                            "This finding is not in the last scan — run a scan to restore it.",
+                            "该发现不在上次扫描结果中，请先扫描再恢复。",
+                          ),
+                          "danger",
+                        );
+                      }
+                    }}
+                  >
+                    {t("Report again", "重新报告")}
+                  </Button>
+                }
+              />
             ))}
           </div>
         </div>
@@ -437,6 +449,6 @@ export function SecuritySettingsCard({
         }}
         onClose={() => setPendingRemove(null)}
       />
-    </section>
+    </Section>
   );
 }

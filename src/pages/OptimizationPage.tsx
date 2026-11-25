@@ -3,7 +3,16 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useI18n } from "../i18n";
 import { messageFrom } from "../lib/format";
-import { Button, InlineError, PageHeader, Toggle, useToast } from "../components/ui";
+import {
+  Badge,
+  Button,
+  InlineError,
+  PageHeader,
+  Row,
+  Section,
+  Toggle,
+  useToast,
+} from "../components/ui";
 import type { TweakState } from "../types";
 
 export function OptimizationPage({
@@ -85,19 +94,16 @@ export function OptimizationPage({
       )}
       {error ? <InlineError message={error} onDismiss={() => setError(null)} /> : null}
 
-      <section className="optimize-group">
-        <div className="optimize-group-head">
-          <h2>
-            <SlidersHorizontal size={15} /> {t("Everyday privacy & clarity", "常用隐私与界面")}
-          </h2>
-          <span className="tip">
-            {changed > 0
-              ? t(`${changed} changed · revertable`, `已更改 ${changed} 项 · 可随时恢复`)
-              : t("Nothing changed yet", "尚未更改任何项")}
-          </span>
-          {/* Embedded (维护 hub): the page header — and with it the restore
-              button — is hidden, so the group head carries it instead. */}
-          {embedded ? (
+      <Section
+        icon={<SlidersHorizontal size={16} />}
+        title={t("Everyday privacy & clarity", "常用隐私与界面")}
+        hint={
+          changed > 0
+            ? t(`${changed} changed · revertable`, `已更改 ${changed} 项 · 可随时恢复`)
+            : t("Nothing changed yet", "尚未更改任何项")
+        }
+        actions={
+          embedded ? (
             <Button
               variant="ghost"
               size="sm"
@@ -107,41 +113,44 @@ export function OptimizationPage({
             >
               {t("Restore all defaults", "恢复全部默认")}
             </Button>
+          ) : undefined
+        }
+      >
+        <div className="row-list">
+          {states.map((state) => (
+            <Row
+              key={state.id}
+              selected={state.enabled}
+              title={lang === "zh" ? state.titleZh : state.titleEn}
+              subtitle={lang === "zh" ? state.detailZh : state.detailEn}
+              detail={`${state.hive}\\${state.key} · ${state.value}`}
+              tags={
+                state.restartHint && state.enabled ? (
+                  <Badge tone="warning">
+                    {t("needs Explorer/Windows restart", "需重启 Explorer/系统生效")}
+                  </Badge>
+                ) : undefined
+              }
+              trailing={
+                <>
+                  <Badge tone={state.risk === "safe" ? "success" : "warning"}>
+                    {state.risk === "safe" ? t("Safe", "安全") : t("Read the note", "看说明")}
+                  </Badge>
+                  <Toggle
+                    checked={state.enabled}
+                    disabled={busy !== null || state.unreadable}
+                    onChange={(next) => void flip(state, next)}
+                    label={lang === "zh" ? state.titleZh : state.titleEn}
+                  />
+                </>
+              }
+            />
+          ))}
+          {states.length === 0 && !error ? (
+            <p className="row-empty">{t("Loading the catalog…", "正在加载目录…")}</p>
           ) : null}
         </div>
-        <ul className="optimize-list">
-          {states.map((state) => (
-            <li key={state.id} className={`optimize-row ${state.enabled ? "is-on" : ""}`}>
-              <div className="optimize-copy">
-                <b>
-                  {lang === "zh" ? state.titleZh : state.titleEn}
-                  {state.restartHint && state.enabled ? (
-                    <span className="optimize-restart">
-                      {t("needs Explorer/Windows restart", "需重启 Explorer/系统生效")}
-                    </span>
-                  ) : null}
-                </b>
-                <small>{lang === "zh" ? state.detailZh : state.detailEn}</small>
-                <small className="optimize-path">
-                  {state.hive}\\{state.key} · {state.value}
-                </small>
-              </div>
-              <span className={`optimize-risk is-${state.risk}`}>
-                {state.risk === "safe" ? t("Safe", "安全") : t("Read the note", "看说明")}
-              </span>
-              <Toggle
-                checked={state.enabled}
-                disabled={busy !== null || state.unreadable}
-                onChange={(next) => void flip(state, next)}
-                label={lang === "zh" ? state.titleZh : state.titleEn}
-              />
-            </li>
-          ))}
-        </ul>
-        {states.length === 0 && !error ? (
-          <p className="optimize-empty">{t("Loading the catalog…", "正在加载目录…")}</p>
-        ) : null}
-      </section>
+      </Section>
     </div>
   );
 }

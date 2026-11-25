@@ -4,11 +4,15 @@ import { api } from "../lib/api";
 import { useI18n } from "../i18n";
 import { formatBytes, formatCount, messageFrom } from "../lib/format";
 import {
+  Badge,
   Button,
   Checkbox,
   EmptyState,
   InlineError,
+  Notice,
   PageHeader,
+  Row,
+  Section,
   useToast,
 } from "../components/ui";
 import type { CleanupItem } from "../types";
@@ -150,78 +154,108 @@ export function PrivacyPage({
       )}
       {error ? <InlineError message={error} onDismiss={() => setError(null)} /> : null}
 
-      <section className="privacy-grid">
-        {groups.map((group) => {
-          const Icon = SPEC_ICONS[group.ruleId] ?? ShieldQuestion;
-          const allOn = group.indexes.every((index) => picked.has(index));
-          const warn = WARN_COPY[group.ruleId];
-          return (
-            <label
-              key={group.ruleId}
-              className={`privacy-card ${group.locked ? "is-locked" : ""} ${allOn ? "is-picked" : ""}`}
-              onClick={() => toggleGroup(group)}
+      <Section
+        icon={<EyeOff size={16} />}
+        title={t("Privacy traces", "隐私痕迹")}
+        hint={t(
+          "Select what to clear. Locked items need the browser or app closed first.",
+          "选择要清除的痕迹；锁定的项目需要先关闭对应浏览器或应用。",
+        )}
+        actions={
+          <div className="row-actions">
+            <Button variant="ghost" onClick={() => void scan()} disabled={scanning || cleaning}>
+              {scanning ? t("Refreshing…", "正在刷新…") : t("Re-scan", "重新扫描")}
+            </Button>
+            <Button
+              variant="danger"
+              disabled={picked.size === 0 || cleaning || scanning}
+              onClick={() => void clean()}
             >
-              <Checkbox
-                checked={allOn}
-                disabled={Boolean(group.locked)}
-                onChange={() => toggleGroup(group)}
-                label={group.label}
-              />
-              <span className="privacy-icon">
-                <Icon size={17} />
-              </span>
-              <span className="privacy-copy">
-                <b>{group.label}</b>
-                <small>{group.detail}</small>
-                {warn && !group.locked ? (
-                  <small className="privacy-warn">{lang === "zh" ? warn[0] : warn[1]}</small>
-                ) : null}
-              </span>
-              {group.locked ? (
-                <span className="privacy-lock">
-                  <Lock size={12} /> {group.locked}
-                </span>
-              ) : (
-                <span className="privacy-size">{formatBytes(group.bytes)}</span>
-              )}
-            </label>
-          );
-        })}
-        {loaded && groups.length === 0 && !scanning ? (
-          <EmptyState
-            icon={<EyeOff size={26} />}
-            title={t("Nothing to clean", "没有可清理的痕迹")}
-            description={t(
-              "No browser profiles or trace stores were found on this machine.",
-              "本机没有找到浏览器 profile 或痕迹存储。",
-            )}
-          />
-        ) : null}
-      </section>
-
-      <section className="privacy-footer">
-        <span className="privacy-footer-sum">
+              {cleaning ? t("Cleaning…", "清理中…") : t("Clean now", "立即清理")}
+            </Button>
+          </div>
+        }
+      >
+        <Notice
+          tone={picked.size > 0 ? "warning" : "info"}
+          actions={
+            <Badge tone={picked.size > 0 ? "warning" : "neutral"}>
+              {picked.size > 0
+                ? t(
+                    `${formatCount(picked.size)} selected · ${formatBytes(pickedBytes)}`,
+                    `已选 ${formatCount(picked.size)} 项 · ${formatBytes(pickedBytes)}`,
+                  )
+                : t("Nothing selected", "尚未选择")}
+            </Badge>
+          }
+        >
           {picked.size > 0
             ? t(
-                `${formatCount(picked.size)} traces selected · ${formatBytes(pickedBytes)} · permanent`,
-                `已选 ${formatCount(picked.size)} 项 · ${formatBytes(pickedBytes)} · 永久删除`,
+                "These deletions skip the Recycle Bin on purpose; History still lists every path.",
+                "这些删除有意绕过回收站；历史记录仍会逐条登记路径与大小。",
               )
             : t(
                 "These deletions skip the Recycle Bin on purpose; History still lists every path.",
                 "这些删除有意绕过回收站；历史记录仍会逐条登记路径与大小。",
               )}
-        </span>
-        <Button variant="ghost" onClick={() => void scan()} disabled={scanning || cleaning}>
-          {scanning ? t("Refreshing…", "正在刷新…") : t("Re-scan", "重新扫描")}
-        </Button>
-        <Button
-          variant="danger"
-          disabled={picked.size === 0 || cleaning || scanning}
-          onClick={() => void clean()}
-        >
-          {cleaning ? t("Cleaning…", "清理中…") : t("Clean now", "立即清理")}
-        </Button>
-      </section>
+        </Notice>
+        <div className="row-list">
+          {groups.map((group) => {
+            const Icon = SPEC_ICONS[group.ruleId] ?? ShieldQuestion;
+            const allOn = group.indexes.every((index) => picked.has(index));
+            const warn = WARN_COPY[group.ruleId];
+            return (
+              <Row
+                key={group.ruleId}
+                selected={allOn}
+                muted={Boolean(group.locked)}
+                onClick={() => toggleGroup(group)}
+                leading={
+                  <span className="whitelist-icon">
+                    <Icon size={16} />
+                  </span>
+                }
+                title={group.label}
+                subtitle={group.detail}
+                tags={
+                  warn && !group.locked ? (
+                    <Badge tone="warning">{lang === "zh" ? warn[0] : warn[1]}</Badge>
+                  ) : undefined
+                }
+                trailing={
+                  <>
+                    {group.locked ? (
+                      <Badge tone="neutral" title={group.locked}>
+                        <Lock size={11} /> {group.locked}
+                      </Badge>
+                    ) : (
+                      <span>{formatBytes(group.bytes)}</span>
+                    )}
+                    <span onClick={(event) => event.stopPropagation()}>
+                      <Checkbox
+                        checked={allOn}
+                        disabled={Boolean(group.locked)}
+                        onChange={() => toggleGroup(group)}
+                        label={group.label}
+                      />
+                    </span>
+                  </>
+                }
+              />
+            );
+          })}
+          {loaded && groups.length === 0 && !scanning ? (
+            <EmptyState
+              icon={<EyeOff size={26} />}
+              title={t("Nothing to clean", "没有可清理的痕迹")}
+              description={t(
+                "No browser profiles or trace stores were found on this machine.",
+                "本机没有找到浏览器 profile 或痕迹存储。",
+              )}
+            />
+          ) : null}
+        </div>
+      </Section>
     </div>
   );
 }

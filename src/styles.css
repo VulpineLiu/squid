@@ -10254,3 +10254,977 @@ html.widget-mode body {
   line-height: 1.5;
   text-align: center;
 }
+/* ══════════════════════════════════════════════════════════════════════
+   Component library
+   ──────────────────────────────────────────────────────────────────────
+   One definition per standard surface. Pages compose these classes (or the
+   matching React primitives in components/ui.tsx); a page may lay them out,
+   but must not restyle them. Anything module-specific belongs in a layout
+   class, not in a second copy of a tab, row, chip or card.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Tabs — page sections and in-page sections share one shape. */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 31px;
+  padding: 0 12px;
+  border: 1px solid var(--nex-line);
+  border-radius: 999px;
+  background: var(--nex-paper);
+  color: var(--nex-muted);
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-medium);
+  white-space: nowrap;
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease,
+    color 0.14s ease;
+}
+
+.tab svg {
+  flex: 0 0 auto;
+  color: var(--nex-muted-soft);
+}
+
+.tab:hover:not(:disabled) {
+  border-color: var(--nex-line-strong);
+  color: var(--nex-ink);
+}
+
+.tab.is-active {
+  border-color: rgba(var(--nex-primary-rgb), 0.32);
+  background: var(--nex-primary-tint);
+  color: var(--nex-primary-strong);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.tab.is-active svg {
+  color: var(--nex-primary);
+}
+
+.tab:disabled {
+  opacity: 0.5;
+}
+
+.tab-badge {
+  margin-left: 1px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--nex-cream);
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.tab.is-active .tab-badge {
+  background: rgba(var(--nex-primary-rgb), 0.12);
+  color: var(--nex-primary-strong);
+}
+
+/* Chips — a filter toggle inside a panel, visually a lighter sibling of a tab. */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 27px;
+  padding: 0 10px;
+  border: 1px solid var(--nex-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-medium);
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease,
+    color 0.14s ease;
+}
+
+.chip:hover {
+  border-color: var(--nex-line-strong);
+  color: var(--nex-ink);
+}
+
+.chip.is-active {
+  border-color: rgba(var(--nex-primary-rgb), 0.3);
+  background: var(--nex-primary-tint);
+  color: var(--nex-primary-strong);
+}
+
+.chip-count {
+  color: var(--nex-muted-soft);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--nex-weight-semibold);
+}
+
+.chip.is-active .chip-count {
+  color: var(--nex-primary);
+}
+
+.chip.is-danger .chip-count {
+  color: #b0563d;
+}
+
+/* Segmented control — mutually exclusive options inside a toolbar. */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--nex-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.segmented-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-medium);
+  white-space: nowrap;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.segmented-item:hover {
+  color: var(--nex-ink);
+}
+
+.segmented-item.is-active {
+  background: var(--nex-paper);
+  color: var(--nex-ink);
+  font-weight: var(--nex-weight-semibold);
+  box-shadow: 0 1px 4px rgba(60, 50, 35, 0.12);
+}
+
+/* Section card — the only card shell for grouped content. */
+.section {
+  margin-bottom: 13px;
+  padding: 18px;
+  border: 1px solid var(--nex-line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 251, 246, 0.84);
+  box-shadow: var(--shadow-card);
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.section-head-main {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.section-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--nex-primary-strong);
+  background: var(--nex-primary-tint);
+}
+
+.section-copy {
+  min-width: 0;
+}
+
+.section-copy h2 {
+  margin: 0;
+  color: var(--nex-ink);
+  font-size: var(--nex-text-xs);
+  font-weight: var(--nex-weight-bold);
+  letter-spacing: -0.018em;
+  line-height: 1.35;
+}
+
+.section-copy p {
+  margin: 3px 0 0;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  line-height: var(--nex-leading-body);
+}
+
+.section-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Rows — one list row for settings, permissions, history, files and apps. */
+.row-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-top: 1px solid var(--nex-line);
+  background: transparent;
+  text-align: left;
+}
+
+.row:first-child,
+.row.is-first {
+  border-top: 0;
+}
+
+.row.is-clickable {
+  border-radius: 10px;
+  transition: background 0.14s ease;
+}
+
+.row.is-clickable:hover {
+  background: rgba(var(--nex-primary-rgb), 0.045);
+}
+
+.row.is-selected {
+  background: var(--nex-primary-tint);
+}
+
+.row.is-muted {
+  opacity: 0.72;
+}
+
+.row.is-busy {
+  opacity: 0.55;
+}
+
+.row-leading {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.row-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.row-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--nex-ink);
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-medium);
+  line-height: 1.35;
+}
+
+.row-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-sub {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  line-height: 1.45;
+}
+
+.row-detail {
+  color: var(--nex-muted-soft);
+  font-family: var(--nex-font-mono);
+  font-size: var(--nex-text-3xs);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.row-trailing {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Badges — every status pill is one of these five tones. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--nex-cream);
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-semibold);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.badge.is-success {
+  border-color: rgba(23, 134, 95, 0.18);
+  background: var(--nex-success-soft);
+  color: var(--nex-success-strong);
+}
+
+.badge.is-warning {
+  border-color: rgba(169, 119, 41, 0.2);
+  background: var(--nex-warning-soft);
+  color: var(--nex-warning-strong);
+}
+
+.badge.is-danger {
+  border-color: rgba(200, 90, 98, 0.2);
+  background: var(--nex-danger-soft);
+  color: var(--nex-danger-strong);
+}
+
+.badge.is-info {
+  border-color: rgba(77, 148, 207, 0.18);
+  background: var(--nex-info-soft);
+  color: var(--nex-info-strong);
+}
+
+.badge.is-primary {
+  border-color: rgba(var(--nex-primary-rgb), 0.2);
+  background: var(--nex-primary-soft);
+  color: var(--nex-primary-strong);
+}
+
+/* Toolbar — filters on the left, search or actions on the right. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Search field — the one input shape used beside toolbars. */
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 180px;
+  height: 31px;
+  padding: 0 10px;
+  border: 1px solid var(--nex-line);
+  border-radius: 9px;
+  color: var(--nex-muted-soft);
+  background: var(--nex-paper);
+  transition: border-color 0.14s ease;
+}
+
+.search-field:focus-within {
+  border-color: rgba(var(--nex-primary-rgb), 0.32);
+}
+
+.search-field input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--nex-ink);
+  background: transparent;
+  font-size: var(--nex-text-2xs);
+}
+
+/* Notice — inline explanation or warning, never a free-floating paragraph. */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--nex-line);
+  border-radius: 11px;
+  background: var(--nex-cream);
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  line-height: var(--nex-leading-body);
+}
+
+.notice.is-warning {
+  border-color: rgba(169, 119, 41, 0.28);
+  background: var(--nex-warning-soft);
+  color: var(--nex-warning-strong);
+}
+
+.notice.is-danger {
+  border-color: rgba(200, 90, 98, 0.26);
+  background: var(--nex-danger-soft);
+  color: var(--nex-danger-strong);
+}
+
+.notice-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  padding-top: 1px;
+}
+
+.notice-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.notice-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Stat — one number per tile, used by overview and system. */
+.stat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--nex-line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 251, 246, 0.84);
+}
+
+.stat-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-medium);
+}
+
+.stat-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--nex-primary-strong);
+  background: var(--nex-primary-tint);
+}
+
+.stat-value {
+  color: var(--nex-ink-strong);
+  font-size: var(--nex-text-xl);
+  font-weight: var(--nex-weight-heavy);
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-hint {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+}
+
+@media (max-width: 900px) {
+  .section-head {
+    flex-wrap: wrap;
+  }
+
+  .row {
+    flex-wrap: wrap;
+  }
+
+  .search-field {
+    width: 100%;
+  }
+}
+
+/* Choice card — a radio option that carries a title and a sentence. */
+.choice-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+
+.choice-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--nex-line);
+  border-radius: 11px;
+  background: var(--nex-paper);
+  text-align: left;
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease;
+}
+
+.choice-card:hover:not(:disabled) {
+  border-color: var(--nex-line-strong);
+}
+
+.choice-card.is-active {
+  border-color: rgba(var(--nex-primary-rgb), 0.28);
+  background: var(--nex-primary-tint);
+}
+
+.choice-card:disabled {
+  opacity: 0.55;
+}
+
+.choice-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 37px;
+  height: 37px;
+  border-radius: 10px;
+  color: var(--nex-primary-strong);
+  background: var(--nex-primary-soft);
+}
+
+.choice-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.choice-copy strong {
+  color: var(--nex-ink);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-medium);
+}
+
+.choice-copy small {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  line-height: var(--nex-leading-body);
+}
+
+.choice-dot {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--nex-line-strong);
+  border-radius: 50%;
+}
+
+.choice-card.is-active .choice-dot {
+  border: 4px solid var(--nex-primary);
+  background: #fff;
+}
+
+@media (max-width: 720px) {
+  .choice-group {
+    grid-template-columns: 1fr;
+  }
+}
+
+.row:focus-visible {
+  outline: 2px solid rgba(var(--nex-primary-rgb), 0.45);
+  outline-offset: 2px;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.row-empty {
+  padding: 18px 4px;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  text-align: center;
+}
+
+.toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-2xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Subhead — a heading inside a section, one step below .section-copy h2. */
+.subhead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 18px 0 4px;
+}
+
+.subhead:first-child {
+  margin-top: 0;
+}
+
+.subhead-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.subhead-copy h3 {
+  margin: 0;
+  color: var(--nex-ink);
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-bold);
+}
+
+.subhead-copy span {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+}
+
+.subhead-action {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Finding rows tint the title by confidence; the shell stays the shared .row. */
+.finding-row.is-danger .row-title-text {
+  color: var(--nex-danger-strong);
+}
+
+.finding-row.is-warning .row-title-text,
+.finding-row.is-risky .row-title-text {
+  color: var(--nex-warning-strong);
+}
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 13px;
+}
+
+@media (max-width: 900px) {
+  .stat-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.toolbar-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+}
+
+.toolbar-copy b {
+  color: var(--nex-ink);
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-semibold);
+}
+
+.toolbar-copy small {
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  line-height: var(--nex-leading-body);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Page layouts
+   ──────────────────────────────────────────────────────────────────────
+   Only placement and page-specific composition lives here. Every surface
+   itself comes from the component library above.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.row-copy > .usage-bar,
+.row-copy > .progress-track {
+  margin-top: 6px;
+}
+
+.row-copy > .notice {
+  margin-top: 8px;
+}
+
+.row .row-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.stat .usage-bar {
+  margin-top: 2px;
+}
+
+.stat-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  line-height: var(--nex-leading-body);
+}
+
+.notice-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: inherit;
+}
+
+.notice-list li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+/* Overview */
+
+.overview-page .overview-metrics {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 0.85fr);
+  gap: 16px;
+  align-items: stretch;
+  margin-top: 26px;
+}
+
+.overview-panel {
+  margin-bottom: 0;
+}
+
+.overview-stat-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin-bottom: 0;
+}
+
+.overview-stat-row .stat {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.overview-stat-row .stat + .stat {
+  padding-left: 16px;
+  border-left: 1px solid var(--nex-line);
+}
+
+.overview-stat-row .stat-value {
+  font-size: var(--nex-text-xl);
+}
+
+.overview-stat-row .stat-hint {
+  min-height: 30px;
+}
+
+.overview-storage .row-copy > .usage-bar,
+.health-side .row-copy > .usage-bar {
+  margin-top: 6px;
+}
+
+.overview-shortcuts .row-leading .quick-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.overview-specs .spec-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  border: 0;
+}
+
+.overview-specs .spec-row .row-copy {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.overview-specs .spec-row .row-title {
+  flex: 0 0 58px;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  font-weight: var(--nex-weight-body);
+}
+
+.overview-specs .spec-row .row-title-text {
+  white-space: normal;
+}
+
+.overview-specs .spec-row .row-detail {
+  flex: 1 1 auto;
+  color: var(--nex-ink-strong);
+  font-family: inherit;
+  font-size: var(--nex-text-2xs);
+  font-weight: var(--nex-weight-bold);
+  overflow-wrap: anywhere;
+}
+
+.overview-specs .spec-row .row-leading {
+  width: 22px;
+}
+
+/* System */
+
+.system-gauge-card.section {
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+  min-height: 297px;
+}
+
+.system-gauge-card.section .section-head {
+  width: 100%;
+}
+
+.system-gauge-card.section .gauge {
+  align-self: center;
+  margin: 5px 0 3px;
+}
+
+.system-gauge-card.section .gauge-facts,
+.system-gauge-card.section .core-bars,
+.system-gauge-card.section .memory-split,
+.system-gauge-card.section .activity-pair,
+.system-gauge-card.section .activity-uptime {
+  width: 100%;
+}
+
+.battery-panel.section {
+  display: block;
+  margin-top: 12px;
+}
+
+.battery-body {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.battery-body .battery-facts {
+  flex: 1 1 auto;
+}
+
+.battery-body .battery-track {
+  flex: 1 1 120px;
+}
+
+.process-panel.section,
+.health-side.section {
+  padding: 18px;
+}
+
+.system-lower {
+  align-items: start;
+}
+
+/* Settings and permissions */
+
+.settings-grid > .section {
+  margin-bottom: 0;
+}
+
+.perm-group-card {
+  margin-bottom: 9px;
+  overflow: hidden;
+  border: 1px solid var(--nex-line);
+  background: var(--nex-paper);
+}
+
+.perm-group-head {
+  padding: 10px 12px;
+}
+
+.perm-group-head .row-title {
+  font-weight: var(--nex-weight-semibold);
+}
+
+.perm-rows {
+  padding: 0 12px 5px;
+}
+
+.perm-rows .row:first-child {
+  border-top: 1px solid var(--nex-line);
+}
+
+.perm-group-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* History */
+
+.history-card.section {
+  padding: 0;
+  overflow: hidden;
+}
+
+.history-card.section > .history-head {
+  padding: 14px 18px;
+}
+
+.history-card.section > .history-detail {
+  padding: 0 18px 14px;
+}
+
+.history-detail > .row-list {
+  max-height: 255px;
+  overflow: auto;
+}
+
+/* Setup dialog */
+
+.setup-card > .row:first-of-type {
+  border-top: 0;
+}
+
+.setup-card > .row {
+  margin-top: 2px;
+}

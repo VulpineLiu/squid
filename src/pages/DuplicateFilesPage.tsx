@@ -17,12 +17,18 @@ import { useI18n } from "../i18n";
 import { agoLabel, formatBytes, formatCount } from "../lib/format";
 import { keepIndexOf, useDuplicatesWorkspace } from "../hooks/useDuplicatesWorkspace";
 import {
+  Badge,
   Button,
   Checkbox,
   EmptyState,
+  IconButton,
   InlineError,
+  Notice,
   PageHeader,
   ProgressCard,
+  Row,
+  Segmented,
+  Toolbar,
   useToast,
 } from "../components/ui";
 import { CleanBar } from "../components/CleanBar";
@@ -75,97 +81,94 @@ function DupGroupCard({
   // the strategy stays visible, and adds a warning when it gets picked.
   const keepPicked = picked?.has(keep) ?? false;
   return (
-    <section className={`dup-group ${group.personal ? "is-personal" : ""}`}>
-      <header className="dup-group-head">
-        <div className="dup-group-title">
-          <span className="dup-group-count">
-            {group.copies.length} {t("copies", "份相同")}
-          </span>
-          <b>{group.copies[keep]?.path.split(/[\\/]/).pop()}</b>
-          <span className="dup-waste-chip">
-            {t("wastes", "重复浪费")} {formatBytes(wasted)}
-          </span>
-          {keepPicked ? (
-            <span className="dup-empty-chip">
-              {t("group will be empty", "本组将一份不剩")}
-            </span>
-          ) : null}
-          {group.personal ? (
-            <span className="dup-personal-chip">
-              <Lock size={11} />
-              {t("personal files", "个人文件")}
-            </span>
-          ) : null}
-        </div>
-        <div className="dup-group-size">
-          {formatBytes(group.size)} {t("each", "/ 份")}
-        </div>
-        <button
-          type="button"
-          className="dup-group-dismiss"
-          title={t("Ignore this group", "忽略本组")}
-          onClick={() => onDismiss(index)}
-        >
-          <X size={13} />
-        </button>
-      </header>
-      <ul className="dup-copies">
+    <section className={`section dup-group ${group.personal ? "is-personal" : ""}`}>
+      <Row
+        className="dup-group-head"
+        title={group.copies[keep]?.path.split(/[\\/]/).pop()}
+        tags={
+          <>
+            <Badge tone="neutral">
+              {group.copies.length} {t("copies", "份相同")}
+            </Badge>
+            <Badge tone="warning">
+              {t("wastes", "重复浪费")} {formatBytes(wasted)}
+            </Badge>
+            {keepPicked ? (
+              <Badge tone="danger">{t("group will be empty", "本组将一份不剩")}</Badge>
+            ) : null}
+            {group.personal ? (
+              <Badge tone="info">
+                <Lock size={11} />
+                {t("personal files", "个人文件")}
+              </Badge>
+            ) : null}
+          </>
+        }
+        subtitle={t(
+          `${formatBytes(group.size)} each`,
+          `每份 ${formatBytes(group.size)}`,
+        )}
+        trailing={
+          <IconButton
+            label={t("Ignore this group", "忽略本组")}
+            onClick={() => onDismiss(index)}
+          >
+            <X size={13} />
+          </IconButton>
+        }
+      />
+      <div className="row-list dup-copies">
         {group.copies.map((copy, copyIndex) => {
           const isKeep = copyIndex === keep;
           const checked = picked?.has(copyIndex) ?? false;
           return (
-            <li
+            <Row
               key={copy.path}
               className={`dup-copy ${checked ? "is-picked" : ""} ${isKeep ? "is-keep" : ""} ${
                 isKeep && checked ? "is-keep-picked" : ""
               }`}
-            >
-              <Checkbox
-                checked={checked}
-                disabled={Boolean(copy.locked)}
-                onChange={() => onToggle(index, copyIndex)}
-                label={copy.path}
-              />
-              {isKeep ? (
-                <span
-                  className={`dup-keep-chip ${checked ? "is-danger" : ""}`}
-                  title={
-                    checked
-                      ? t(
-                          "This is the kept copy — deleting it leaves the group with nothing.",
-                          "此文件为最后保留版本，勾选即完全删除本组。",
-                        )
-                      : undefined
+              selected={checked}
+              muted={isKeep}
+              leading={
+                <Checkbox
+                  checked={checked}
+                  disabled={Boolean(copy.locked)}
+                  onChange={() => onToggle(index, copyIndex)}
+                  label={copy.path}
+                />
+              }
+              title={copy.path}
+              tags={
+                <>
+                  {isKeep ? (
+                    <Badge tone={checked ? "danger" : "primary"}>
+                      {checked
+                        ? t("keep · deleting", "保留 · 已勾选删除")
+                        : t("keep", "保留")}
+                    </Badge>
+                  ) : null}
+                  {copy.locked ? (
+                    <Badge tone="neutral" title={copy.locked}>
+                      <Lock size={11} />
+                    </Badge>
+                  ) : null}
+                </>
+              }
+              subtitle={copy.mtimeMs ? agoLabel(copy.mtimeMs, lang) : undefined}
+              trailing={
+                <IconButton
+                  label={t("Reveal in Explorer", "在文件夹中显示")}
+                  onClick={() =>
+                    void apiClient.api.revealPath(copy.path).catch(() => undefined)
                   }
                 >
-                  {checked ? t("keep · deleting", "保留 · 已勾选删除") : t("keep", "保留")}
-                </span>
-              ) : null}
-
-              {copy.locked ? (
-                <span className="dup-lock-chip" title={copy.locked}>
-                  <Lock size={11} />
-                </span>
-              ) : null}
-              <span className="dup-copy-path" title={copy.path}>
-                {copy.path}
-              </span>
-              <span className="dup-copy-age">
-                {copy.mtimeMs ? agoLabel(copy.mtimeMs, lang) : ""}
-              </span>
-              <button
-                type="button"
-                className="dup-copy-reveal"
-                onClick={() => void apiClient.api.revealPath(copy.path).catch(() => undefined)}
-                title={t("Reveal in Explorer", "在文件夹中显示")}
-              >
-                <MapPin size={12} />
-                {t("Reveal", "定位")}
-              </button>
-            </li>
+                  <MapPin size={12} />
+                </IconButton>
+              }
+            />
           );
         })}
-      </ul>
+      </div>
     </section>
   );
 }
@@ -280,18 +283,15 @@ export function DuplicateFilesPage({
         </button>
         <span className="dup-config-spacer" />
         <span className="dup-config-label">{t("Min size", "最小体积")}</span>
-        <div className="dup-seg" role="group">
-          {MIN_SIZE_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={minSize === option.value ? "is-active" : ""}
-              onClick={() => setMinSize(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          value={minSize}
+          label={t("Min size", "最小体积")}
+          onChange={setMinSize}
+          options={MIN_SIZE_OPTIONS.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+        />
         <Button
           size="lg"
           variant="primary"
@@ -401,44 +401,47 @@ export function DuplicateFilesPage({
 
       {!workspace.scanning && groups.length > 0 ? (
         <>
-          <section className="dup-toolbar">
-            <button type="button" className="dup-smart" onClick={() => workspace.smartSelect()}>
-              <Sparkles size={13} />{" "}
+          <Toolbar>
+            <div className="toolbar-copy">
+              {formatCount(groups.length)} {t("groups · duplicate copies", "组 · 重复副本")}{" "}
+              {formatCount(groups.reduce((sum, g) => sum + g.copies.length - 1, 0))} ·{" "}
+              {formatBytes(visibleWasted)}
+              {empties > 0 ? (
+                <b>
+                  {t(
+                    `${formatCount(empties)} group(s) will be fully removed`,
+                    ` · ${formatCount(empties)} 组将一份不剩`,
+                  )}
+                </b>
+              ) : null}
+            </div>
+            <div className="toolbar-group">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Sparkles size={13} />}
+              onClick={() => workspace.smartSelect()}
+            >
               {t("Smart pick (keep one per group)", "智能选择（每组保留一份）")}
-            </button>
-            <button
-              type="button"
-              className="dup-strategy"
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() =>
                 workspace.setKeepStrategy(
                   workspace.keepStrategy === "shortest" ? "oldest" : "shortest",
                 )
               }
-              title={t("Which copy survives when picking smartly", "智能选择保留哪一份")}
             >
               {workspace.keepStrategy === "shortest"
                 ? t("keep: shortest path", "保留：路径最短")
                 : t("keep: oldest copy", "保留：最早的一份")}
-            </button>
-            <button type="button" className="dup-invert" onClick={workspace.invertSelection}>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={workspace.invertSelection}>
               {t("Invert", "反选")}
-            </button>
-            <span className="dup-toolbar-sum">
-              {formatCount(groups.length)} {t("groups · duplicate copies", "组 · 重复副本")}{" "}
-              {formatCount(groups.reduce((sum, g) => sum + g.copies.length - 1, 0))} ·{" "}
-              {formatBytes(visibleWasted)}
-              {empties > 0 ? (
-                <em className="dup-empties">
-                  {t(
-                    `${formatCount(empties)} group(s) will be fully removed`,
-                    ` · ${formatCount(empties)} 组将一份不剩`,
-                  )}
-                </em>
-              ) : null}
-            </span>
+            </Button>
             <Button
               variant="danger"
-              className="dup-clean"
               disabled={workspace.selectedCount === 0 || workspace.deleting}
               onClick={() => setConfirming(true)}
             >
@@ -452,44 +455,44 @@ export function DuplicateFilesPage({
                     )} · ${formatBytes(workspace.selectedBytes)}`}
               </span>
             </Button>
-          </section>
+            </div>
+          </Toolbar>
           {confirming ? (
-            <section className={`dup-confirm ${empties > 0 ? "is-strict" : ""}`}>
-              <ShieldAlert size={15} />
-              <div>
-                <b>
-                  {lang === "zh"
-                    ? `将 ${workspace.selectedCount} 个副本（${formatBytes(workspace.selectedBytes)}）移入回收站？`
-                    : `Move ${workspace.selectedCount} copies (${formatBytes(workspace.selectedBytes)}) to the Recycle Bin?`}
-                </b>
-                {empties > 0 ? (
-                  <b className="dup-confirm-warn">
-                    {lang === "zh"
-                      ? `${formatCount(empties)} 组勾选了最后保留版本——这 ${formatCount(empties)} 组将被完全删除！`
-                      : `${formatCount(empties)} group(s) include the kept copy — they will be deleted entirely!`}
-                  </b>
-                ) : (
-                  <small>
-                    {t(
-                      "Every group keeps at least one copy; a mis-click is one Undo away from History.",
-                      "每组至少保留一份；误删可从「历史记录 → 撤销」找回。",
-                    )}
-                  </small>
-                )}
-                <small>
-                  {t(
-                    "Deletions land in the Recycle Bin — undo from History.",
-                    "删除一律进回收站，可从「历史记录 → 撤销」找回。",
+            <Notice
+              tone={empties > 0 ? "danger" : "warning"}
+              icon={<ShieldAlert size={15} />}
+              actions={
+                <>
+                  <Button onClick={() => setConfirming(false)}>{t("Cancel", "取消")}</Button>
+                  <Button variant="danger" onClick={() => void confirmClean()}>
+                    {empties > 0
+                      ? t("Delete everything selected", "确认完全删除")
+                      : t("Confirm", "确认清理")}
+                  </Button>
+                </>
+              }
+            >
+              <b>
+                {lang === "zh"
+                  ? `将 ${workspace.selectedCount} 个副本（${formatBytes(workspace.selectedBytes)}）移入回收站？`
+                  : `Move ${workspace.selectedCount} copies (${formatBytes(workspace.selectedBytes)}) to the Recycle Bin?`}
+              </b>
+              <br />
+              {empties > 0
+                ? t(
+                    `${formatCount(empties)} group(s) include the kept copy — they will be deleted entirely!`,
+                    `${formatCount(empties)} 组勾选了最后保留版本——这 ${formatCount(empties)} 组将被完全删除！`,
+                  )
+                : t(
+                    "Every group keeps at least one copy; a mis-click is one Undo away from History.",
+                    "每组至少保留一份；误删可从「历史记录 → 撤销」找回。",
                   )}
-                </small>
-              </div>
-              <Button onClick={() => setConfirming(false)}>{t("Cancel", "取消")}</Button>
-              <Button variant="danger" onClick={() => void confirmClean()}>
-                {empties > 0
-                  ? t("Delete everything selected", "确认完全删除")
-                  : t("Confirm", "确认清理")}
-              </Button>
-            </section>
+              <br />
+              {t(
+                "Deletions land in the Recycle Bin — undo from History.",
+                "删除一律进回收站，可从「历史记录 → 撤销」找回。",
+              )}
+            </Notice>
           ) : null}
           <div className="dup-groups">
             {entries.map(({ group, index }) => (

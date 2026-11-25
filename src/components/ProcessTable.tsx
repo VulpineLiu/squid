@@ -17,10 +17,14 @@ import type { Finding, ProcessDetail, ProcessRow } from "../types";
 import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
 import {
   Button,
+  Chip,
   ConfirmDialog,
   EmptyState,
   InlineError,
   Modal,
+  SearchField,
+  Section,
+  Toolbar,
   useToast,
 } from "./ui";
 
@@ -224,55 +228,47 @@ export function ProcessTable({
   if (error && !rows) return <InlineError message={error} />;
 
   return (
-    <section className="panel">
-      <div className="process-controls">
-        <label className="search-field">
-          <Search size={14} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t("Search name, path or PID", "搜索名称、路径或 PID")}
-          />
-        </label>
+    <Section
+      title={t("Processes", "进程")}
+      hint={
+        rows
+          ? t(
+              `${formatCount(rows.length)} running processes · signature checks are on demand`,
+              `${formatCount(rows.length)} 个运行中的进程 · 签名按需检查`,
+            )
+          : undefined
+      }
+    >
+      <Toolbar>
+        <SearchField
+          value={query}
+          onChange={setQuery}
+          label={t("Search processes", "搜索进程")}
+          placeholder={t("Search name, path or PID", "搜索名称、路径或 PID")}
+        />
         <div className="chip-row">
-          <button
-            className={`filter-chip ${mineOnly ? "is-active" : ""}`}
-            onClick={() => setMineOnly((current) => !current)}
-          >
+          <Chip active={mineOnly} onClick={() => setMineOnly((current) => !current)}>
             {t("My processes", "我的进程")}
-          </button>
-          <button
-            className={`filter-chip ${unsignedOnly ? "is-active" : ""}`}
-            onClick={() => setUnsignedOnly((current) => !current)}
-          >
+          </Chip>
+          <Chip active={unsignedOnly} onClick={() => setUnsignedOnly((current) => !current)}>
             {t("Unsigned only", "仅未签名")}
-          </button>
-          <button
-            className={`filter-chip ${startupOnly ? "is-active" : ""}`}
-            onClick={() => setStartupOnly((current) => !current)}
-          >
+          </Chip>
+          <Chip active={startupOnly} onClick={() => setStartupOnly((current) => !current)}>
             {t("Started at login", "由登录项启动")}
-          </button>
-          <button
-            className={`filter-chip ${grouped ? "is-active" : ""}`}
-            onClick={() => setGrouped((current) => !current)}
-          >
+          </Chip>
+          <Chip active={grouped} onClick={() => setGrouped((current) => !current)}>
             {t("Group by app", "按应用聚合")}
-          </button>
-          <button
-            className={`filter-chip ${trust ? "is-active" : ""}`}
+          </Chip>
+          <Chip
+            active={trust}
             onClick={() => {
               const next = !trust;
               setTrust(next);
               void load(next);
             }}
-            title={t(
-              "Signature lookups make each refresh slower",
-              "读取签名会让每次刷新变慢",
-            )}
           >
             {t("Check signatures", "检查签名")}
-          </button>
+          </Chip>
           <Button
             variant="ghost"
             size="sm"
@@ -283,7 +279,7 @@ export function ProcessTable({
             {t("Refresh", "刷新")}
           </Button>
         </div>
-      </div>
+      </Toolbar>
 
       {visible.length === 0 ? (
         <EmptyState
@@ -474,7 +470,7 @@ export function ProcessTable({
         onConfirm={() => victim && void stop(victim)}
         onClose={() => setVictim(null)}
       />
-    </section>
+    </Section>
   );
 }
 

@@ -26,14 +26,17 @@ import { formatBytes, formatCount, messageFrom, shortPath } from "../lib/format"
 import type { Confidence, Finding, SecurityScan, SecurityStatus } from "../types";
 import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
 import {
+  Badge,
   Button,
+  Chip,
   ConfirmDialog,
   EmptyState,
   InlineError,
   Modal,
   PageHeader,
   ProgressCard,
-  SectionTitle,
+  Row,
+  Section,
   useToast,
 } from "../components/ui";
 
@@ -252,28 +255,25 @@ export function SecurityPage({
         onToggleScope={() => setShowScope((current) => !current)}
       />
 
-      <section className="panel">
-        <SectionTitle
-          title={t("Findings", "发现")}
-          action={
-            scan ? (
-              <div className="chip-row" role="tablist">
-                {filterOptions.map(([key, label, count]) => (
-                  <button
-                    key={key}
-                    role="tab"
-                    aria-selected={filter === key}
-                    className={`filter-chip ${filter === key ? "is-active" : ""}`}
-                    onClick={() => setFilter(key)}
-                  >
-                    {label}
-                    <b>{count}</b>
-                  </button>
-                ))}
-              </div>
-            ) : null
-          }
-        />
+      <Section
+        title={t("Findings", "发现")}
+        actions={
+          scan ? (
+            <div className="chip-row" role="group">
+              {filterOptions.map(([key, label, count]) => (
+                <Chip
+                  key={key}
+                  active={filter === key}
+                  count={count}
+                  onClick={() => setFilter(key)}
+                >
+                  {label}
+                </Chip>
+              ))}
+            </div>
+          ) : null
+        }
+      >
         {!scan ? (
           <EmptyState
             icon={<ShieldQuestion size={26} />}
@@ -309,7 +309,7 @@ export function SecurityPage({
             }
           />
         ) : (
-          <ul className="item-list">
+          <div className="row-list">
             {findings.map((finding) => (
               <FindingRow
                 key={finding.id}
@@ -331,9 +331,9 @@ export function SecurityPage({
                 }
               />
             ))}
-          </ul>
+          </div>
         )}
-      </section>
+      </Section>
 
       <QuarantineCard
         status={status}
@@ -480,18 +480,18 @@ function ProtectionCard({
         : protection.productName || t("No product reported", "未读到防护产品");
 
   return (
-    <section className={`panel is-protection ${unknown ? "is-unknown" : ""}`}>
+    <section className={`section is-protection ${unknown ? "is-unknown" : ""}`}>
       <span className={`metric-icon ${unknown ? "tone-warning" : "tone-primary"}`}>
         {unknown ? <ShieldQuestion size={22} /> : <ShieldCheck size={22} />}
       </span>
       <div className="protection-copy">
         <div className="protection-head">
           <strong>{providerName}</strong>
-          <span className={`status-chip is-${unknown ? "neutral" : "info"}`}>
+          <Badge tone={unknown ? "neutral" : "info"}>
             {unknown
               ? t("Could not be confirmed", "无法确认")
               : t("Read from the system", "来自系统")}
-          </span>
+          </Badge>
         </div>
         <p>
           {t(
@@ -589,7 +589,7 @@ function CoverageCard({
       : t("Coverage was complete", "覆盖范围完整");
 
   return (
-    <section className={`panel is-coverage is-${tone}`}>
+    <section className={`section is-coverage is-${tone}`}>
       <div className="coverage-head">
         <div>
           <strong>{title}</strong>
@@ -613,7 +613,7 @@ function CoverageCard({
                 )}
           </p>
         </div>
-        <span className={`status-chip is-${tone}`}>
+        <Badge tone={tone === "success" ? "success" : tone === "warning" ? "warning" : "neutral"}>
           {lang === "zh"
             ? !scan
               ? "未扫描"
@@ -625,7 +625,7 @@ function CoverageCard({
               : restricted
                 ? "limited"
                 : "complete"}
-        </span>
+        </Badge>
       </div>
 
       {access === "denied" || access === "unknown" ? (
@@ -684,8 +684,8 @@ function CoverageCard({
               "signed" because a signature would have been accepted if one had been
               configured is the kind of green that costs trust later. */}
           {intel.source === "pack" ? (
-            <span
-              className={`status-chip is-${intel.signed ? "success" : "warning"}`}
+            <Badge
+              tone={intel.signed ? "success" : "warning"}
               title={
                 intel.signed
                   ? t(
@@ -701,7 +701,7 @@ function CoverageCard({
               {intel.signed
                 ? t("signature verified", "已校验签名")
                 : t("hash only · not signed", "仅校验哈希 · 未验签")}
-            </span>
+            </Badge>
           ) : null}
         </div>
         <div className="coverage-actions">
@@ -803,25 +803,31 @@ function FindingRow({
   const { t } = useI18n();
   const meta = CONFIDENCE_META[finding.confidence];
   return (
-    <li
-      className={`item-row is-${meta.tone} ${
-        finding.quarantined || finding.allowlisted ? "is-handled" : ""
-      }`}
-    >
-      <button className="item-main" onClick={onOpen}>
-        <span className="item-copy">
-          <strong>{finding.name}</strong>
-          <small title={finding.displayPath ?? undefined}>
-            {finding.displayPath ?? t("Machine state", "系统状态")}
-          </small>
-          <em>{finding.title}</em>
-        </span>
-      </button>
-      <span className={`status-chip is-${finding.allowlisted ? "neutral" : meta.tone}`}>
-        {finding.allowlisted ? t("Trusted", "已信任") : t(meta.en, meta.zh)}
-        {finding.quarantined ? ` · ${t("held", "已隔离")}` : ""}
-      </span>
-      <div className="item-actions">
+    <Row
+      className={`finding-row is-${meta.tone}`}
+      title={finding.name}
+      tags={
+        <Badge
+          tone={
+            finding.allowlisted
+              ? "neutral"
+              : meta.tone === "danger"
+                ? "danger"
+                : meta.tone === "warning" || meta.tone === "risky"
+                  ? "warning"
+                  : "info"
+          }
+        >
+          {finding.allowlisted ? t("Trusted", "已信任") : t(meta.en, meta.zh)}
+          {finding.quarantined ? ` · ${t("held", "已隔离")}` : ""}
+        </Badge>
+      }
+      subtitle={finding.title}
+      detail={finding.displayPath ?? t("Machine state", "系统状态")}
+      muted={finding.quarantined || finding.allowlisted}
+      onClick={onOpen}
+      trailing={
+      <div className="row-actions" onClick={(event) => event.stopPropagation()}>
         {finding.path ? (
           <button
             className="icon-button"
@@ -872,7 +878,8 @@ function FindingRow({
           </>
         )}
       </div>
-    </li>
+      }
+    />
   );
 }
 
@@ -932,32 +939,31 @@ function QuarantineCard({
   const { t } = useI18n();
   const items = status.quarantine;
   return (
-    <section className="panel">
-      <SectionTitle
-        title={t("Quarantine", "隔离区")}
-        subtitle={
-          items.length
-            ? t(
-                `${formatCount(items.length)} items · ${formatBytes(
-                  status.quarantineSize,
-                )} · held where they cannot run`,
-                `${formatCount(items.length)} 项 · ${formatBytes(
-                  status.quarantineSize,
-                )} · 存放位置无法执行`,
-              )
-            : t("Empty — nothing has been moved out of the way.", "空的——没有文件被移走。")
-        }
-        action={
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<FolderOpen size={14} />}
-            onClick={() => void api.openQuarantineFolder().catch(() => undefined)}
-          >
-            {t("Open folder", "打开目录")}
-          </Button>
-        }
-      />
+    <Section
+      title={t("Quarantine", "隔离区")}
+      hint={
+        items.length
+          ? t(
+              `${formatCount(items.length)} items · ${formatBytes(
+                status.quarantineSize,
+              )} · held where they cannot run`,
+              `${formatCount(items.length)} 项 · ${formatBytes(
+                status.quarantineSize,
+              )} · 存放位置无法执行`,
+            )
+          : t("Empty — nothing has been moved out of the way.", "空的——没有文件被移走。")
+      }
+      actions={
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<FolderOpen size={14} />}
+          onClick={() => void api.openQuarantineFolder().catch(() => undefined)}
+        >
+          {t("Open folder", "打开目录")}
+        </Button>
+      }
+    >
       {items.length === 0 ? (
         <p className="empty-inline">
           {t(
@@ -966,17 +972,16 @@ function QuarantineCard({
           )}
         </p>
       ) : (
-        <ul className="item-list">
+        <div className="row-list">
           {items.map((item) => (
-            <li key={item.id} className="item-row">
-              <div className="item-copy">
-                <strong title={item.originalPath}>{item.displayPath}</strong>
-                <small>
-                  {item.title} · {formatBytes(item.size)} ·{" "}
-                  {new Date(item.quarantinedMs).toLocaleString()}
-                </small>
-              </div>
-              <div className="item-actions">
+            <Row
+              key={item.id}
+              title={<span title={item.originalPath}>{item.displayPath}</span>}
+              subtitle={`${item.title} · ${formatBytes(item.size)} · ${new Date(
+                item.quarantinedMs,
+              ).toLocaleString()}`}
+              trailing={
+              <div className="row-actions">
                 <Button
                   size="sm"
                   variant="ghost"
@@ -996,11 +1001,12 @@ function QuarantineCard({
                   {t("Delete", "删除")}
                 </Button>
               </div>
-            </li>
+              }
+            />
           ))}
-        </ul>
+        </div>
       )}
-    </section>
+    </Section>
   );
 }
 
@@ -1015,10 +1021,7 @@ function ActivityCard({
   const activity = status.activity;
   if (!activity.length) return null;
   return (
-    <section className="panel">
-      <SectionTitle
-        title={t("Recent security activity", "最近的安全活动")}
-      />
+    <Section title={t("Recent security activity", "最近的安全活动")}>
       <ul className="activity-list">
         {activity.slice(0, 10).map((entry, index) => (
           <li key={`${entry.atMs}-${index}`}>
@@ -1032,6 +1035,6 @@ function ActivityCard({
         <HardDriveDownload size={13} />
         {t("Manage startup items", "管理启动项")}
       </button>
-    </section>
+    </Section>
   );
 }

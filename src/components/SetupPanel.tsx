@@ -15,7 +15,7 @@ import { api } from "../lib/api";
 import { messageFrom } from "../lib/format";
 import type { PermissionStatus, SecurityStatus } from "../types";
 import type { SecurityWorkspace } from "../hooks/useSecurityWorkspace";
-import { Button } from "./ui";
+import { Badge, Button, Row } from "./ui";
 
 type State = "checking" | "granted" | "denied" | "unknown" | "not-required" | "error";
 
@@ -362,22 +362,30 @@ function SetupRow({
 }) {
   const { t } = useI18n();
   return (
-    <div className={`setup-check is-${state.tone}`}>
-      <span className="setup-check-icon">{icon}</span>
-      <div className="setup-check-copy">
-        <strong>
-          {title}
-          {optional ? <span className="setup-check-optional">{t("optional", "可选")}</span> : null}
-          <span className="setup-check-state">
-            {state.tone === "ok" ? <Check size={13} /> : null}
-            {state.tone === "problem" ? <X size={13} /> : null}
+    <Row
+      leading={<span className="setup-check-icon">{icon}</span>}
+      title={title}
+      tags={
+        <>
+          {optional ? <Badge>{t("optional", "可选")}</Badge> : null}
+          <Badge
+            tone={
+              state.tone === "ok"
+                ? "success"
+                : state.tone === "problem"
+                  ? "warning"
+                  : "neutral"
+            }
+          >
+            {state.tone === "ok" ? <Check size={12} /> : null}
+            {state.tone === "problem" ? <X size={12} /> : null}
             {state.label}
-          </span>
-        </strong>
-        <small>{note}</small>
-        {code ? <code>{code}</code> : null}
-      </div>
-      {action ? <div className="setup-check-action">{action}</div> : null}
-    </div>
+          </Badge>
+        </>
+      }
+      subtitle={note}
+      detail={code ? <code>{code}</code> : undefined}
+      trailing={action}
+    />
   );
 }
