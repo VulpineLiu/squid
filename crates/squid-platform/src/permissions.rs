@@ -606,6 +606,30 @@ mod windows {
         (!product.is_empty()).then(|| product.to_string())
     }
 
+    /// Windows-style *component role* descriptions shipped inside PEs —
+    /// "Windows File System Proxy" (WinFsp), "Microsoft Edge Elevation
+    /// Service" — label a role, not a product the user recognises. Rows
+    /// named only by such a label are not attributed to a software group;
+    /// they fall into 其他软件 like any anonymous helper. Microsoft-signed
+    /// ones are usually hidden in 系统组件 anyway.
+    fn is_component_role_label(text: &str) -> bool {
+        let lower = text.trim().to_lowercase();
+        let vendor_led = lower.starts_with("windows ") || lower.starts_with("microsoft ");
+        const ROLES: [&str; 10] = [
+            "proxy",
+            "host",
+            "agent",
+            "service",
+            "support",
+            "helper",
+            "driver",
+            "component",
+            "launcher",
+            "broker",
+        ];
+        vendor_led && ROLES.iter().any(|role| lower.ends_with(role))
+    }
+
     /// Resolve `display_name` (and the software icon) for every scanned
     /// entry, once per binary. Also settles `target` / `target_exists`: the
     /// binary the row really runs, and whether it is still on disk (a missing
@@ -643,8 +667,12 @@ mod windows {
                 friendly_program_name(&entry.name, description.as_deref(), product.as_deref());
             // 电脑管家's grouping rule: an entry is only attributed to a
             // software product when the binary carries real human strings;
-            // everything else falls into the 其他软件 bucket.
-            entry.named = description.is_some() || product.is_some();
+            // everything else falls into the 其他软件 bucket. A "Windows
+            // File System Proxy"-style role label names a plumbing part,
+            // not a product the user recognises — WinFsp's launcher used to
+            // open its own fake software group through its FileDescription.
+            entry.named = (description.is_some() || product.is_some())
+                && !is_component_role_label(&entry.display_name);
             if !entry.named {
                 if let Some(product) = windows_store_product(&probed) {
                     entry.display_name = product;
@@ -2492,11 +2520,56 @@ mod windows {
     mod tests {
         use super::{
             approved_enabled, attribute_vendor_suites, clean_module_path, exe_from_command,
-            friendly_program_name, has_cjk, is_placeholder_label, module_folder_name,
-            parse_csv_line, split_run_path, suite_path, task_settings_enabled,
+            friendly_program_name, has_cjk, is_component_role_label, is_placeholder_label,
+            module_folder_name, parse_csv_line, split_run_path, suite_path, task_settings_enabled,
             windows_store_product, write_approved, StartupEntry, CURRENT_VERSION,
         };
         use winreg::RegKey;
+
+        #[test]
+        fn role_labels_are_not_products() {
+            // WinFsp's launcher names itself "Windows File System Proxy";
+            // that is plumbing, so the row must not open its own group.
+            assert!(is_component_role_label("Windows File System Proxy"));
+            assert!(is_component_role_label("Microsoft Edge Elevation Service"));
+            assert!(is_component_role_label(
+                "Windows Push Notifications User Service"
+            ));
+            // Real products keep their groups, Chinese or English.
+            assert!(!is_component_role_label("微信"));
+            assert!(!is_component_role_label("Windows Defender Firewall"));
+            assert!(!is_component_role_label("Everything"));
+            assert!(!is_component_role_label("WinFsp Launcher"));
+        }
+
+        #[test]
+        fn the_live_scan_leaves_winfsp_unattributed() {
+            // The user's exact complaint: the WinFsp launcher service opened
+            // a "Windows File System Proxy" software group of its own.
+            if !std::path::Path::new(r"C:\Program Files (x86)\WinFsp").exists() {
+                eprintln!("skipping: no WinFsp on this machine");
+                return;
+            }
+            let entries = super::scan_startup();
+            let launcher: Vec<_> = entries
+                .iter()
+                .filter(|entry| {
+                    entry
+                        .target
+                        .to_lowercase()
+                        .starts_with(r"c:\program files (x86)\winfsp")
+                })
+                .collect();
+            assert!(!launcher.is_empty(), "WinFsp rows vanished");
+            assert!(
+                launcher.iter().all(|entry| !entry.named),
+                "WinFsp still attributed: {:?}",
+                launcher
+                    .iter()
+                    .map(|entry| (&entry.name, &entry.display_name, entry.named))
+                    .collect::<Vec<_>>()
+            );
+        }
 
         #[test]
         fn suite_paths_need_a_vendor_and_a_child_folder() {
