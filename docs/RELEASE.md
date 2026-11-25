@@ -1,5 +1,16 @@
 # Desktop release and update channel
 
+## 代码仓上传规则（用户指令「上传代码仓」即指本节）
+
+- 地址：`https://git.unissense.tech/mula/nex_squid.git`（origin 已内置账号，
+  凭据 lijunjie，勿写入其他文件）。
+- 分支：**dev**。提交信息用中文，经 `git commit --file -`（或 `-F 文件`）传入，
+  避免 pwsh 引号问题；发布二进制需 `git add -f`（release 目录不在 .gitignore
+  白名单内）。
+- 打包版上传时同步刷新 `release/<ver>/`（安装包/便携包/SHA256SUMS/
+  squid-update.json/RELEASE_NOTES），并在 `release/CHANGELOG-SINCE-<上次上传版本>.md`
+  补每个版本的更新说明，注明本版学习/借鉴的 GitHub 开源项目及链接。
+
 Squid uses the same release model as `nex_shift`: a git branch is the update
 server. No object storage or release API is required.
 
