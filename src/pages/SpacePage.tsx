@@ -1024,20 +1024,7 @@ export function SpacePage({
 
   return (
     <div className={`page ${embedded ? "is-embedded" : ""}`}>
-      {embedded ? (
-        <div className="space-embedded-head">
-          <Button
-            variant={cleanup.result || purge.result ? "secondary" : "primary"}
-            icon={<ScanSearch size={15} />}
-            onClick={() => void runScan()}
-            disabled={scanning || deleting}
-          >
-            {cleanup.result || purge.result
-              ? t("Rescan", "重新扫描")
-              : t("Start scan", "开始扫描")}
-          </Button>
-        </div>
-      ) : (
+      {!embedded ? (
       <div className="space-head">
         <div>
           <div className="eyebrow">{t("Space cleaning", "空间清理")}</div>
@@ -1051,44 +1038,53 @@ export function SpacePage({
             )}
           </p>
         </div>
+      </div>
+      ) : null}
+
+      {/* Shared hub toolbar: config items wrap on the left, one big primary
+          action pinned right — the three space tabs dress it identically. */}
+      <div className="space-config">
+        <div className="config-items">
+          <span className="space-config-label">
+            {t("Deep-scan folders", "深度扫描目录")}
+          </span>
+          <span className="space-config-static">
+            {t(
+              "Auto-discovered: Desktop, Documents, project folders on every drive",
+              "自动发现：桌面、文档、各磁盘根目录下的项目目录（无需设置）",
+            )}
+          </span>
+          <span className="space-config-spacer" />
+          <span className="space-config-label">
+            {t("Older than", "仅处理早于")}
+          </span>
+          <div className="space-seg">
+            {AGE_CHOICES.map((days) => (
+              <button
+                key={days}
+                type="button"
+                className={minAge === days ? "is-on" : ""}
+                onClick={() => setMinAge(days)}
+              >
+                {t(`${days} days`, `${days}天`)}
+              </button>
+            ))}
+          </div>
+        </div>
         <Button
+          size="lg"
           variant="primary"
           icon={<ScanSearch size={16} />}
+          className="scan-cta"
           onClick={() => void runScan()}
           disabled={scanning || deleting}
         >
-          {cleanup.result || purge.result
-            ? t("Rescan", "重新扫描")
-            : t("Start scan", "开始扫描")}
+          {scanning
+            ? t("Scanning…", "扫描中…")
+            : cleanup.result || purge.result
+              ? t("Rescan", "重新扫描")
+              : t("Start scan", "开始扫描")}
         </Button>
-      </div>
-      )}
-
-      <div className="space-config">
-        <span className="space-config-label">
-          {t("Deep-scan folders", "深度扫描目录")}
-        </span>
-        <span className="space-config-static">
-          {t(
-            "Auto-discovered: Desktop, Documents, project folders on every drive",
-            "自动发现：桌面、文档、各磁盘根目录下的项目目录（无需设置）",
-          )}
-        </span>
-        <span className="space-config-label">
-          {t("Older than", "仅处理早于")}
-        </span>
-        <div className="space-seg">
-          {AGE_CHOICES.map((days) => (
-            <button
-              key={days}
-              type="button"
-              className={minAge === days ? "is-on" : ""}
-              onClick={() => setMinAge(days)}
-            >
-              {t(`${days} days`, `${days}天`)}
-            </button>
-          ))}
-        </div>
         {/* Git 保护不再有开关：它永远是开着的（删前用 git 复核被跟踪的目录），
             需要绕过时走 CLI 的 --all。 */}
       </div>
@@ -1169,16 +1165,9 @@ export function SpacePage({
           <span>
             {t(
               "Not scanned yet. Start scan checks known cache spots and auto-discovers project folders across the machine.",
-              "尚未扫描。点击「开始扫描」，Squid 会检查已知缓存位置，并自动发现本机各处的项目构建目录。",
+              "尚未扫描。点击右侧「开始扫描」，Squid 会检查已知缓存位置，并自动发现本机各处的项目构建目录。",
             )}
           </span>
-          {/* Embedded: the head button is hidden inside the hub, so the
-              empty stage carries its own entry point. */}
-          {embedded ? (
-            <Button variant="primary" icon={<ScanSearch size={15} />} onClick={() => void runScan()}>
-              {t("Start scan", "开始扫描")}
-            </Button>
-          ) : null}
         </div>
       ) : null}
 

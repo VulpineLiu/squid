@@ -2,11 +2,13 @@ import {
   Archive,
   Disc3,
   Cloud,
+  FileQuestion,
   FileVideo,
   HardDrive,
   Lock,
   MapPin,
   Package,
+  ScanSearch,
   ShieldAlert,
   Trash2,
 } from "lucide-react";
@@ -225,8 +227,19 @@ export function LargeFilesPage({
             );
           })}
         </div>
-        <Button variant="primary" onClick={() => void run()} disabled={scanning || deleting}>
-          {scanning ? t("Scanning…", "扫描中…") : t("Scan", "开始扫描")}
+        <Button
+          size="lg"
+          variant="primary"
+          className="scan-cta"
+          icon={<ScanSearch size={16} />}
+          onClick={() => void run()}
+          disabled={scanning || deleting}
+        >
+          {scanning
+            ? t("Scanning…", "扫描中…")
+            : files
+              ? t("Rescan", "重新扫描")
+              : t("Start scan", "开始扫描")}
         </Button>
       </section>
 
@@ -237,6 +250,17 @@ export function LargeFilesPage({
           onCancel={() => {
             if (job.current) void apiClient.api.cancelJob(job.current);
           }}
+        />
+      ) : null}
+
+      {!files && !scanning ? (
+        <EmptyState
+          icon={<FileQuestion size={26} />}
+          title={t("No large-file scan yet", "还没有扫描过大文件")}
+          description={t(
+            "Start scan walks every drive above the size floor; results sort heaviest first.",
+            "点击「开始扫描」按体积门槛遍历所选磁盘，结果从最大往下排。",
+          )}
         />
       ) : null}
 

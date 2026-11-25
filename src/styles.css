@@ -5486,6 +5486,30 @@ select:focus-visible,
   background: #fff;
 }
 
+/* Config bars of the three space tabs all end in the same big primary CTA
+   pinned right; labels/segs wrap inside .config-items on the left. */
+.config-items {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
+}
+
+.space-config-spacer {
+  flex: 1 1 auto;
+}
+
+.page.is-embedded .space-config {
+  margin-top: 14px;
+}
+
+.button.scan-cta {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
 .space-config-label {
   color: #3a3226;
   font-size: var(--nex-text-2xs);

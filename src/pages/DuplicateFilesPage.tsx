@@ -4,6 +4,7 @@ import {
   FolderPlus,
   Lock,
   MapPin,
+  ScanSearch,
   ShieldAlert,
   Sparkles,
   Trash2,
@@ -286,10 +287,19 @@ export function DuplicateFilesPage({
             </button>
           ))}
         </div>
-        <Button variant="primary" onClick={start} disabled={workspace.scanning || workspace.deleting}>
-          <span className="dup-start-icon">
-            {workspace.scanning ? t("Scanning…", "扫描中…") : t("Scan duplicates", "开始查找")}
-          </span>
+        <Button
+          size="lg"
+          variant="primary"
+          className="scan-cta"
+          icon={<ScanSearch size={16} />}
+          onClick={start}
+          disabled={workspace.scanning || workspace.deleting}
+        >
+          {workspace.scanning
+            ? t("Scanning…", "扫描中…")
+            : workspace.result
+              ? t("Rescan", "重新扫描")
+              : t("Start scan", "开始扫描")}
         </Button>
       </section>
 
@@ -338,7 +348,7 @@ export function DuplicateFilesPage({
           icon={<FileQuestion size={26} />}
           title={t("No duplicate scan yet", "还没有扫描过重复文件")}
           description={t(
-            "The first scan walks your files once; later scans reuse the hash cache and only re-check what changed.",
+            "Start scan walks your files once; later scans reuse the hash cache and only re-check what changed.",
             "首次扫描遍历一遍文件；之后的扫描复用哈希缓存，只重算发生变化的文件。",
           )}
         />
