@@ -693,8 +693,21 @@ fn git_state(project: &Path, artifact: &Path) -> GitState {
     }
 }
 
+/// Spawn helper: on Windows a GUI parent (Squid) would otherwise get a fresh
+/// console window for every short-lived CLI call, flashing on the desktop.
+fn hide_console(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+    command
+}
+
 fn run_git(project: &Path, args: &[&str]) -> Option<bool> {
-    let output = Command::new("git")
+    let output = hide_console(&mut Command::new("git"))
         .arg("-C")
         .arg(project)
         .args(args)
@@ -706,7 +719,7 @@ fn run_git(project: &Path, args: &[&str]) -> Option<bool> {
 }
 
 fn run_git_raw(project: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
+    let output = hide_console(&mut Command::new("git"))
         .arg("-C")
         .arg(project)
         .args(args)

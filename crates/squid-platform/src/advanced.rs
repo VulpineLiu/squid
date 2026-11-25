@@ -274,10 +274,16 @@ pub(crate) mod windows {
         let script = format!(
             "$ErrorActionPreference='SilentlyContinue'; {list} | ForEach-Object {{ $s = Get-AuthenticodeSignature -FilePath $_; \"@@|$_|$($s.Status)|$($s.SignerCertificate.Subject)\" }} | Out-String -Width 4096"
         );
-        let Ok(output) = std::process::Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .output()
-        else {
+        let mut command = std::process::Command::new("powershell.exe");
+        command.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // Squid is a GUI app: without this every scan flashed a console
+            // window for the duration of the signature batch.
+            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let Ok(output) = command.output() else {
             return grades;
         };
         let text = String::from_utf8_lossy(&output.stdout);

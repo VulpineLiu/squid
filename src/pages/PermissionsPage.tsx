@@ -41,56 +41,9 @@ function isLeftover(item: StartupItem): boolean {
   return item.targetExists === false;
 }
 
-// MangoDisk's source-kind chips: compact kind label, the detailed path lives
-// in the expanded row.
-const SOURCE_KIND: Record<string, [string, string]> = {
-  registry: ["Registry", "注册表"],
-  startupFolder: ["Startup folder", "启动文件夹"],
-  scheduledTask: ["Task", "计划任务"],
-  service: ["Service", "服务"],
-  launchAgent: ["LaunchAgent", "LaunchAgent"],
-  autostart: ["Autostart", "自启动"],
-};
-
-// When the row fires, phrased the way the user experiences it.
-const TRIGGER_LABEL: Record<string, [string, string]> = {
-  boot: ["On boot", "开机后"],
-  logon: ["On logon", "登录后"],
-  background: ["Background", "后台常驻"],
-};
-
-type SigTone = "microsoft" | "vendor" | "unsigned" | "invalid" | "unknown";
-
-function signatureChip(
-  verdict: string,
-  t: (en: string, zh: string) => string,
-): [string, string] | null {
-  switch (verdict as SigTone) {
-    case "microsoft":
-      return [t("Microsoft", "微软"), "is-microsoft"];
-    case "vendor":
-      return [t("Signed", "签名有效"), "is-vendor"];
-    case "unsigned":
-      return [t("Not signed", "未签名"), "is-unsigned"];
-    case "invalid":
-      return [t("Invalid", "签名无效"), "is-invalid"];
-    default:
-      return null;
-  }
-}
-
-// The one signature story a group tells: the worst verdict inside it, so a
-// group never looks greener than its sketchiest row.
-function groupSignature(items: StartupItem[]): string {
-  const seen = new Set(items.map((item) => item.signature ?? "unknown"));
-  if (seen.has("invalid")) return "invalid";
-  if (seen.has("unsigned")) return "unsigned";
-  if (seen.has("vendor")) return "vendor";
-  if (seen.has("microsoft")) return "microsoft";
-  return "unknown";
-}
-
-// 残留 / 已启用 / 已禁用 row tag; leftover wins the colour fight.
+// 残留 / 已启用 / 已禁用 row tag; leftover wins the colour fight. The
+// source / trigger / signature chips used to sit on the group header — the
+// user found them noise; the detailed path already rides on every row.
 function statusChip(
   item: StartupItem,
   t: (en: string, zh: string) => string,
@@ -395,9 +348,6 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
             const open = isGroupOpen(software);
             const groupIds = items.map((item) => item.id);
             const leftovers = items.filter(isLeftover);
-            const sources = [...new Set(items.map((item) => item.source))];
-            const triggers = [...new Set(items.map((item) => item.trigger ?? "unknown"))];
-            const groupSigChip = signatureChip(groupSignature(items), t);
             return (
               <div
                 key={software}
@@ -414,30 +364,11 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
                     </span>
                   )}
                   <span className="perm-group-name">{software}</span>
-                  <span className="perm-group-chips">
-                    {leftovers.length > 0 ? (
-                      <span className="perm-sig is-leftover">
-                        {t(`${leftovers.length} leftover`, `${leftovers.length} 个残留`)}
-                      </span>
-                    ) : null}
-                    {sources.map((source) => {
-                      const n = items.filter((item) => item.source === source).length;
-                      return (
-                        <span className="perm-src-chip" key={source}>
-                          {t(SOURCE_KIND[source]?.[0] ?? source, SOURCE_KIND[source]?.[1] ?? source)}
-                          {n > 1 ? <i>×{n}</i> : null}
-                        </span>
-                      );
-                    })}
-                    {triggers.map((trigger) => (
-                      <span className="perm-src-chip" key={trigger}>
-                        {t(TRIGGER_LABEL[trigger]?.[0] ?? "—", TRIGGER_LABEL[trigger]?.[1] ?? "—")}
-                      </span>
-                    ))}
-                    {groupSigChip ? (
-                      <span className={`perm-sig ${groupSigChip[1]}`}>{groupSigChip[0]}</span>
-                    ) : null}
-                  </span>
+                  {leftovers.length > 0 ? (
+                    <span className="perm-sig is-leftover">
+                      {t(`${leftovers.length} leftover`, `${leftovers.length} 个残留`)}
+                    </span>
+                  ) : null}
                   <b className={allOn ? "is-all" : onCount === 0 ? "is-none" : "is-part"}>
                     {allOn
                       ? t("All on", "全部开启")
@@ -479,7 +410,6 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
                   <div className="perm-rows">
                     {items.map((item) => {
                       const [statusText, statusTone] = statusChip(item, t);
-                      const sigChip = signatureChip(item.signature ?? "unknown", t);
                       const reveal = rowRevealPath(item);
                       return (
                         <div
@@ -504,14 +434,6 @@ export function PermissionsPage({ workspace }: { workspace: PermissionsWorkspace
                             </div>
                           </div>
                           <div className="perm-row-actions">
-                            {sigChip ? (
-                              <span
-                                className={`perm-sig ${sigChip[1]}`}
-                                title={item.signer ?? undefined}
-                              >
-                                {sigChip[0]}
-                              </span>
-                            ) : null}
                             {isLeftover(item) ? (
                               <Button
                                 size="sm"
