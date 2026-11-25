@@ -1,6 +1,6 @@
 # Squid Usage Guide
 
-For Squid 0.1.11. See [`README.en.md`](../README.en.md) for the project overview and [`CHANGELOG.md`](../CHANGELOG.md) for version history.
+For Squid 0.1.13. See [`README.en.md`](../README.en.md) for the project overview and [`CHANGELOG.md`](../CHANGELOG.md) for version history.
 
 ## 1. Download and install
 
@@ -9,12 +9,12 @@ Desktop installers are published on the origin repository's `releases` branch. T
 - Release directory: <https://git.unissense.tech/mula/nex_squid/src/branch/releases>
 - Update manifest: <https://git.unissense.tech/mula/nex_squid/raw/branch/releases/squid-update.json>
 
-Current version 0.1.11:
+Current version 0.1.13:
 
 | Platform | Installer |
 | --- | --- |
-| macOS 12+ | [`Squid-0.1.11-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.11-macOS-universal.dmg) |
-| Windows 10/11 x64 | [`Squid-Setup-0.1.11-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.11-win-x64.exe) |
+| macOS 12+ | [`Squid-0.1.13-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.13-macOS-universal.dmg) |
+| Windows 10/11 x64 | [`Squid-Setup-0.1.13-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.13-win-x64.exe) |
 
 Both installers are unsigned builds. Verify their exact size and SHA256 against `SHA256SUMS.txt` in the release directory.
 

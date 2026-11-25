@@ -20,12 +20,12 @@ The desktop app supports macOS 12+ and Windows 10/11 x64. The CLI and TUI share 
 
 ## Download and install
 
-Current version **0.1.11** (2026-11-22). Desktop installers are published on the origin repository's `releases` branch:
+Current version **0.1.13** (2026-11-25). Desktop installers are published on the origin repository's `releases` branch:
 
 | Platform | Installer |
 | --- | --- |
-| macOS 12+ | [`Squid-0.1.11-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.11-macOS-universal.dmg) |
-| Windows 10/11 x64 | [`Squid-Setup-0.1.11-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.11-win-x64.exe) |
+| macOS 12+ | [`Squid-0.1.13-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.13-macOS-universal.dmg) |
+| Windows 10/11 x64 | [`Squid-Setup-0.1.13-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.13-win-x64.exe) |
 
 Release directory: <https://git.unissense.tech/mula/nex_squid/src/branch/releases>
 
