@@ -3583,7 +3583,7 @@ dependencies = [
 
 [[package]]
 name = "squid-cli"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3603,7 +3603,7 @@ dependencies = [
 
 [[package]]
 name = "squid-core"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3622,7 +3622,7 @@ dependencies = [
 
 [[package]]
 name = "squid-engine"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3645,7 +3645,7 @@ dependencies = [
 
 [[package]]
 name = "squid-guard"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "chrono",
  "hex",
@@ -3661,7 +3661,7 @@ dependencies = [
 
 [[package]]
 name = "squid-platform"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "dirs",
  "file_icon_provider",
@@ -3681,7 +3681,7 @@ dependencies = [
 
 [[package]]
 name = "squid-rules"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "globset",
  "serde",
@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "squid-stats"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "chrono",
  "libc",
@@ -3706,7 +3706,7 @@ dependencies = [
 
 [[package]]
 name = "squid-tui"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "chrono",

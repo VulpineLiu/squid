@@ -20,18 +20,18 @@ The desktop app supports macOS 12+ and Windows 10/11 x64. The CLI and TUI share 
 
 ## Download and install
 
-Current version **0.1.13** (2026-11-25). Desktop installers are published on the origin repository's `releases` branch:
+Current version **0.1.14** (2026-11-25). Desktop installers are published on the origin repository's `releases` branch:
 
 | Platform | Installer |
 | --- | --- |
-| macOS 12+ | [`Squid-0.1.13-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.13-macOS-universal.dmg) |
-| Windows 10/11 x64 | [`Squid-Setup-0.1.13-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.13-win-x64.exe) |
+| macOS 12+ | [`Squid-0.1.14-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.14-macOS-universal.dmg) |
+| Windows 10/11 x64 | [`Squid-Setup-0.1.14-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.14-win-x64.exe) |
 
 Release directory: <https://git.unissense.tech/mula/nex_squid/src/branch/releases>
 
 Both installers are unsigned builds. On macOS, right-click **Open** the first time; on Windows, choose **More info** > **Run anyway** when SmartScreen appears. See the [usage guide](docs/USAGE.md) for installation, daily use, uninstall, and troubleshooting.
 
-The GitHub repository mirrors source code only and does not carry the `releases` branch. The app still checks the origin update channel.
+The same installers are attached to the [GitHub release](https://github.com/VulpineLiu/squid/releases/tag/v0.1.14). The GitHub repository does not carry the `releases` branch. The app still checks the origin update channel.
 
 ## Features
 

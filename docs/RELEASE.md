@@ -20,7 +20,9 @@ There are two remotes:
   orphan `releases` branch.
 - GitHub is a public source mirror. It receives `main` only and must never
   receive `releases`. Its history is rewritten to drop `release/`, `*.dmg` and
-  `*.exe`, so its commit hashes differ from origin.
+  `*.exe`, so its commit hashes differ from origin. Installer assets are
+  attached to GitHub Releases for direct download; the app's update feed still
+  points at origin.
 
 ## Artifact names
 
@@ -148,6 +150,16 @@ sync script, which strips release installers from GitHub history:
 ```bash
 git push origin main
 scripts/sync-github.sh
+gh release create v<version> \
+  --repo VulpineLiu/squid \
+  --title "Squid <version>" \
+  --notes-file artifacts/RELEASE_NOTES.md \
+  artifacts/Squid-<version>-macOS-universal.dmg \
+  artifacts/Squid-Setup-<version>-win-x64.exe \
+  artifacts/SHA256SUMS.txt \
+  artifacts/README-macOS.txt \
+  artifacts/README-Windows-x64.txt \
+  artifacts/一键安装.bat
 ```
 
 Do not run `git push github main` from the working repository: its history still

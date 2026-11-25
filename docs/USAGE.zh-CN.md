@@ -1,20 +1,20 @@
 # Squid 使用帮助
 
-适用于 Squid 0.1.13。项目说明见 [`README.zh-CN.md`](../README.zh-CN.md)，版本历史见 [`CHANGELOG.md`](../CHANGELOG.md)。
+适用于 Squid 0.1.14。项目说明见 [`README.zh-CN.md`](../README.zh-CN.md)，版本历史见 [`CHANGELOG.md`](../CHANGELOG.md)。
 
 ## 1. 下载与安装
 
-Squid 的桌面安装包发布在 origin 仓库的 `releases` 分支。GitHub 只镜像源码，不承载这个分支。
+Squid 的桌面安装包发布在 origin 仓库的 `releases` 分支，并同步附到 GitHub Release。GitHub 不承载这个分支。
 
 - 发布目录：<https://git.unissense.tech/mula/nex_squid/src/branch/releases>
 - 更新清单：<https://git.unissense.tech/mula/nex_squid/raw/branch/releases/squid-update.json>
 
-当前版本 0.1.13：
+当前版本 0.1.14：
 
 | 平台 | 安装包 |
 | --- | --- |
-| macOS 12+ | [`Squid-0.1.13-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.13-macOS-universal.dmg) |
-| Windows 10/11 x64 | [`Squid-Setup-0.1.13-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.13-win-x64.exe) |
+| macOS 12+ | [`Squid-0.1.14-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.14-macOS-universal.dmg) |
+| Windows 10/11 x64 | [`Squid-Setup-0.1.14-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.14-win-x64.exe) |
 
 两个安装包都是未签名构建。校验文件大小和 SHA256 的方法见发布目录中的 `SHA256SUMS.txt`。
 

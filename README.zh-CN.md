@@ -20,18 +20,18 @@ Squid 是面向 macOS 与 Windows 的本地系统维护工具：清理可重建�
 
 ## 下载与安装
 
-当前版本 **0.1.13**（2026-11-25）。桌面安装包发布在 origin 仓库的 `releases` 分支：
+当前版本 **0.1.14**（2026-11-25）。桌面安装包发布在 origin 仓库的 `releases` 分支：
 
 | 平台 | 安装包 |
 | --- | --- |
-| macOS 12+ | [`Squid-0.1.13-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.13-macOS-universal.dmg) |
-| Windows 10/11 x64 | [`Squid-Setup-0.1.13-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.13-win-x64.exe) |
+| macOS 12+ | [`Squid-0.1.14-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.14-macOS-universal.dmg) |
+| Windows 10/11 x64 | [`Squid-Setup-0.1.14-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.14-win-x64.exe) |
 
 发布目录：<https://git.unissense.tech/mula/nex_squid/src/branch/releases>
 
 两个安装包都是未签名构建。macOS 首次打开请在访达中右键选择“打开”；Windows SmartScreen 提示时选择“更多信息” > “仍要运行”。完整的安装、使用、卸载与故障排查见[使用帮助](docs/USAGE.zh-CN.md)。
 
-GitHub 仓库只镜像源码，不承载 `releases` 分支；应用更新仍从 origin 的发布通道检查。
+同一批安装包也会附到 [GitHub Release](https://github.com/VulpineLiu/squid/releases/tag/v0.1.14)。GitHub 不承载 `releases` 分支；应用更新仍从 origin 的发布通道检查。
 
 ## 功能
 

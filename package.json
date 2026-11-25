@@ -1,7 +1,7 @@
 {
   "name": "squid-desktop",
   "private": true,
-  "version": "0.1.13",
+  "version": "0.1.14",
   "type": "module",
   "author": "mula.liu",
   "license": "GPL-3.0-only",
