@@ -29,7 +29,7 @@ use squid_core::{Bytes, Category, CleanupItem, ItemKind};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Files below this size are never offered: deduplicating a 4 KiB config is
@@ -235,6 +235,31 @@ fn skip_dir(name: &str) -> bool {
     SKIP.iter().any(|wanted| lower == *wanted)
 }
 
+/// Path-subtree exclusions that only matter as a *sequence*: WorkBuddy's
+/// `\.workbuddy\workspace\sessions` folders snapshot copies of files the
+/// agent was created from, so deduping them would re-offer churn the tool
+/// regenerates itself — on whichever volume it happens to live. Matched as
+/// consecutive normal path components, case- and drive-independent.
+fn excluded_subtree(dir: &Path) -> bool {
+    const SEGMENTS: [&str; 3] = [".workbuddy", "workspace", "sessions"];
+    // Cheap guard: the walk prunes at the `sessions` door, so anything else
+    // can never match while descending.
+    if !dir
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("sessions"))
+    {
+        return false;
+    }
+    let names: Vec<String> = dir
+        .components()
+        .filter_map(|part| match part {
+            std::path::Component::Normal(name) => Some(name.to_string_lossy().to_lowercase()),
+            _ => None,
+        })
+        .collect();
+    names.len() >= SEGMENTS.len() && names.windows(SEGMENTS.len()).any(|w| w == SEGMENTS)
+}
+
 /// Run the funnel. Groups stream out as `Event::Group { kind: "dup", … }`;
 /// the return value is the same data collected, with per-copy locks
 /// resolved, so the command layer can hand the frontend a finished list too.
@@ -271,7 +296,7 @@ pub fn scan(
                     continue;
                 };
                 if file_type.is_dir() {
-                    if skip_dir(&entry.file_name().to_string_lossy()) {
+                    if skip_dir(&entry.file_name().to_string_lossy()) || excluded_subtree(&path) {
                         continue;
                     }
                     stack.push((path, depth + 1));
@@ -568,6 +593,22 @@ mod tests {
                 None
             }
         }
+    }
+
+    #[test]
+    fn workbuddy_session_snapshots_are_never_walked() {
+        assert!(excluded_subtree(Path::new(
+            r"C:\.workbuddy\workspace\sessions"
+        )));
+        assert!(excluded_subtree(Path::new(
+            r"D:\Work\.WorkBuddy\Workspace\Sessions"
+        )));
+        assert!(!excluded_subtree(Path::new(
+            r"C:\Users\dev\workspace\sessions"
+        )));
+        assert!(!excluded_subtree(Path::new(
+            r"C:\.workbuddy\workspace\sessions-notes"
+        )));
     }
 
     #[test]
