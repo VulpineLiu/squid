@@ -88,6 +88,12 @@ pub struct ShellExtEntry {
     /// PNG bytes of the owning module's icon (Windows only).
     #[serde(default)]
     pub icon: Option<Vec<u8>>,
+    /// True once the handler was attributed to a real software product (its
+    /// module carries usable FileDescription/ProductName strings). Drives the
+    /// same software-grouping rule the startup list uses; unattributed rows
+    /// land in 其他软件.
+    #[serde(default)]
+    pub named: bool,
 }
 
 /// A visible top-level window the popup blocker could act on.
@@ -2085,9 +2091,12 @@ mod windows {
                 icon = exe_icon_png(&clean, 0);
                 cleaned = Some(clean);
             }
-            let friendly_name = module_label
-                .or_else(|| cleaned.as_deref().and_then(module_folder_name))
-                .or(clsid_name);
+            // Attribution for the UI's software grouping: a row belongs to a
+            // product when its module carries real strings or sits in a
+            // recognisable install folder — same rule the startup list uses.
+            let folder_label = cleaned.as_deref().and_then(module_folder_name);
+            let named = module_label.is_some() || folder_label.is_some();
+            let friendly_name = module_label.or(folder_label).or(clsid_name);
             if is_builtin_handler(&name, friendly_name.as_deref(), cleaned.as_deref()) {
                 continue;
             }
@@ -2105,6 +2114,7 @@ mod windows {
                 module: cleaned.or(module),
                 publisher,
                 icon,
+                named,
             });
         }
         out

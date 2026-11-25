@@ -191,6 +191,8 @@ pub struct ExtensionView {
     icon: Option<String>,
     /// false = currently parked in the app's restore list.
     registered: bool,
+    /// Module carries real product strings — drives the software grouping.
+    named: bool,
 }
 
 impl ExtensionView {
@@ -216,6 +218,7 @@ impl From<&ShellExtEntry> for ExtensionView {
             publisher: entry.publisher.clone(),
             icon: entry.icon.as_deref().map(png_data_url),
             registered: true,
+            named: entry.named,
         }
     }
 }

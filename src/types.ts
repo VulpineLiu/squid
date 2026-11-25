@@ -499,6 +499,8 @@ export interface ShellExtension {
   /** data-URL PNG of the owning module's icon; null without extraction. */
   icon: string | null;
   registered: boolean;
+  /** Module carries real product strings (software grouping, like startup). */
+  named: boolean;
 }
 
 export interface PopupWindowItem {
