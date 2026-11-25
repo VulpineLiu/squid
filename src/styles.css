@@ -5390,12 +5390,23 @@ select:focus-visible,
   padding-bottom: 24px;
 }
 
-.overview-page .page-header {
+/* 概览页：页头是纯问候语，三行文字拉开呼吸、整块下移一点——下方指标行
+   改版后省出的空间就摊在这里（其它页面的页头不受影响）。 */
+.overview-page > .page-header {
+  margin: 14px 0 26px;
+}
+
+.overview-page .page-eyebrow {
   margin-bottom: 14px;
 }
 
 .overview-page .page-header h1 {
   font-size: 25px;
+  line-height: 1.35;
+}
+
+.overview-page .page-header p {
+  margin-top: 14px;
 }
 
 .overview-page .overview-hero {
