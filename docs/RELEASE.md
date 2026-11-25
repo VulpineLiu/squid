@@ -3,6 +3,13 @@
 Squid uses the same release model as `nex_shift`: a git branch is the update
 server. No object storage or release API is required.
 
+There are two remotes:
+
+- `origin` is the canonical repository and the update channel. It carries the
+  orphan `releases` branch.
+- GitHub is a public source mirror. It receives `main` only and must never
+  receive `releases`.
+
 ## Artifact names
 
 Both installers must carry the exact version from `src-tauri/tauri.conf.json`:
@@ -123,6 +130,14 @@ scripts/publish-release.sh --dry-run --key ~/.config/squid-release/release.ed255
 scripts/publish-release.sh --no-push --key ~/.config/squid-release/release.ed25519
 ```
 
+The script pushes `releases` to `origin` only. Push the source mirror
+separately, and never push the release branch to GitHub:
+
+```bash
+git push origin main
+git push github main
+```
+
 The branch contains:
 
 ```text
@@ -134,21 +149,32 @@ Squid-Setup-<version>-win-x64.exe
 
 ## Feed URL
 
-`src-tauri/build.rs` derives the manifest URL from `origin`:
+`src-tauri/build.rs` bakes a fixed default feed rather than deriving it from
+whatever remote a checkout happens to use:
 
-| Remote | Feed |
-| --- | --- |
-| Gitea / Forgejo | `https://host/owner/repo/raw/branch/releases/squid-update.json` |
-| GitHub | `https://github.com/owner/repo/raw/releases/squid-update.json` |
-| GitLab | `https://gitlab.example/owner/repo/-/raw/releases/squid-update.json` |
+```text
+https://git.unissense.tech/mula/nex_squid/raw/branch/releases/squid-update.json
+```
 
-`SQUID_UPDATE_URL` overrides it at build time. The same variable at runtime
-overrides the baked value, which is useful for staging feeds:
+This is deliberate: GitHub clones have `origin` pointing at GitHub, which does
+not carry the `releases` branch. A GitHub clone must still update from the
+origin channel.
+
+For forks or staging feeds, `SQUID_UPDATE_URL` overrides the default at build
+time. The same variable at runtime overrides the baked value:
 
 ```bash
 SQUID_UPDATE_URL=https://host/owner/repo/raw/branch/staging/squid-update.json \
   open Squid.app
 ```
+
+The matching raw-file layouts are:
+
+| Host | Feed |
+| --- | --- |
+| Gitea / Forgejo | `https://host/owner/repo/raw/branch/releases/squid-update.json` |
+| GitHub | `https://github.com/owner/repo/raw/releases/squid-update.json` |
+| GitLab | `https://gitlab.example/owner/repo/-/raw/releases/squid-update.json` |
 
 ## Manifest
 
@@ -203,4 +229,4 @@ Keep these four values equal:
 - `package.json`
 
 Then run frontend checks, Rust tests (including `src-tauri`), build both
-installers, and publish.
+installers, update `CHANGELOG.md` and `RELEASE_NOTES.md`, and publish.

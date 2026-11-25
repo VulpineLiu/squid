@@ -3,6 +3,13 @@
   "private": true,
   "version": "0.1.11",
   "type": "module",
+  "author": "mula.liu",
+  "license": "GPL-3.0-only",
+  "homepage": "https://github.com/VulpineLiu/squid",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/VulpineLiu/squid.git"
+  },
   "scripts": {
     "dev": "vite --port 1420 --strictPort",
     "build": "tsc && vite build",

@@ -1,6 +1,6 @@
 # Squid
 
-[简体中文](README.zh-CN.md) · [Bilingual home](README.md)
+[简体中文](README.zh-CN.md) · [Bilingual home](README.md) · [Usage guide](docs/USAGE.md) · [Changelog](CHANGELOG.md)
 
 **Give your computer a bath.**
 
@@ -17,6 +17,21 @@ The desktop app, CLI, and TUI share one Rust scan-and-delete engine. Cleaning ru
 | TUI | Rust + ratatui + crossterm | `squid state` |
 
 The desktop app supports macOS 12+ and Windows 10/11 x64. The CLI and TUI share the same Rust workspace.
+
+## Download and install
+
+Current version **0.1.11** (2026-11-22). Desktop installers are published on the origin repository's `releases` branch:
+
+| Platform | Installer |
+| --- | --- |
+| macOS 12+ | [`Squid-0.1.11-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.11-macOS-universal.dmg) |
+| Windows 10/11 x64 | [`Squid-Setup-0.1.11-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.11-win-x64.exe) |
+
+Release directory: <https://git.unissense.tech/mula/nex_squid/src/branch/releases>
+
+Both installers are unsigned builds. On macOS, right-click **Open** the first time; on Windows, choose **More info** > **Run anyway** when SmartScreen appears. See the [usage guide](docs/USAGE.md) for installation, daily use, uninstall, and troubleshooting.
+
+The GitHub repository mirrors source code only and does not carry the `releases` branch. The app still checks the origin update channel.
 
 ## Features
 
@@ -96,6 +111,7 @@ monitor sampler, refreshes at 2 / 5 / 10 seconds, and pauses while hidden.
 - Version changes, release notes, and actions appear only when a newer version exists; there is no duplicate "up to date" message.
 - After a verified download, install and restart, or use the neutral outlined **Discard** button that matches Shift to remove the downloaded file.
 - Automatic checks are enabled by default and run at most once per day.
+- The manifest comes from the origin `releases` branch; GitHub mirrors source only and does not carry that branch.
 - Installers must match the manifest's size and SHA256. Builds with a release public key also verify the manifest's Ed25519 signature.
 
 ### Permissions and privacy
@@ -320,6 +336,8 @@ The publish script rebuilds the `releases` branch with `squid-update.json`, both
 
 See [`docs/RELEASE.md`](docs/RELEASE.md) for the full release, signing, and manifest process.
 
+The GitHub repository receives source branches such as `main` only. It never receives `releases`; the publish script pushes the update branch to origin, and GitHub clones keep using that origin channel.
+
 ## Platform status
 
 | Platform | Status |
@@ -328,6 +346,17 @@ See [`docs/RELEASE.md`](docs/RELEASE.md) for the full release, signing, and mani
 | Windows x64 | Desktop and CLI/TUI support; NSIS installer |
 | Linux | Platform layer and basic CLI/TUI support; built-in rules and desktop installers are not yet provided |
 
+## Documentation
+
+- [Usage guide](docs/USAGE.md)
+- [Changelog](CHANGELOG.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Desktop app](docs/DESKTOP.md)
+- [Release and updates](docs/RELEASE.md)
+- [Security](docs/SECURITY.md)
+
 ## License
 
-Squid is licensed under **GNU General Public License v3.0 only** (`GPL-3.0-only`). See [`LICENSE`](LICENSE).
+Squid is licensed under **GNU General Public License v3.0 only** (`GPL-3.0-only`).
+
+Copyright © 2026 mula.liu. See [`LICENSE`](LICENSE) and [`COPYRIGHT`](COPYRIGHT).

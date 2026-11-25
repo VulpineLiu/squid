@@ -202,7 +202,9 @@ scanning if you do not want those prompts.
 
 The update implementation mirrors `nex_shift`:
 
-- A build derives its feed from the git `origin` remote or `SQUID_UPDATE_URL`.
+- A build bakes the origin release feed by default; `SQUID_UPDATE_URL`
+  overrides it. The GitHub repository mirrors source only and does not carry
+  the `releases` branch, so a GitHub clone still updates from origin.
 - The feed is an orphan `releases` branch containing installers and
   `squid-update.json`.
 - The manifest always provides exact byte size and SHA256; both are checked

@@ -36,6 +36,10 @@
     "active": true,
     "targets": ["app", "dmg", "nsis"],
     "category": "Utility",
+    "publisher": "mula.liu",
+    "copyright": "Copyright © 2026 mula.liu",
+    "homepage": "https://github.com/VulpineLiu/squid",
+    "license": "GPL-3.0-only",
     "shortDescription": "Clean, uninstall, purge and monitor your Mac or PC.",
     "longDescription": "Squid is a cross-platform system care app for macOS and Windows. It scans caches and system junk, removes applications with their leftovers, finds project build artefacts, maps disk usage and monitors live system health.",
     "icon": [

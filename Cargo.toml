@@ -8,8 +8,9 @@ version = "0.1.11"
 edition = "2021"
 rust-version = "1.95"
 license = "GPL-3.0-only"
-authors = ["squid contributors"]
-repository = "https://github.com/nexdev/squid"
+authors = ["mula.liu"]
+repository = "https://github.com/VulpineLiu/squid"
+homepage = "https://github.com/VulpineLiu/squid"
 description = "squid — one tool for cleaning, uninstalling, purging and monitoring your machine"
 
 [workspace.dependencies]

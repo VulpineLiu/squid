@@ -29,7 +29,7 @@
 !define APP_NAME "Squid"
 !define APP_ID "app.nex.squid"
 !define APP_VERSION "${VERSION}"
-!define PUBLISHER "Squid Contributors"
+!define PUBLISHER "mula.liu"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 !define WEBVIEW_KEY "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 

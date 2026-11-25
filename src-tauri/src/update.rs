@@ -1,10 +1,11 @@
 //! Git-backed update channel, matching the model used by nex_shift.
 //!
 //! Installers and a `squid-update.json` manifest live on an orphan `releases`
-//! branch in this repository. A checkout over HTTPS is the whole update server.
-//! The app verifies the installer's exact byte length and SHA256 before it can
-//! run, and verifies a detached Ed25519 signature when a release key was baked
-//! into the build. A helper replaces the app after it exits.
+//! branch in the origin repository. GitHub mirrors the source but does not carry
+//! that branch. A checkout over HTTPS is the whole update server. The app
+//! verifies the installer's exact byte length and SHA256 before it can run, and
+//! verifies a detached Ed25519 signature when a release key was baked into the
+//! build. A helper replaces the app after it exits.
 
 use std::{
     collections::BTreeMap,

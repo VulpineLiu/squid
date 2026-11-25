@@ -1,6 +1,6 @@
 # Squid
 
-[English](README.en.md) · [返回双语首页](README.md)
+[English](README.en.md) · [返回双语首页](README.md) · [使用帮助](docs/USAGE.zh-CN.md) · [更新日志](CHANGELOG.md)
 
 **给你的电脑洗个澡。**
 
@@ -17,6 +17,21 @@ Squid 是面向 macOS 与 Windows 的本地系统维护工具：清理可重建�
 | 终端界面 | Rust + ratatui + crossterm | `squid state` |
 
 桌面端支持 macOS 12+ 与 Windows 10/11 x64；CLI/TUI 使用同一个 Rust workspace。
+
+## 下载与安装
+
+当前版本 **0.1.11**（2026-11-22）。桌面安装包发布在 origin 仓库的 `releases` 分支：
+
+| 平台 | 安装包 |
+| --- | --- |
+| macOS 12+ | [`Squid-0.1.11-macOS-universal.dmg`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-0.1.11-macOS-universal.dmg) |
+| Windows 10/11 x64 | [`Squid-Setup-0.1.11-win-x64.exe`](https://git.unissense.tech/mula/nex_squid/raw/branch/releases/Squid-Setup-0.1.11-win-x64.exe) |
+
+发布目录：<https://git.unissense.tech/mula/nex_squid/src/branch/releases>
+
+两个安装包都是未签名构建。macOS 首次打开请在访达中右键选择“打开”；Windows SmartScreen 提示时选择“更多信息” > “仍要运行”。完整的安装、使用、卸载与故障排查见[使用帮助](docs/USAGE.zh-CN.md)。
+
+GitHub 仓库只镜像源码，不承载 `releases` 分支；应用更新仍从 origin 的发布通道检查。
 
 ## 功能
 
@@ -83,6 +98,7 @@ Windows 上 `1`–`9` 依次是概览、日常清理、应用卸载、深度清�
 - 只有检测到更高版本时，才显示版本变化、更新说明和操作按钮；已经是最新版本时不显示额外提示。
 - 下载完成后可安装并重启，或用与 Shift 一致的中性描边“放弃”按钮清除已下载文件。
 - 自动检查默认开启，每天最多检查一次。
+- 更新清单来自项目 origin 的 `releases` 分支；GitHub 仅镜像源码，不承载发布分支。
 - 安装包必须通过 SHA256 与文件大小校验；带发布公钥的构建还会校验清单的 Ed25519 签名。
 
 ### 权限与隐私
@@ -300,6 +316,8 @@ scripts/publish-release.sh --notes /path/to/release-notes.md
 
 完整发布流程、签名和清单格式见 [`docs/RELEASE.md`](docs/RELEASE.md)。
 
+GitHub 仓库只推送 `main` 等源码分支，不推送 `releases`。发布脚本只向 origin 推送更新分支；GitHub 上的源码镜像继续使用 origin 的发布通道。
+
 ## 平台状态
 
 | 平台 | 状态 |
@@ -308,6 +326,17 @@ scripts/publish-release.sh --notes /path/to/release-notes.md
 | Windows x64 | 桌面端与 CLI/TUI 支持，发布 NSIS 安装包 |
 | Linux | 平台层与 CLI/TUI 基础实现；尚未提供内置 Linux 规则和桌面安装包 |
 
+## 文档
+
+- [使用帮助](docs/USAGE.zh-CN.md)
+- [更新日志](CHANGELOG.md)
+- [架构说明](docs/ARCHITECTURE.md)
+- [桌面端说明](docs/DESKTOP.md)
+- [发布与更新](docs/RELEASE.md)
+- [安全说明](docs/SECURITY.md)
+
 ## 许可证
 
-Squid 使用 **GNU General Public License v3.0 only**（`GPL-3.0-only`）。完整条款见 [`LICENSE`](LICENSE)。
+Squid 使用 **GNU General Public License v3.0 only**（`GPL-3.0-only`）。
+
+Copyright © 2026 mula.liu。完整条款见 [`LICENSE`](LICENSE)，版权与授权声明见 [`COPYRIGHT`](COPYRIGHT)。

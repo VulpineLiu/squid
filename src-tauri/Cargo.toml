@@ -2,10 +2,12 @@
 name = "squid-desktop"
 version = "0.1.11"
 description = "Squid — a CleanMyMac-inspired cleaner, uninstaller and system monitor."
-authors = ["squid contributors"]
+authors = ["mula.liu"]
 edition = "2021"
 rust-version = "1.95"
 license = "GPL-3.0-only"
+repository = "https://github.com/VulpineLiu/squid"
+homepage = "https://github.com/VulpineLiu/squid"
 default-run = "squid-desktop"
 
 [lib]

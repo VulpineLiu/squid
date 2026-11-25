@@ -8,10 +8,10 @@
 # Intel 上都能装,bottle 交给 `brew tap-new` 的 CI 去做。
 class Squid < Formula
   desc "Clean, uninstall, purge and watch a Mac from the terminal"
-  homepage "https://github.com/nexdev/squid"
-  version "0.1.0"
+  homepage "https://github.com/VulpineLiu/squid"
+  version "0.1.11"
   sha256 "REPLACE_WITH_DIST_SQUID_TARBALL_SHA256"
-  url "https://github.com/nexdev/squid/releases/download/v#{version}/squid-#{version}-universal-apple-darwin.tar.gz"
+  url "https://github.com/VulpineLiu/squid/releases/download/v#{version}/squid-#{version}-universal-apple-darwin.tar.gz"
   license "GPL-3.0-only"
 
   # 也可以直接从源码装(不需要预先发 release):

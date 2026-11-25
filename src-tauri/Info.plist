@@ -16,5 +16,7 @@
 	<string>Squid can analyze network volumes you select.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Squid reads the login items macOS lists in System Settings so the startup page can show the same ones.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 mula.liu</string>
 </dict>
 </plist>
