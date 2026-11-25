@@ -98,7 +98,7 @@ asset_text = "".join(
 # Markers are the Chinese copy that has to survive into the bundle: the overview,
 # uninstall, monitor and update panels each contribute one phrase, so a bundle built
 # from an older or newer `dist` than the one on disk fails here rather than shipping.
-for marker in ("本机配置", "智能扫描", "卸载，干净彻底", "掌握设备的每一次呼吸", "扫描完成", "自动检查更新"):
+for marker in ("本机配置", "智能扫描", "卸载，干净彻底", "掌握设备的每一次呼吸", "清理完成", "自动检查更新"):
     if marker not in asset_text:
         missing.append(marker)
 if missing:
