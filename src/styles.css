@@ -5279,8 +5279,25 @@ select:focus-visible,
   border-top: 1px dashed rgba(96, 82, 60, 0.18);
 }
 
+/* Bars flush with the metric icons (no extra side inset), and the detail
+   line reads exactly like the drive rows' info text. Declared after the
+   generic .overview-metrics inset below so it wins the cascade. */
+.metric-combo .m-block > small {
+  display: block;
+  margin-top: 8px;
+  overflow: hidden;
+  color: var(--nex-muted);
+  font-size: var(--nex-text-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .overview-metrics .usage-bar {
   margin-inline: 12px;
+}
+
+.metric-combo .usage-bar {
+  margin-inline: 0;
 }
 
 .metric-drives {

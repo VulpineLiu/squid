@@ -214,7 +214,7 @@ export function OverviewPage({
                 : t("Start a smart scan", "开始智能扫描")}
             </Button>
             <Button
-              variant="ghost"
+              variant="primary"
               icon={<CircleGauge size={16} />}
               onClick={() => onNavigate("system")}
             >
