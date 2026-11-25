@@ -104,11 +104,13 @@ export function OverviewPage({
         : 0),
     0,
   );
-  // 智能扫描 lives on the 空间清理 page now; the workspaces are app-level so
-  // kicking both stages from here simply continues on that page. It uses the
-  // default deep-scan settings — tweak them there and re-scan if needed.
+  // 智能扫描 is an entry point, not a resident process: the moment it is
+  // pressed we hand the page over to 空间清理 and launch both scan stages
+  // there (SpacePage owns the settings — age threshold, auto-discovery).
+  // A finished scan keeps the button as a shortcut back to the results.
   const smartScan = () => {
-    if (!scanned) {
+    onNavigate("space");
+    if (!scanned && !scanning) {
       void cleanup.runScan().then(() =>
         purge.runScan({
           // Empty = engine auto-discovery of project containers.
@@ -118,7 +120,6 @@ export function OverviewPage({
         }),
       );
     }
-    onNavigate("space");
   };
 
   const hardware = bootstrap.hardwareInfo;
@@ -174,19 +175,6 @@ export function OverviewPage({
           "One safe scan for clutter, storage and everyday performance.",
           "一次安全扫描，整理垃圾、空间与日常性能。",
         )}
-        actions={
-          <Button
-            variant="primary"
-            size="lg"
-            icon={<Sparkles size={17} />}
-            onClick={smartScan}
-            disabled={scanning}
-          >
-            {scanned
-              ? t("Review scan", "查看扫描结果")
-              : t("Smart scan", "智能扫描")}
-          </Button>
-        }
       />
 
       <section className="overview-hero">
@@ -315,65 +303,70 @@ export function OverviewPage({
         </section>
       ) : null}
 
+      {/* 指标行 30% / 42% / 28%：处理器+内存共用一框上下分布；存储每盘
+          一行；日常维护三入口竖排放右列，与左两卡等高。独立的「日常维护」
+          区块随此改版取消。 */}
       <section className="overview-metrics">
-        <div className="metric-panel">
-          <div className="metric-panel-head">
-            <span className="metric-icon tone-blue">
-              <CircleGauge size={18} />
-            </span>
-            <div>
-              <strong>{t("Processor", "处理器")}</strong>
-              <span>
-                {snapshot
-                  ? `${snapshot.cpu.physical_cores} ${t("cores", "核")} / ${snapshot.cpu.logical_cores} ${t("threads", "线程")}`
-                  : t("Sampling…", "正在采样…")}
+        <div className="metric-panel metric-combo">
+          <div className="m-block">
+            <div className="metric-panel-head">
+              <span className="metric-icon tone-blue">
+                <CircleGauge size={18} />
               </span>
+              <div>
+                <strong>{t("Processor", "处理器")}</strong>
+                <span>
+                  {snapshot
+                    ? `${snapshot.cpu.physical_cores} ${t("cores", "核")} / ${snapshot.cpu.logical_cores} ${t("threads", "线程")}`
+                    : t("Sampling…", "正在采样…")}
+                </span>
+              </div>
+              <b>{Math.round(snapshot?.cpu.total ?? 0)}%</b>
             </div>
-            <b>{Math.round(snapshot?.cpu.total ?? 0)}%</b>
+            <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="blue" />
+            <small>
+              {snapshot?.cpu.brand || t("Processor details unavailable", "暂无处理器信息")}
+            </small>
           </div>
-          <UsageBar used={snapshot?.cpu.total ?? 0} total={100} tone="blue" />
-          <small>
-            {snapshot?.cpu.brand || t("Processor details unavailable", "暂无处理器信息")}
-          </small>
-        </div>
-        <div className="metric-panel">
-          <div className="metric-panel-head">
-            <span className="metric-icon tone-violet">
-              <Boxes size={18} />
-            </span>
-            <div>
-              <strong>{t("Memory", "内存")}</strong>
-              <span>
-                {snapshot
-                  ? `${formatMemory(snapshot.memory.used)} / ${formatMemory(memoryInstalled)}`
-                  : t("Sampling…", "正在采样…")}
+          <div className="m-block">
+            <div className="metric-panel-head">
+              <span className="metric-icon tone-violet">
+                <Boxes size={18} />
               </span>
+              <div>
+                <strong>{t("Memory", "内存")}</strong>
+                <span>
+                  {snapshot
+                    ? `${formatMemory(snapshot.memory.used)} / ${formatMemory(memoryInstalled)}`
+                    : t("Sampling…", "正在采样…")}
+                </span>
+              </div>
+              <b>
+                {Math.round(
+                  snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0,
+                )}
+                %
+              </b>
             </div>
-            <b>
-              {Math.round(
-                snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0,
-              )}
-              %
-            </b>
-          </div>
-          <UsageBar
-            used={snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0}
-            total={100}
-            tone="violet"
-          />
-          <small>
-            {memoryReserved > 0
-              ? t(
-                  `Hardware reserved (integrated graphics): ${formatMemory(memoryReserved)}`,
-                  `硬件保留（含核显）：${formatMemory(memoryReserved)}`,
-                )
-              : snapshot
+            <UsageBar
+              used={snapshot ? percent(snapshot.memory.used, snapshot.memory.total) : 0}
+              total={100}
+              tone="violet"
+            />
+            <small>
+              {memoryReserved > 0
                 ? t(
-                    `${formatCount(snapshot.processes)} processes running`,
-                    `${formatCount(snapshot.processes)} 个进程正在运行`,
+                    `Hardware reserved (integrated graphics): ${formatMemory(memoryReserved)}`,
+                    `硬件保留（含核显）：${formatMemory(memoryReserved)}`,
                   )
-                : t("Reading activity", "正在读取活动")}
-          </small>
+                : snapshot
+                  ? t(
+                      `${formatCount(snapshot.processes)} processes running`,
+                      `${formatCount(snapshot.processes)} 个进程正在运行`,
+                    )
+                  : t("Reading activity", "正在读取活动")}
+            </small>
+          </div>
         </div>
         <div className="metric-panel metric-drives">
           <div className="metric-panel-head">
@@ -397,39 +390,29 @@ export function OverviewPage({
               const usedPercent = percent(volume.total - volume.free, volume.total);
               return (
                 <div className="drive-row" key={volume.mount_point}>
-                  <div className="drive-line">
-                    <strong>
-                      {driveLabel(volume)}
-                      {volume.name && volume.name !== driveLabel(volume)
-                        ? ` · ${volume.name}`
-                        : ""}
-                    </strong>
-                    <span>
-                      <b className="drive-pct">{Math.round(usedPercent)}%</b>
-                      {t(
-                        `total ${formatBytes(volume.total)} · ${formatBytes(volume.free)} free`,
-                        `总 ${formatBytes(volume.total)} · 可用 ${formatBytes(volume.free)}`,
-                      )}
-                    </span>
-                  </div>
-                  <UsageBar
-                    used={usedPercent}
-                    total={100}
-                    tone={usedPercent > 85 ? "red" : "green"}
-                  />
+                  <strong className="drive-name" title={volume.name || undefined}>
+                    {driveLabel(volume)}
+                  </strong>
+                  <span className="drive-bar">
+                    <UsageBar
+                      used={usedPercent}
+                      total={100}
+                      tone={usedPercent > 85 ? "red" : "green"}
+                    />
+                  </span>
+                  <span className="drive-info">
+                    <b className="drive-pct">{Math.round(usedPercent)}%</b>
+                    {t(
+                      `total ${formatBytes(volume.total)} · ${formatBytes(volume.free)} free`,
+                      `总 ${formatBytes(volume.total)} · 可用 ${formatBytes(volume.free)}`,
+                    )}
+                  </span>
                 </div>
               );
             })}
           </div>
         </div>
-      </section>
-
-      <section className="quick-actions">
-        <SectionTitle
-          title={t("Everyday care", "日常维护")}
-          subtitle={t("The right tool for the next five minutes.", "用几分钟完成最常用的事。")}
-        />
-        <div className="quick-grid">
+        <div className="quick-col">
           <button className="quick-card tone-cyan" onClick={() => onNavigate("applications")}>
             <span className="quick-icon">
               <AppWindow size={22} />
@@ -440,10 +423,7 @@ export function OverviewPage({
             </span>
             <ChevronRight size={17} />
           </button>
-          <button
-            className="quick-card tone-indigo"
-            onClick={() => onOpenSpaceTab?.("big")}
-          >
+          <button className="quick-card tone-indigo" onClick={() => onOpenSpaceTab?.("big")}>
             <span className="quick-icon">
               <HardDrive size={22} />
             </span>
